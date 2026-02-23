@@ -98,7 +98,7 @@ Get your first SBOM in under a minute:
 ```
 MyApp/
 ├── MyApp.dproj
-├── bom.json          ← your SBOM, ready to submit or archive
+├── bom.json          ← your SBOM, ready to archive with this release
 └── ...
 ```
 
@@ -129,6 +129,26 @@ dxcomply --ci --config=.dxcomply.json
     name: sbom
     path: bom.json
 ```
+
+---
+
+### What to do with your SBOM
+
+Once generated, there is no submission process — you simply keep it. Here is what you should do:
+
+1. **Archive it with each release.**
+   Store `bom.json` alongside your release artefacts (installer, binaries, changelog). Name it clearly, e.g. `bom-v2.1.0.json`. One SBOM per shipped version.
+
+2. **Keep it for at least 10 years.**
+   The CRA requires technical documentation — including the SBOM — to be retained for at least 10 years after a product version is placed on the market (Article 13). A release archive folder or a document management system both work fine.
+
+3. **Be ready to hand it over if asked.**
+   Market surveillance authorities can formally request your technical documentation (Article 52). This is rare and requires a reasoned request — but you should be able to produce the SBOM for any released version within a reasonable time.
+
+4. **Sharing with customers is your choice.**
+   The CRA does not require you to publish or hand the SBOM to end users. If you do choose to share it (e.g. in a trust portal or on your website), you must document where it can be accessed (Annex II, Part I, point 9).
+
+> **In short:** Generate → archive → retain. That is all the CRA asks of you on the SBOM front.
 
 ---
 
