@@ -35,6 +35,54 @@ Manually maintaining such a list is tedious and error-prone — especially acros
 
 ---
 
+## What exactly must I do? (CRA compliance at a glance)
+
+The CRA applies to you if you place software products on the EU market — regardless of where you or your company is based. "Placing on the market" means selling, distributing, or otherwise making your product available to users in the EU.
+
+Here is a plain-language overview of what the CRA requires from software manufacturers:
+
+| # | Obligation | What it means in practice | DX.Comply |
+|---|---|---|:---:|
+| 1 | Secure-by-design | Build security into your development process from the start (threat modelling, secure defaults, least privilege) | — |
+| 2 | SBOM | Generate and keep a machine-readable list of all software components shipped with your product | ✔️ |
+| 3 | Vulnerability handling | Track known vulnerabilities in your components; patch and communicate them proactively | — |
+| 4 | Incident reporting | Report actively exploited vulnerabilities to ENISA within 24 hours — **mandatory from 11 September 2026** (Article 14) | — |
+| 5 | Technical documentation | Prepare and retain all compliance documentation for at least **10 years** (Article 13) | partial ¹ |
+| 6 | Conformity assessment | For higher-risk products: formal third-party audit and CE marking | — |
+
+> ¹ DX.Comply generates the SBOM artefact. Archiving and versioning it is your responsibility.
+
+### The SBOM obligation — key clarifications
+
+**You do NOT submit the SBOM anywhere.**
+
+There is no EU portal, no registration process, and no proactive submission required. The SBOM is part of your *technical documentation* — you generate it per release, keep it, and make it available only in two situations:
+
+- **To market surveillance authorities** — only if they formally request it (Article 52). This is an inspection right, not a submission requirement.
+- **To end users / customers** — entirely **optional** (Annex II, Part I, point 9). If you choose to share it, you must document where it can be accessed.
+
+### What counts as a valid SBOM?
+
+The CRA requires (Annex I, Part II, point 1):
+
+- Machine-readable format
+- A commonly-used format — CycloneDX and SPDX are both accepted
+- Coverage of at least the **top-level (direct) dependencies** of your product
+
+Germany's Federal Office for Information Security (BSI) has published the first national technical interpretation: **BSI TR-03183-2** (v2.1, August 2025). It specifies:
+
+- Format: **CycloneDX 1.6+** or **SPDX 3.0.1+** (JSON or XML)
+- Checksums: **SHA-512** per component
+- One SBOM per software version; no vulnerability data inside the SBOM (use CSAF/VEX for that)
+
+> **Note:** BSI TR-03183-2 is Germany's national interpretation of the CRA SBOM requirement. The EU Commission may issue implementing acts that supersede or align national guidelines. DX.Comply tracks these developments.
+
+### What DX.Comply covers
+
+DX.Comply handles **obligation #2** — generating a standards-compliant SBOM directly from your Delphi/RAD Studio project. All other obligations (secure-by-design, vulnerability management, incident reporting, CE marking) are outside its scope.
+
+---
+
 ## Quick Start
 
 ### Option A — RAD Studio IDE (recommended)
