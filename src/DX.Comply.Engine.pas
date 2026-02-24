@@ -71,7 +71,10 @@ type
   /// <summary>
   /// Event type for progress notifications.
   /// </summary>
-  TProgressEvent = procedure(const AMessage: string; const AProgress: Integer) of object;
+  /// <summary>
+  /// Compatible with anonymous closures, plain procedures, and method pointers.
+  /// </summary>
+  TProgressEvent = reference to procedure(const AMessage: string; const AProgress: Integer);
 
   /// <summary>
   /// Main facade for SBOM generation.

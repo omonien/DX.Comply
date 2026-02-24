@@ -9,9 +9,7 @@
 /// IOTAMessageServices. All calls are guarded against unavailable IDE
 /// services so the unit is safe to use during package load/unload.
 ///
-/// TIDELoggerProgressAdapter is a helper object whose OnProgress method
-/// has the correct 'of object' signature required by TProgressEvent, and
-/// internally delegates all calls to TIDELogger class methods.
+/// TIDELogger.Progress routes to Error or Info based on the sign of APercent.
 /// </remarks>
 ///
 /// <copyright>
@@ -25,8 +23,7 @@ interface
 
 uses
   System.SysUtils,
-  ToolsAPI,
-  DX.Comply.Engine;
+  ToolsAPI;
 
 type
   /// <summary>
@@ -63,20 +60,6 @@ type
     /// <param name="AMessage">The message text to display.</param>
     /// <param name="APercent">Completion percentage (0-100). Use -1 to signal an error.</param>
     class procedure Progress(const AMessage: string; const APercent: Integer);
-  end;
-
-  /// <summary>
-  /// Adapter that bridges TProgressEvent ('of object') to TIDELogger class methods.
-  /// Assign its OnProgress method to TDxComplyGenerator.OnProgress:
-  ///   Generator.OnProgress := FProgressAdapter.OnProgress
-  /// </summary>
-  TIDELoggerProgressAdapter = class
-  public
-    /// <summary>
-    /// 'of object' method compatible with TProgressEvent.
-    /// Forwards the call to TIDELogger.Progress.
-    /// </summary>
-    procedure OnProgress(const AMessage: string; const AProgress: Integer);
   end;
 
 implementation
@@ -151,11 +134,5 @@ begin
     Info(Format('[%d%%] %s', [APercent, AMessage]));
 end;
 
-{ TIDELoggerProgressAdapter }
-
-procedure TIDELoggerProgressAdapter.OnProgress(const AMessage: string; const AProgress: Integer);
-begin
-  TIDELogger.Progress(AMessage, AProgress);
-end;
 
 end.

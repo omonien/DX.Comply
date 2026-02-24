@@ -18,9 +18,8 @@
 /// IOTAProjectManager.GetCurrentProject, derives the output path next to
 /// the .dproj file, and delegates generation to TDxComplyGenerator.
 ///
-/// Progress events are routed to the IDE message window via
-/// TIDELoggerProgressAdapter, which bridges the 'of object' TProgressEvent
-/// type to TIDELogger's class methods.
+/// Progress events are routed to the IDE message window via an anonymous
+/// closure that delegates to TIDELogger.Progress.
 /// </remarks>
 ///
 /// <copyright>
@@ -51,7 +50,6 @@ type
   TDxComplyWizard = class(TInterfacedObject, IOTANotifier, IOTAWizard, IOTAMenuWizard)
   private
     FProjectMenuItem: TMenuItem;
-    FProgressAdapter: TIDELoggerProgressAdapter;
     /// <summary>
     /// Injects a TMenuItem into the main Project menu.
     /// Called once from the constructor.
@@ -107,14 +105,12 @@ constructor TDxComplyWizard.Create;
 begin
   inherited Create;
   FProjectMenuItem := nil;
-  FProgressAdapter := TIDELoggerProgressAdapter.Create;
   AddProjectMenuItem;
 end;
 
 destructor TDxComplyWizard.Destroy;
 begin
   RemoveProjectMenuItem;
-  FProgressAdapter.Free;
   inherited;
 end;
 
@@ -262,8 +258,11 @@ begin
 
     LGenerator := TDxComplyGenerator.Create;
     try
-      // FProgressAdapter bridges 'of object' TProgressEvent to TIDELogger.
-      LGenerator.OnProgress := FProgressAdapter.OnProgress;
+      LGenerator.OnProgress :=
+        procedure(const AMessage: string; const AProgress: Integer)
+        begin
+          TIDELogger.Progress(AMessage, AProgress);
+        end;
 
       LSuccess := LGenerator.Generate(LProjectPath, LOutputPath, sfCycloneDxJson);
 
