@@ -11,13 +11,13 @@
         <Projects Include="src\DX.Comply.IDE.dproj">
             <Dependencies>src\DX.Comply.Engine.dproj</Dependencies>
         </Projects>
-        <Projects Include="tests\DX.Comply.Tests.dproj">
+        <Projects Include="demo\CLI\dxcomply.dproj">
             <Dependencies>src\DX.Comply.Engine.dproj</Dependencies>
         </Projects>
         <Projects Include="demo\ExampleApp\ExampleApp.dproj">
             <Dependencies>src\DX.Comply.Engine.dproj</Dependencies>
         </Projects>
-        <Projects Include="demo\CLI\dxcomply.dproj">
+        <Projects Include="tests\DX.Comply.Tests.dproj">
             <Dependencies>src\DX.Comply.Engine.dproj</Dependencies>
         </Projects>
     </ItemGroup>
@@ -28,100 +28,59 @@
             <Default.Personality/>
         </BorlandProject>
     </ProjectExtensions>
-    <Target Name="Engine">
+    <Target Name="DXComplyEngine">
         <MSBuild Projects="src\DX.Comply.Engine.dproj"/>
     </Target>
-    <Target Name="Engine_Win32">
-        <MSBuild Projects="src\DX.Comply.Engine.dproj" Properties="Platform=Win32"/>
+    <Target Name="DXComplyEngine:Clean">
+        <MSBuild Targets="Clean" Projects="src\DX.Comply.Engine.dproj"/>
     </Target>
-    <Target Name="Engine_Win64">
-        <MSBuild Projects="src\DX.Comply.Engine.dproj" Properties="Platform=Win64"/>
+    <Target Name="DXComplyEngine:Make">
+        <MSBuild Targets="Make" Projects="src\DX.Comply.Engine.dproj"/>
     </Target>
-    <Target Name="Engine_Debug">
-        <MSBuild Projects="src\DX.Comply.Engine.dproj" Properties="Config=Debug"/>
-    </Target>
-    <Target Name="Engine_Release">
-        <MSBuild Projects="src\DX.Comply.Engine.dproj" Properties="Config=Release"/>
-    </Target>
-    <Target Name="IDE">
+    <Target Name="DXComplyIDE">
         <MSBuild Projects="src\DX.Comply.IDE.dproj"/>
     </Target>
-    <Target Name="IDE_Win32">
-        <MSBuild Projects="src\DX.Comply.IDE.dproj" Properties="Platform=Win32"/>
+    <Target Name="DXComplyIDE:Clean">
+        <MSBuild Targets="Clean" Projects="src\DX.Comply.IDE.dproj"/>
     </Target>
-    <Target Name="IDE_Win64">
-        <MSBuild Projects="src\DX.Comply.IDE.dproj" Properties="Platform=Win64"/>
+    <Target Name="DXComplyIDE:Make">
+        <MSBuild Targets="Make" Projects="src\DX.Comply.IDE.dproj"/>
     </Target>
-    <Target Name="IDE_Debug">
-        <MSBuild Projects="src\DX.Comply.IDE.dproj" Properties="Config=Debug"/>
+    <Target Name="DXComplyCLI">
+        <MSBuild Projects="demo\CLI\dxcomply.dproj"/>
     </Target>
-    <Target Name="IDE_Release">
-        <MSBuild Projects="src\DX.Comply.IDE.dproj" Properties="Config=Release"/>
+    <Target Name="DXComplyCLI:Clean">
+        <MSBuild Targets="Clean" Projects="demo\CLI\dxcomply.dproj"/>
+    </Target>
+    <Target Name="DXComplyCLI:Make">
+        <MSBuild Targets="Make" Projects="demo\CLI\dxcomply.dproj"/>
     </Target>
     <Target Name="ExampleApp">
         <MSBuild Projects="demo\ExampleApp\ExampleApp.dproj"/>
     </Target>
-    <Target Name="ExampleApp_Win32">
-        <MSBuild Projects="demo\ExampleApp\ExampleApp.dproj" Properties="Platform=Win32"/>
+    <Target Name="ExampleApp:Clean">
+        <MSBuild Targets="Clean" Projects="demo\ExampleApp\ExampleApp.dproj"/>
     </Target>
-    <Target Name="ExampleApp_Win64">
-        <MSBuild Projects="demo\ExampleApp\ExampleApp.dproj" Properties="Platform=Win64"/>
+    <Target Name="ExampleApp:Make">
+        <MSBuild Targets="Make" Projects="demo\ExampleApp\ExampleApp.dproj"/>
     </Target>
-    <Target Name="ExampleApp_Debug">
-        <MSBuild Projects="demo\ExampleApp\ExampleApp.dproj" Properties="Config=Debug"/>
-    </Target>
-    <Target Name="ExampleApp_Release">
-        <MSBuild Projects="demo\ExampleApp\ExampleApp.dproj" Properties="Config=Release"/>
-    </Target>
-    <Target Name="CLI">
-        <MSBuild Projects="demo\CLI\dxcomply.dproj"/>
-    </Target>
-    <Target Name="CLI_Win32">
-        <MSBuild Projects="demo\CLI\dxcomply.dproj" Properties="Platform=Win32"/>
-    </Target>
-    <Target Name="CLI_Win64">
-        <MSBuild Projects="demo\CLI\dxcomply.dproj" Properties="Platform=Win64"/>
-    </Target>
-    <Target Name="CLI_Debug">
-        <MSBuild Projects="demo\CLI\dxcomply.dproj" Properties="Config=Debug"/>
-    </Target>
-    <Target Name="CLI_Release">
-        <MSBuild Projects="demo\CLI\dxcomply.dproj" Properties="Config=Release"/>
-    </Target>
-    <Target Name="Tests">
+    <Target Name="DXComplyTests">
         <MSBuild Projects="tests\DX.Comply.Tests.dproj"/>
     </Target>
-    <Target Name="Tests_Win32">
-        <MSBuild Projects="tests\DX.Comply.Tests.dproj" Properties="Platform=Win32"/>
+    <Target Name="DXComplyTests:Clean">
+        <MSBuild Targets="Clean" Projects="tests\DX.Comply.Tests.dproj"/>
     </Target>
-    <Target Name="Tests_Win64">
-        <MSBuild Projects="tests\DX.Comply.Tests.dproj" Properties="Platform=Win64"/>
-    </Target>
-    <Target Name="Tests_Debug">
-        <MSBuild Projects="tests\DX.Comply.Tests.dproj" Properties="Config=Debug"/>
-    </Target>
-    <Target Name="Tests_Release">
-        <MSBuild Projects="tests\DX.Comply.Tests.dproj" Properties="Config=Release"/>
+    <Target Name="DXComplyTests:Make">
+        <MSBuild Targets="Make" Projects="tests\DX.Comply.Tests.dproj"/>
     </Target>
     <Target Name="Build">
-        <CallTarget Targets="Engine"/>
-        <CallTarget Targets="IDE"/>
-        <CallTarget Targets="ExampleApp"/>
-        <CallTarget Targets="CLI"/>
-        <CallTarget Targets="Tests"/>
+        <CallTarget Targets="DXComplyEngine;DXComplyIDE;DXComplyCLI;ExampleApp;DXComplyTests"/>
     </Target>
-    <Target Name="Build_Debug">
-        <CallTarget Targets="Engine_Debug"/>
-        <CallTarget Targets="IDE_Debug"/>
-        <CallTarget Targets="ExampleApp_Debug"/>
-        <CallTarget Targets="CLI_Debug"/>
-        <CallTarget Targets="Tests_Debug"/>
+    <Target Name="Clean">
+        <CallTarget Targets="DXComplyEngine:Clean;DXComplyIDE:Clean;DXComplyCLI:Clean;ExampleApp:Clean;DXComplyTests:Clean"/>
     </Target>
-    <Target Name="Build_Release">
-        <CallTarget Targets="Engine_Release"/>
-        <CallTarget Targets="IDE_Release"/>
-        <CallTarget Targets="ExampleApp_Release"/>
-        <CallTarget Targets="CLI_Release"/>
-        <CallTarget Targets="Tests_Release"/>
+    <Target Name="Make">
+        <CallTarget Targets="DXComplyEngine:Make;DXComplyIDE:Make;DXComplyCLI:Make;ExampleApp:Make;DXComplyTests:Make"/>
     </Target>
+    <Import Condition="Exists('$(BDS)\Bin\CodeGear.Group.Targets')" Project="$(BDS)\Bin\CodeGear.Group.Targets"/>
 </Project>
