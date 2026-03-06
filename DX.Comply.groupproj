@@ -12,10 +12,13 @@
             <Dependencies>src\DX.Comply.Engine.dproj</Dependencies>
         </Projects>
         <Projects Include="tests\DX.Comply.Tests.dproj">
-            <Dependencies/>
+            <Dependencies>src\DX.Comply.Engine.dproj</Dependencies>
         </Projects>
         <Projects Include="demo\ExampleApp\ExampleApp.dproj">
-            <Dependencies/>
+            <Dependencies>src\DX.Comply.Engine.dproj</Dependencies>
+        </Projects>
+        <Projects Include="demo\CLI\dxcomply.dproj">
+            <Dependencies>src\DX.Comply.Engine.dproj</Dependencies>
         </Projects>
     </ItemGroup>
     <ProjectExtensions>
@@ -58,13 +61,67 @@
     <Target Name="ExampleApp">
         <MSBuild Projects="demo\ExampleApp\ExampleApp.dproj"/>
     </Target>
+    <Target Name="ExampleApp_Win32">
+        <MSBuild Projects="demo\ExampleApp\ExampleApp.dproj" Properties="Platform=Win32"/>
+    </Target>
+    <Target Name="ExampleApp_Win64">
+        <MSBuild Projects="demo\ExampleApp\ExampleApp.dproj" Properties="Platform=Win64"/>
+    </Target>
+    <Target Name="ExampleApp_Debug">
+        <MSBuild Projects="demo\ExampleApp\ExampleApp.dproj" Properties="Config=Debug"/>
+    </Target>
+    <Target Name="ExampleApp_Release">
+        <MSBuild Projects="demo\ExampleApp\ExampleApp.dproj" Properties="Config=Release"/>
+    </Target>
+    <Target Name="CLI">
+        <MSBuild Projects="demo\CLI\dxcomply.dproj"/>
+    </Target>
+    <Target Name="CLI_Win32">
+        <MSBuild Projects="demo\CLI\dxcomply.dproj" Properties="Platform=Win32"/>
+    </Target>
+    <Target Name="CLI_Win64">
+        <MSBuild Projects="demo\CLI\dxcomply.dproj" Properties="Platform=Win64"/>
+    </Target>
+    <Target Name="CLI_Debug">
+        <MSBuild Projects="demo\CLI\dxcomply.dproj" Properties="Config=Debug"/>
+    </Target>
+    <Target Name="CLI_Release">
+        <MSBuild Projects="demo\CLI\dxcomply.dproj" Properties="Config=Release"/>
+    </Target>
     <Target Name="Tests">
         <MSBuild Projects="tests\DX.Comply.Tests.dproj"/>
+    </Target>
+    <Target Name="Tests_Win32">
+        <MSBuild Projects="tests\DX.Comply.Tests.dproj" Properties="Platform=Win32"/>
+    </Target>
+    <Target Name="Tests_Win64">
+        <MSBuild Projects="tests\DX.Comply.Tests.dproj" Properties="Platform=Win64"/>
+    </Target>
+    <Target Name="Tests_Debug">
+        <MSBuild Projects="tests\DX.Comply.Tests.dproj" Properties="Config=Debug"/>
+    </Target>
+    <Target Name="Tests_Release">
+        <MSBuild Projects="tests\DX.Comply.Tests.dproj" Properties="Config=Release"/>
     </Target>
     <Target Name="Build">
         <CallTarget Targets="Engine"/>
         <CallTarget Targets="IDE"/>
         <CallTarget Targets="ExampleApp"/>
+        <CallTarget Targets="CLI"/>
         <CallTarget Targets="Tests"/>
+    </Target>
+    <Target Name="Build_Debug">
+        <CallTarget Targets="Engine_Debug"/>
+        <CallTarget Targets="IDE_Debug"/>
+        <CallTarget Targets="ExampleApp_Debug"/>
+        <CallTarget Targets="CLI_Debug"/>
+        <CallTarget Targets="Tests_Debug"/>
+    </Target>
+    <Target Name="Build_Release">
+        <CallTarget Targets="Engine_Release"/>
+        <CallTarget Targets="IDE_Release"/>
+        <CallTarget Targets="ExampleApp_Release"/>
+        <CallTarget Targets="CLI_Release"/>
+        <CallTarget Targets="Tests_Release"/>
     </Target>
 </Project>
