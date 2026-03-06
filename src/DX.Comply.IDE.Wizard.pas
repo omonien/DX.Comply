@@ -151,7 +151,7 @@ begin
     LProjectMenu.Add(LSeparator);
 
     LMenuItem := TMenuItem.Create(nil);
-    LMenuItem.Caption := 'Generate SBOM (DX.Comply)...';
+    LMenuItem.Caption := 'SBOM generieren (DX.Comply)...';
     LMenuItem.OnClick := OnProjectMenuItemClick;
     LProjectMenu.Add(LMenuItem);
 
@@ -221,7 +221,7 @@ end;
 function TDxComplyWizard.GetMenuText: string;
 begin
   // Caption shown in Help > <entry> added automatically by the IDE.
-  Result := 'Generate SBOM (DX.Comply)...';
+  Result := 'SBOM generieren (DX.Comply)...';
 end;
 
 procedure TDxComplyWizard.Execute;
