@@ -83,6 +83,8 @@
         <DelphiCompile Include="$(MainSource)">
             <MainSource>MainSource</MainSource>
         </DelphiCompile>
+        <DCCReference Include="DX.Comply.Tests.BuildEvidence.Intf.pas"/>
+        <DCCReference Include="DX.Comply.Tests.BuildEvidence.Reader.pas"/>
         <DCCReference Include="DX.Comply.Tests.HashService.pas"/>
         <DCCReference Include="DX.Comply.Tests.FileScanner.pas"/>
         <DCCReference Include="DX.Comply.Tests.ProjectScanner.pas"/>

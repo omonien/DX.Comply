@@ -37,6 +37,8 @@ requires
 
 contains
   DX.Comply.Engine.Intf in 'DX.Comply.Engine.Intf.pas',
+  DX.Comply.BuildEvidence.Intf in 'DX.Comply.BuildEvidence.Intf.pas',
+  DX.Comply.BuildEvidence.Reader in 'DX.Comply.BuildEvidence.Reader.pas',
   DX.Comply.ProjectScanner in 'DX.Comply.ProjectScanner.pas',
   DX.Comply.FileScanner in 'DX.Comply.FileScanner.pas',
   DX.Comply.HashService in 'DX.Comply.HashService.pas',

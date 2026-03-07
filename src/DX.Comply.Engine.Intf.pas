@@ -61,10 +61,22 @@ type
     Configuration: string;
     /// <summary>Output directory for build artefacts.</summary>
     OutputDir: string;
+    /// <summary>Output directory for generated package binaries (.bpl).</summary>
+    BplOutputDir: string;
+    /// <summary>Output directory for generated package metadata (.dcp).</summary>
+    DcpOutputDir: string;
+    /// <summary>Output directory for generated compiled units (.dcu).</summary>
+    DcuOutputDir: string;
     /// <summary>Project version (if specified).</summary>
     Version: string;
+    /// <summary>Resolved unit search paths for the selected platform/configuration.</summary>
+    SearchPaths: TList<string>;
+    /// <summary>Resolved unit scope names for the selected platform/configuration.</summary>
+    UnitScopeNames: TList<string>;
     /// <summary>List of runtime package dependencies.</summary>
     RuntimePackages: TList<string>;
+    /// <summary>Warnings collected while scanning the project metadata.</summary>
+    Warnings: TList<string>;
     /// <summary>Initializes the record with a new TList instance.</summary>
     class function Create: TProjectInfo; static;
     /// <summary>Frees internal resources. Call this when done with the record.</summary>
@@ -193,15 +205,36 @@ implementation
 class function TProjectInfo.Create: TProjectInfo;
 begin
   Result := Default(TProjectInfo);
+  Result.SearchPaths := TList<string>.Create;
+  Result.UnitScopeNames := TList<string>.Create;
   Result.RuntimePackages := TList<string>.Create;
+  Result.Warnings := TList<string>.Create;
 end;
 
 procedure TProjectInfo.Free;
 begin
+  if Assigned(SearchPaths) then
+  begin
+    SearchPaths.Free;
+    SearchPaths := nil;
+  end;
+
+  if Assigned(UnitScopeNames) then
+  begin
+    UnitScopeNames.Free;
+    UnitScopeNames := nil;
+  end;
+
   if Assigned(RuntimePackages) then
   begin
     RuntimePackages.Free;
     RuntimePackages := nil;
+  end;
+
+  if Assigned(Warnings) then
+  begin
+    Warnings.Free;
+    Warnings := nil;
   end;
 end;
 

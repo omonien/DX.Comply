@@ -36,6 +36,8 @@ uses
   System.DateUtils,
   System.Generics.Collections,
   DX.Comply.Engine.Intf,
+  DX.Comply.BuildEvidence.Intf,
+  DX.Comply.BuildEvidence.Reader,
   DX.Comply.ProjectScanner,
   DX.Comply.FileScanner,
   DX.Comply.HashService,
@@ -85,6 +87,7 @@ type
   TDxComplyGenerator = class
   private
     FProjectScanner: IProjectScanner;
+    FBuildEvidenceReader: IBuildEvidenceReader;
     FFileScanner: IFileScanner;
     FHashService: IHashService;
     FSbomWriter: ISbomWriter;
@@ -94,6 +97,7 @@ type
     function LoadConfig(const AConfigPath: string): TSbomConfig;
     function CreateWriter(AFormat: TSbomFormat): ISbomWriter;
     function BuildMetadata(const AConfig: TSbomConfig): TSbomMetadata;
+    function ReadBuildEvidence(const AProjectInfo: TProjectInfo): TBuildEvidence;
   public
     /// <summary>
     /// Creates a new TDxComplyGenerator instance.
@@ -163,6 +167,7 @@ begin
   inherited Create;
   FConfig := TSbomConfig.Default;
   FProjectScanner := TProjectScanner.Create;
+  FBuildEvidenceReader := TBuildEvidenceReader.Create;
   FHashService := THashService.Create;
   FFileScanner := TFileScanner.Create(FHashService);
 end;
@@ -176,10 +181,19 @@ end;
 destructor TDxComplyGenerator.Destroy;
 begin
   FProjectScanner := nil;
+  FBuildEvidenceReader := nil;
   FFileScanner := nil;
   FHashService := nil;
   FSbomWriter := nil;
   inherited;
+end;
+
+function TDxComplyGenerator.ReadBuildEvidence(const AProjectInfo: TProjectInfo): TBuildEvidence;
+begin
+  if Assigned(FBuildEvidenceReader) then
+    Result := FBuildEvidenceReader.Read(AProjectInfo)
+  else
+    Result := TBuildEvidence.Create;
 end;
 
 procedure TDxComplyGenerator.DoProgress(const AMessage: string; const AProgress: Integer);
@@ -290,6 +304,7 @@ function TDxComplyGenerator.Generate(const AProjectPath, AOutputPath: string;
   AFormat: TSbomFormat): Boolean;
 var
   LProjectInfo: TProjectInfo;
+  LBuildEvidence: TBuildEvidence;
   LArtefacts: TArtefactList;
   LMetadata: TSbomMetadata;
   LOutputPath: string;
@@ -308,6 +323,7 @@ begin
 
   // Scan project — initialize record so the outer finally can safely call Free
   LProjectInfo := Default(TProjectInfo);
+  LBuildEvidence := Default(TBuildEvidence);
   try
     LProjectInfo := FProjectScanner.Scan(AProjectPath, FConfig.Platform, FConfig.Configuration);
   except
@@ -319,6 +335,11 @@ begin
   end;
 
   try
+    DoProgress('Preparing build evidence...', 20);
+    LBuildEvidence := ReadBuildEvidence(LProjectInfo);
+    DoProgress(Format('Collected %d build evidence item(s)',
+      [LBuildEvidence.EvidenceItems.Count]), 25);
+
     DoProgress('Scanning build output...', 30);
 
     // Warn if output directory doesn't exist (artefacts not yet built)
@@ -386,6 +407,7 @@ begin
       LArtefacts.Free;
     end;
   finally
+    LBuildEvidence.Free;
     LProjectInfo.Free;
   end;
 end;

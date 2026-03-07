@@ -86,6 +86,22 @@ type
     [Test]
     procedure Scan_EngineDproj_RuntimePackagesNotNil;
 
+    /// <summary>SearchPaths list must be assigned and include the src folder.</summary>
+    [Test]
+    procedure Scan_EngineDproj_ExtractsSearchPaths;
+
+    /// <summary>UnitScopeNames must include the standard System namespace.</summary>
+    [Test]
+    procedure Scan_EngineDproj_ExtractsUnitScopeNames;
+
+    /// <summary>Additional output directories must be resolved as absolute paths.</summary>
+    [Test]
+    procedure Scan_EngineDproj_ExtractsAdditionalOutputDirs;
+
+    /// <summary>Warnings list must be assigned even when no warnings are emitted.</summary>
+    [Test]
+    procedure Scan_EngineDproj_WarningsListAssigned;
+
     /// <summary>ProjectDir must be the src directory containing the dproj.</summary>
     [Test]
     procedure Scan_EngineDproj_ProjectDirIsValid;
@@ -206,6 +222,66 @@ begin
   try
     Assert.IsNotNull(LProjectInfo.RuntimePackages,
       'RuntimePackages must be assigned (not nil) after scanning');
+  finally
+    LProjectInfo.Free;
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_EngineDproj_ExtractsSearchPaths;
+var
+  LProjectInfo: TProjectInfo;
+begin
+  LProjectInfo := FScanner.Scan(FEngineDprojPath, 'Win32', 'Debug');
+  try
+    Assert.IsNotNull(LProjectInfo.SearchPaths,
+      'SearchPaths must be assigned after scanning');
+    Assert.IsTrue(LProjectInfo.SearchPaths.Contains(LProjectInfo.ProjectDir),
+      'SearchPaths must include the project src directory resolved from the dproj');
+  finally
+    LProjectInfo.Free;
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_EngineDproj_ExtractsUnitScopeNames;
+var
+  LProjectInfo: TProjectInfo;
+begin
+  LProjectInfo := FScanner.Scan(FEngineDprojPath, 'Win32', 'Debug');
+  try
+    Assert.IsNotNull(LProjectInfo.UnitScopeNames,
+      'UnitScopeNames must be assigned after scanning');
+    Assert.IsTrue(LProjectInfo.UnitScopeNames.Contains('System'),
+      'UnitScopeNames must include the System namespace from DCC_Namespace');
+  finally
+    LProjectInfo.Free;
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_EngineDproj_ExtractsAdditionalOutputDirs;
+var
+  LProjectInfo: TProjectInfo;
+begin
+  LProjectInfo := FScanner.Scan(FEngineDprojPath, 'Win32', 'Debug');
+  try
+    Assert.IsFalse(TPath.IsRelativePath(LProjectInfo.BplOutputDir),
+      'BplOutputDir must be an absolute path after scanning');
+    Assert.IsFalse(TPath.IsRelativePath(LProjectInfo.DcpOutputDir),
+      'DcpOutputDir must be an absolute path after scanning');
+    Assert.IsFalse(TPath.IsRelativePath(LProjectInfo.DcuOutputDir),
+      'DcuOutputDir must be an absolute path after scanning');
+  finally
+    LProjectInfo.Free;
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_EngineDproj_WarningsListAssigned;
+var
+  LProjectInfo: TProjectInfo;
+begin
+  LProjectInfo := FScanner.Scan(FEngineDprojPath, 'Win32', 'Debug');
+  try
+    Assert.IsNotNull(LProjectInfo.Warnings,
+      'Warnings must be assigned after scanning');
   finally
     LProjectInfo.Free;
   end;

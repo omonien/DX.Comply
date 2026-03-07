@@ -93,6 +93,23 @@ type
     /// </summary>
     function NormalizePath(const APath, AProjectName: string): string;
     /// <summary>
+    /// Resolves a configured build path to a normalized absolute path.
+    /// </summary>
+    function ResolveBuildPath(const ARawPath, AProjectDir, AProjectName: string): string;
+    /// <summary>
+    /// Adds semicolon-delimited values to a list, optionally normalizing them as paths.
+    /// </summary>
+    procedure AddDelimitedValues(const AValue: string; const AValues: TList<string>;
+      const AProjectDir, AProjectName: string; ANormalizeAsPath: Boolean);
+    /// <summary>
+    /// Extracts the effective unit search paths for the current platform/configuration.
+    /// </summary>
+    function ExtractSearchPaths(const AProjectDir, AProjectName: string): TList<string>;
+    /// <summary>
+    /// Extracts the effective unit scope names for the current platform/configuration.
+    /// </summary>
+    function ExtractUnitScopeNames: TList<string>;
+    /// <summary>
     /// Attempts to detect the TargetedPlatforms bitmask and returns
     /// a list of platform names (Win32, Win64, etc.).
     /// </summary>
@@ -112,6 +129,46 @@ type
 implementation
 
 { TProjectScanner }
+
+procedure TProjectScanner.AddDelimitedValues(const AValue: string; const AValues: TList<string>;
+  const AProjectDir, AProjectName: string; ANormalizeAsPath: Boolean);
+var
+  LItem: string;
+  LItems: TArray<string>;
+begin
+  if not Assigned(AValues) then
+    Exit;
+
+  if Trim(AValue) = '' then
+    Exit;
+
+  LItems := AValue.Split([';']);
+  for LItem in LItems do
+  begin
+    LItem := Trim(LItem);
+    if LItem = '' then
+      Continue;
+
+    if LItem[1] = '$' then
+      Continue;
+
+    if ANormalizeAsPath then
+    begin
+      LItem := NormalizePath(LItem, AProjectName);
+      if (LItem <> '') and TPath.IsRelativePath(LItem) then
+        LItem := TPath.Combine(AProjectDir, LItem);
+
+      try
+        LItem := TPath.GetFullPath(LItem);
+      except
+        FWarnings.Add('Could not resolve search path: ' + LItem);
+      end;
+    end;
+
+    if not AValues.Contains(LItem) then
+      AValues.Add(LItem);
+  end;
+end;
 
 constructor TProjectScanner.Create;
 begin
@@ -429,6 +486,24 @@ begin
   Result := LPackages;
 end;
 
+function TProjectScanner.ExtractSearchPaths(const AProjectDir, AProjectName: string): TList<string>;
+var
+  LSearchPathValue: string;
+begin
+  Result := TList<string>.Create;
+  LSearchPathValue := GetPropertyValue('DCC_UnitSearchPath', '');
+  AddDelimitedValues(LSearchPathValue, Result, AProjectDir, AProjectName, True);
+end;
+
+function TProjectScanner.ExtractUnitScopeNames: TList<string>;
+var
+  LNamespaceValue: string;
+begin
+  Result := TList<string>.Create;
+  LNamespaceValue := GetPropertyValue('DCC_Namespace', '');
+  AddDelimitedValues(LNamespaceValue, Result, '', '', False);
+end;
+
 function TProjectScanner.NormalizePath(const APath, AProjectName: string): string;
 var
   LPath: string;
@@ -448,11 +523,35 @@ begin
   Result := LPath;
 end;
 
+function TProjectScanner.ResolveBuildPath(const ARawPath, AProjectDir, AProjectName: string): string;
+var
+  LPath: string;
+begin
+  Result := '';
+  if Trim(ARawPath) = '' then
+    Exit;
+
+  LPath := NormalizePath(ARawPath, AProjectName);
+  if (LPath <> '') and TPath.IsRelativePath(LPath) then
+    LPath := TPath.Combine(AProjectDir, LPath);
+
+  try
+    Result := TPath.GetFullPath(LPath);
+  except
+    Result := LPath;
+    FWarnings.Add('Could not resolve output path: ' + LPath);
+  end;
+end;
+
 function TProjectScanner.Scan(const AProjectPath, APlatform, AConfiguration: string): TProjectInfo;
 var
-  LOutputDir: string;
+  LBplOutputDir: string;
+  LDcpOutputDir: string;
+  LDcuOutputDir: string;
+  LExeOutputDir: string;
   LVersionStr: string;
   LMajor, LMinor, LRelease, LBuild: string;
+  LWarning: string;
 begin
   FWarnings.Clear;
   Result := TProjectInfo.Create;
@@ -505,38 +604,51 @@ begin
       Result.Version := LVersionStr;
 
     // Extract output directory — try multiple common elements
-    LOutputDir := GetPropertyValue('DCC_ExeOutput', '');
-    if LOutputDir = '' then
-      LOutputDir := GetPropertyValue('DCC_BplOutput', '');
-    if LOutputDir = '' then
-      LOutputDir := GetPropertyValue('DCC_DcpOutput', '');
-    if LOutputDir = '' then
-      LOutputDir := GetPropertyValue('DCC_DcuOutput', '');
-    if LOutputDir = '' then
+    LExeOutputDir := ResolveBuildPath(GetPropertyValue('DCC_ExeOutput', ''),
+      Result.ProjectDir, Result.ProjectName);
+    LBplOutputDir := ResolveBuildPath(GetPropertyValue('DCC_BplOutput', ''),
+      Result.ProjectDir, Result.ProjectName);
+    LDcpOutputDir := ResolveBuildPath(GetPropertyValue('DCC_DcpOutput', ''),
+      Result.ProjectDir, Result.ProjectName);
+    LDcuOutputDir := ResolveBuildPath(GetPropertyValue('DCC_DcuOutput', ''),
+      Result.ProjectDir, Result.ProjectName);
+
+    Result.BplOutputDir := LBplOutputDir;
+    Result.DcpOutputDir := LDcpOutputDir;
+    Result.DcuOutputDir := LDcuOutputDir;
+
+    Result.OutputDir := LExeOutputDir;
+    if Result.OutputDir = '' then
+      Result.OutputDir := Result.BplOutputDir;
+    if Result.OutputDir = '' then
+      Result.OutputDir := Result.DcpOutputDir;
+    if Result.OutputDir = '' then
+      Result.OutputDir := Result.DcuOutputDir;
+
+    if Result.OutputDir = '' then
     begin
       // Fallback to standard project structure
-      LOutputDir := '..\build\$(Platform)\$(Config)';
-      FWarnings.Add('No output directory found in .dproj. Using default: ' + LOutputDir);
+      Result.OutputDir := ResolveBuildPath('..\build\$(Platform)\$(Config)',
+        Result.ProjectDir, Result.ProjectName);
+      FWarnings.Add('No output directory found in .dproj. Using default: ..\build\$(Platform)\$(Config)');
     end;
 
-    LOutputDir := NormalizePath(LOutputDir, Result.ProjectName);
+    // Extract search paths and namespace scopes
+    if Assigned(Result.SearchPaths) then
+      Result.SearchPaths.Free;
+    Result.SearchPaths := ExtractSearchPaths(Result.ProjectDir, Result.ProjectName);
 
-    // Make path absolute if relative
-    if TPath.IsRelativePath(LOutputDir) then
-      LOutputDir := TPath.Combine(Result.ProjectDir, LOutputDir);
-
-    try
-      Result.OutputDir := TPath.GetFullPath(LOutputDir);
-    except
-      // GetFullPath can fail on invalid paths — use as-is
-      Result.OutputDir := LOutputDir;
-      FWarnings.Add('Could not resolve output path: ' + LOutputDir);
-    end;
+    if Assigned(Result.UnitScopeNames) then
+      Result.UnitScopeNames.Free;
+    Result.UnitScopeNames := ExtractUnitScopeNames;
 
     // Extract runtime packages
     if Assigned(Result.RuntimePackages) then
       Result.RuntimePackages.Free;
     Result.RuntimePackages := ExtractRuntimePackages;
+
+    for LWarning in FWarnings do
+      Result.Warnings.Add(LWarning);
   except
     on E: Exception do
     begin

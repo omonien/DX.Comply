@@ -25,6 +25,8 @@ uses
   DUnitX.TestFramework,
   DUnitX.Loggers.Console,
   DUnitX.Loggers.XML.NUnit,
+  DX.Comply.Tests.BuildEvidence.Intf in 'DX.Comply.Tests.BuildEvidence.Intf.pas',
+  DX.Comply.Tests.BuildEvidence.Reader in 'DX.Comply.Tests.BuildEvidence.Reader.pas',
   DX.Comply.Tests.HashService in 'DX.Comply.Tests.HashService.pas',
   DX.Comply.Tests.FileScanner in 'DX.Comply.Tests.FileScanner.pas',
   DX.Comply.Tests.ProjectScanner in 'DX.Comply.Tests.ProjectScanner.pas',

@@ -91,6 +91,8 @@
         <DCCReference Include="rtl.dcp"/>
         <DCCReference Include="xmlrtl.dcp"/>
         <DCCReference Include="DX.Comply.Engine.Intf.pas"/>
+        <DCCReference Include="DX.Comply.BuildEvidence.Intf.pas"/>
+        <DCCReference Include="DX.Comply.BuildEvidence.Reader.pas"/>
         <DCCReference Include="DX.Comply.ProjectScanner.pas"/>
         <DCCReference Include="DX.Comply.FileScanner.pas"/>
         <DCCReference Include="DX.Comply.HashService.pas"/>
