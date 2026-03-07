@@ -8,6 +8,25 @@ Extend DX.Comply from a build artefact scanner to a two-layer evidence generator
 
 The guiding principle is: **CRA minimum outside, deep Delphi evidence inside.**
 
+## Current Implementation Status (2026-03-07)
+
+Already implemented:
+
+- build-evidence contracts and evidence container types
+- `TProjectInfo` expansion for search paths, unit scopes, output paths, and `MapFilePath`
+- `BuildEvidenceReader` with MAP-derived evidence items
+- dedicated `MapFileReader`
+- initial `UnitResolver` with `.map`-seeded unit creation
+- first `BuildOrchestrator` slice with optional explicit Deep-Evidence build execution
+
+Still pending from the full target plan:
+
+- representation refinement for resolved units
+- `OriginClassifier`
+- `EvidenceWriter`
+- dedicated CLI switches for Deep Evidence
+- end-to-end verification on a machine with Delphi installed
+
 ## Key Product Decisions
 
 ### 1. Two output layers instead of one overloaded SBOM
@@ -214,11 +233,12 @@ This service must stay logically separate from SBOM generation.
 - Use `THashService` unchanged as the shared hash provider for both release artefacts and resolved unit evidence.
 - Refactor `TDxComplyGenerator.Generate` into an explicit pipeline:
   1. scan project metadata
-  2. read build evidence
-  3. resolve unit closure
-  4. classify origin
-  5. hash artefacts and resolved unit evidence
-  6. write release SBOM and evidence sidecar
+  2. optionally ensure a Deep-Evidence build
+  3. read build evidence
+  4. resolve unit closure
+  5. classify origin
+  6. hash artefacts and resolved unit evidence
+  7. write release SBOM and evidence sidecar
 
 ## Design Reference
 See `docs/BuildEvidenceDesign.md` for the concrete first-pass Delphi records, enums, and interfaces proposed for implementation.

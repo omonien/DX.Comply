@@ -4,8 +4,16 @@
 
 The `dxcomply` CLI can be dropped into any Windows build pipeline that produces
 Delphi build artefacts. It reads a `.dproj` file (or a `.dxcomply.json`
-configuration file in CI mode), scans the build output directory, hashes every
-artefact, and writes a standards-compliant SBOM.
+configuration file in CI mode), combines project metadata with build evidence,
+scans the build output directory, hashes every artefact, and writes a
+standards-compliant SBOM.
+
+Current Deep-Evidence status:
+
+- the engine can consume MAP-derived evidence when a detailed Delphi `.map` file exists
+- Deep-Evidence mode can be enabled through `.dxcomply.json`
+- the engine can try to trigger an explicit build before evidence collection
+- CLI-specific Deep-Evidence switches are not exposed yet; use the config file for now
 
 The `--no-pause` flag suppresses the interactive "Press Enter to quit" prompt
 and is **required** in all automated pipeline steps.
@@ -99,6 +107,10 @@ store the configuration in `.dxcomply.json` at the repository root.
     "build/**/Debug/**",
     "**/*.dcu"
   ],
+  "deepEvidence": {
+    "build": true,
+    "delphiVersion": 13
+  },
   "product": {
     "name": "My Application",
     "version": "2.1.0",
@@ -116,6 +128,21 @@ dxcomply --project=src/MyApp.dproj --ci --config=.dxcomply.json --no-pause
 When `--ci` is given and the config file exists, `GenerateFromConfig` is called
 instead of `Generate`, so command-line format/output flags are ignored in favour
 of the file contents.
+
+### Deep Evidence in CI
+
+When `deepEvidence.build` is set to `true`, DX.Comply will try to run the shared
+`build/DelphiBuildDPROJ.ps1` script before collecting evidence. This currently
+requires:
+
+- a Windows runner
+- a Delphi installation visible to the build script
+- permission to run the PowerShell build helper
+
+If the runner does not have Delphi installed, the Deep-Evidence build step will
+fail before evidence collection. In that environment, either disable
+`deepEvidence.build` or provide an existing detailed `.map` file as part of the
+build output.
 
 ---
 

@@ -4,12 +4,30 @@
 Deliver a stable MVP (v1.0) for CRA-facing SBOM generation plus deep Delphi composition evidence,
 followed by incremental releases for diffing and optional advisory correlation.
 
+## Current Progress Snapshot (2026-03-07)
+
+Completed foundation work:
+
+- build-evidence contracts
+- `TProjectInfo` expansion for search-path/output/MAP metadata
+- `BuildEvidenceReader`
+- `MapFileReader`
+- first `UnitResolver` slice with MAP-derived unit seeding
+- first `Build-Orchestrator` slice for explicit Deep-Evidence builds
+
+Next milestone focus:
+
+- representation refinement
+- `OriginClassifier`
+- `EvidenceWriter`
+- Deep-Evidence CLI exposure
+
 ## Milestones
 ### M1 – Core (Week 1–2)
 - Evidence contracts (`DX.Comply.BuildEvidence.Intf`)
 - ProjectScanner extension (.dproj, search paths, output paths, runtime packages)
 - BuildEvidenceReader (compiler/package evidence, response files, side artefacts)
-- UnitResolver (direct + transitive unit closure)
+- UnitResolver (initial MAP-seeded slice done; full direct + transitive closure still pending)
 - OriginClassifier (RTL/VCL/FMX/local/third-party)
 - HashService reuse (SHA-512 + optional SHA-256)
 - CycloneDX Writer (release SBOM)

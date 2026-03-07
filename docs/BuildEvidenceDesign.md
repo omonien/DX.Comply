@@ -3,6 +3,9 @@
 ## Goal
 Define the first concrete Delphi-facing model for build-evidence-driven unit resolution without committing to implementation details too early.
 
+Implementation note: parts of this design are already implemented. For the
+current handover state, see `docs/CurrentStatus.md`.
+
 ## Design Principles
 - Use the real build as the source of truth.
 - Prefer an explicit Deep-Evidence build with detailed `.map` generation whenever possible.
@@ -199,7 +202,7 @@ Use when:
 ## Integration With Current Code
 
 ### `TProjectInfo`
-Recommended future additions:
+Already implemented additions:
 - `SearchPaths: TList<string>`
 - `UnitScopeNames: TList<string>`
 - `DcuOutputDir: string`
@@ -208,38 +211,42 @@ Recommended future additions:
 - `MapFilePath: string`
 - `Warnings: TList<string>`
 
-This keeps `.dproj` parsing results reusable and avoids reparsing later phases.
+These additions keep `.dproj` parsing results reusable and avoid reparsing in later phases.
 
 ### `TDxComplyGenerator`
-Recommended future pipeline:
+Current pipeline direction:
 1. `IProjectScanner.Scan`
-2. `IBuildEvidenceReader.Read`
-3. if Deep Evidence is enabled, prefer `.map`-driven membership seeding
-4. `IUnitResolver.Resolve`
-4. `IOriginClassifier.Classify`
-5. `IHashService` for artefacts and unit evidence
-6. `ISbomWriter.Write`
-7. `IEvidenceWriter.Write`
+2. if Deep Evidence is enabled, optionally ensure an explicit build with detailed `.map` output
+3. `IBuildEvidenceReader.Read`
+4. use `.map`-driven membership seeding when available
+5. `IUnitResolver.Resolve`
+6. `IOriginClassifier.Classify`
+7. `IHashService` for artefacts and unit evidence
+8. `ISbomWriter.Write`
+9. `IEvidenceWriter.Write`
 
 ### `TFileScanner`
 Keep it limited to shipped artefacts. Unit resolution should not depend on a recursive directory scan of the build output alone.
 
-## First Implementation Slice
-To keep the first coding step small and safe, implement in this order:
+## Completed Foundation Slices
 
-1. Add `DX.Comply.BuildEvidence.Intf.pas` with enums, records, and interfaces only.
-2. Extend `TProjectInfo` with the extra build-path/search-path fields.
-3. Implement `DX.Comply.BuildEvidence.Reader.pas` for `.dproj` + build-side evidence collection.
-4. Wire the reader into `TDxComplyGenerator` without yet changing SBOM output.
-5. Add `UnitResolver` after build evidence can already be inspected in tests/logs.
+The following foundation slices are already implemented:
 
-## Next Implementation Slice
-The next resolver slice should:
+1. `DX.Comply.BuildEvidence.Intf.pas`
+2. `TProjectInfo` expansion for build/search-path metadata
+3. `DX.Comply.BuildEvidence.Reader.pas`
+4. dedicated `DX.Comply.MapFile.Reader.pas`
+5. `.map`-seeded `DX.Comply.UnitResolver.pas`
+6. first `DX.Comply.BuildOrchestrator.pas` slice
 
-1. add `MapFilePath` to `TProjectInfo`
-2. introduce a dedicated `MapFileReader`
-3. let `BuildEvidenceReader` emit `besMapFile` evidence items from a detailed `.map`
-4. let `UnitResolver` create the first real `TResolvedUnitInfo` entries from `.map` membership evidence
+## Next Active Slices
+
+The next implementation slices should focus on:
+
+1. representation refinement for map-derived units
+2. `OriginClassifier`
+3. `EvidenceWriter`
+4. Deep-Evidence CLI exposure
 
 ## Non-Goals For The First Slice
 - Full parsing of every Delphi package format
@@ -249,3 +256,6 @@ The next resolver slice should:
 
 ## Result
 This design gives DX.Comply a clear next coding step: introduce the evidence contracts first, then move the existing engine from artefact-scan-driven orchestration toward a build-evidence-driven pipeline.
+
+That transition has now started and the repository contains the first working
+MAP-first and Build-Orchestrator foundation slices.

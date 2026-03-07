@@ -13,6 +13,15 @@ DX.Comply generates that document — a *Software Bill of Materials* — directl
 
 **You generate it. You archive it. You never have to submit it anywhere.**
 
+Current implementation status:
+- release SBOM generation is available
+- build-evidence foundations are in place
+- MAP-first Deep-Evidence seeding is implemented
+- explicit Deep-Evidence build orchestration is implemented
+- representation refinement, origin classification, and evidence sidecar output are still in progress
+
+See `docs/CurrentStatus.md` for the detailed technical handover state.
+
 → [Jump to Quick Start](#quick-start)
 
 ---
@@ -165,15 +174,25 @@ Once generated, there is no submission process — you simply keep it. Here is w
 
 ## What DX.Comply analyses
 
-For each build, DX.Comply scans your project and output directory and records:
+For each build, DX.Comply currently combines project metadata, build evidence,
+and build-output artefact scanning. When a detailed Delphi MAP file is present
+— or when Deep Evidence is configured to create one explicitly — it is treated
+as a primary membership source for the units actually linked into the result.
 
 | What                        | Details                                      |
 |-----------------------------|----------------------------------------------|
 | Project metadata            | Name, version, platform, configuration       |
+| Build evidence              | Search paths, unit scopes, runtime packages, expected MAP path |
+| MAP-derived unit membership | First seed set for units proven by linker evidence when a detailed `.map` exists |
 | Build artefacts             | `.exe`, `.dll`, `.bpl`, `.dcp`, resources    |
-| Third-party packages        | Runtime packages, detected library paths     |
+| Third-party package hints   | Runtime packages and detected library roots  |
 | Cryptographic fingerprints  | SHA-256 hash for every file                  |
 | Dependency graph            | Basic component relationships                |
+
+Important limitation: the current engine already seeds unit membership from MAP
+evidence, but representation refinement (`.pas` / `.dcu` / `.dcp` / `.bpl`),
+origin classification, and separate evidence sidecar output are still being
+implemented.
 
 ---
 
@@ -187,6 +206,10 @@ Add a `.dxcomply.json` to your project folder to control the scan:
   "format": "cyclonedx-json",
   "include": ["build/**"],
   "exclude": ["build/**/Debug/**", "**/*.dcu"],
+  "deepEvidence": {
+    "build": false,
+    "delphiVersion": 13
+  },
   "product": {
     "name": "My Application",
     "version": "2.1.0",
@@ -194,6 +217,21 @@ Add a `.dxcomply.json` to your project folder to control the scan:
   }
 }
 ```
+
+### Deep Evidence configuration
+
+Current config support includes:
+
+- `deepEvidence.build`
+  - `false`: consume existing build evidence only
+  - `true`: try to trigger an explicit Deep-Evidence build before evidence collection
+- `deepEvidence.delphiVersion`
+  - optional Delphi major version to forward into the build script
+
+The current implementation uses the shared `build/DelphiBuildDPROJ.ps1` script
+and appends additional MSBuild properties to force detailed MAP generation.
+CLI-specific Deep-Evidence switches are not exposed yet; use `.dxcomply.json`
+for this mode for now.
 
 ---
 
@@ -239,7 +277,7 @@ All generated SBOMs are validated against the official schema before being writt
 
 | Version | Highlights                                              | Status   |
 |---------|---------------------------------------------------------|----------|
-| v1.0    | IDE plugin, CLI, CycloneDX JSON/XML, artefact scan     | In development |
+| v1.0    | IDE plugin, CLI, CycloneDX JSON/XML, artefact scan, build-evidence foundation, MAP-first Deep-Evidence foundation | In development |
 | v1.1    | SPDX export, HTML report, SBOM diff                    | Planned  |
 | v2.0    | CVE feed integration, licence heuristics, policy checks | Planned  |
 
