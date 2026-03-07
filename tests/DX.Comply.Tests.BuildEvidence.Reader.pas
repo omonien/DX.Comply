@@ -60,6 +60,12 @@ type
     /// </summary>
     [Test]
     procedure Read_ProjectInfo_WithMapFile_CreatesMapEvidenceItems;
+
+    /// <summary>
+    /// Missing MAP files must produce targeted warnings, including RSM guidance.
+    /// </summary>
+    [Test]
+    procedure Read_ProjectInfo_MissingMapFile_AddsHelpfulWarnings;
   end;
 
 implementation
@@ -237,6 +243,42 @@ begin
   finally
     if TFile.Exists(LMapFilePath) then
       TFile.Delete(LMapFilePath);
+  end;
+end;
+
+procedure TBuildEvidenceReaderTests.Read_ProjectInfo_MissingMapFile_AddsHelpfulWarnings;
+var
+  LBuildEvidence: TBuildEvidence;
+  LMapFilePath: string;
+  LProjectInfo: TProjectInfo;
+  LRsmFilePath: string;
+begin
+  LMapFilePath := TPath.Combine(TPath.GetTempPath, TPath.GetRandomFileName + '.map');
+  LRsmFilePath := ChangeFileExt(LMapFilePath, '.rsm');
+  TFile.WriteAllText(LRsmFilePath, 'dummy-rsm', TEncoding.UTF8);
+  try
+    LProjectInfo := TProjectInfo.Create;
+    try
+      LProjectInfo.ProjectDir := TPath.GetTempPath;
+      LProjectInfo.MapFilePath := LMapFilePath;
+
+      LBuildEvidence := FReader.Read(LProjectInfo);
+      try
+        Assert.AreEqual(NativeInt(2), NativeInt(LBuildEvidence.Warnings.Count),
+          'Missing MAP files with a sibling RSM file must emit two targeted warnings');
+        Assert.IsTrue(Pos('.map', LowerCase(LBuildEvidence.Warnings[0])) > 0,
+          'The first warning must mention the missing MAP file');
+        Assert.IsTrue(Pos('.rsm', LowerCase(LBuildEvidence.Warnings[1])) > 0,
+          'The second warning must mention the sibling RSM file');
+      finally
+        LBuildEvidence.Free;
+      end;
+    finally
+      LProjectInfo.Free;
+    end;
+  finally
+    if TFile.Exists(LRsmFilePath) then
+      TFile.Delete(LRsmFilePath);
   end;
 end;
 

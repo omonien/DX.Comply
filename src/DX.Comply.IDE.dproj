@@ -107,6 +107,9 @@
         <DCCReference Include="DX.Comply.Schema.Validator.pas"/>
         <DCCReference Include="DX.Comply.Engine.pas"/>
         <DCCReference Include="DX.Comply.IDE.Logger.pas"/>
+        <DCCReference Include="DX.Comply.IDE.Settings.pas"/>
+        <DCCReference Include="DX.Comply.IDE.OptionsFrame.pas"/>
+        <DCCReference Include="DX.Comply.IDE.Options.pas"/>
         <DCCReference Include="DX.Comply.IDE.Wizard.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>

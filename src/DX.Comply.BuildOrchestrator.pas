@@ -23,6 +23,28 @@ uses
 
 type
   /// <summary>
+  /// Controls when a Deep-Evidence build should be executed.
+  /// </summary>
+  TDeepEvidenceBuildMode = (
+    /// <summary>Do not attempt an explicit Deep-Evidence build.</summary>
+    debDisabled,
+    /// <summary>Execute only when the expected map file is missing.</summary>
+    debWhenMapMissing,
+    /// <summary>Always execute before SBOM generation.</summary>
+    debAlways
+  );
+
+  /// <summary>
+  /// Input options for Deep-Evidence build planning.
+  /// </summary>
+  TDeepEvidenceBuildOptions = record
+    Mode: TDeepEvidenceBuildMode;
+    DelphiVersion: Integer;
+    BuildScriptPathOverride: string;
+    class function Default: TDeepEvidenceBuildOptions; static;
+  end;
+
+  /// <summary>
   /// Deterministic plan for an explicit Deep-Evidence build.
   /// </summary>
   TDeepEvidenceBuildPlan = record
@@ -60,7 +82,7 @@ type
     /// Creates a deterministic plan for a Deep-Evidence build.
     /// </summary>
     function CreatePlan(const AProjectInfo: TProjectInfo;
-      ADeepEvidenceBuildEnabled: Boolean; ADelphiVersion: Integer): TDeepEvidenceBuildPlan;
+      const AOptions: TDeepEvidenceBuildOptions): TDeepEvidenceBuildPlan;
     /// <summary>
     /// Executes the specified Deep-Evidence build plan.
     /// </summary>
@@ -69,7 +91,7 @@ type
     /// Ensures the requested Deep-Evidence build exists and produced a map file.
     /// </summary>
     function EnsureDeepEvidenceBuild(const AProjectInfo: TProjectInfo;
-      ADeepEvidenceBuildEnabled: Boolean; ADelphiVersion: Integer): TDeepEvidenceBuildResult;
+      const AOptions: TDeepEvidenceBuildOptions): TDeepEvidenceBuildResult;
   end;
 
   /// <summary>
@@ -84,6 +106,19 @@ type
     /// </summary>
     function GetRepositoryRoot(const AProjectInfo: TProjectInfo): string;
     /// <summary>
+    /// Returns the directory of the currently loaded module.
+    /// </summary>
+    function GetModuleDirectory: string;
+    /// <summary>
+    /// Searches for the shared Delphi build script from the supplied directory upward.
+    /// </summary>
+    function FindBuildScriptFromDirectory(const AStartDirectory: string): string;
+    /// <summary>
+    /// Resolves the effective build script path, honoring user overrides first.
+    /// </summary>
+    function ResolveBuildScriptPath(const AProjectInfo: TProjectInfo;
+      const ABuildScriptPathOverride: string): string;
+    /// <summary>
     /// Quotes one command-line argument.
     /// </summary>
     function QuoteArgument(const AValue: string): string;
@@ -93,10 +128,10 @@ type
     function BuildCommandLine(const APlan: TDeepEvidenceBuildPlan): string;
   public
     function CreatePlan(const AProjectInfo: TProjectInfo;
-      ADeepEvidenceBuildEnabled: Boolean; ADelphiVersion: Integer): TDeepEvidenceBuildPlan;
+      const AOptions: TDeepEvidenceBuildOptions): TDeepEvidenceBuildPlan;
     function ExecutePlan(const APlan: TDeepEvidenceBuildPlan): TDeepEvidenceBuildResult;
     function EnsureDeepEvidenceBuild(const AProjectInfo: TProjectInfo;
-      ADeepEvidenceBuildEnabled: Boolean; ADelphiVersion: Integer): TDeepEvidenceBuildResult;
+      const AOptions: TDeepEvidenceBuildOptions): TDeepEvidenceBuildResult;
   end;
 
 implementation
@@ -105,6 +140,15 @@ uses
   System.IOUtils,
   System.SysUtils,
   Winapi.Windows;
+
+{ TDeepEvidenceBuildOptions }
+
+class function TDeepEvidenceBuildOptions.Default: TDeepEvidenceBuildOptions;
+begin
+  Result.Mode := debDisabled;
+  Result.DelphiVersion := 0;
+  Result.BuildScriptPathOverride := '';
+end;
 
 function TBuildOrchestrator.BuildCommandLine(const APlan: TDeepEvidenceBuildPlan): string;
 var
@@ -124,30 +168,74 @@ begin
 end;
 
 function TBuildOrchestrator.CreatePlan(const AProjectInfo: TProjectInfo;
-  ADeepEvidenceBuildEnabled: Boolean; ADelphiVersion: Integer): TDeepEvidenceBuildPlan;
+  const AOptions: TDeepEvidenceBuildOptions): TDeepEvidenceBuildPlan;
+var
+  LProjectDirectory: string;
 begin
   Result := Default(TDeepEvidenceBuildPlan);
-  Result.Enabled := ADeepEvidenceBuildEnabled;
-  Result.WorkingDirectory := GetRepositoryRoot(AProjectInfo);
-  Result.ScriptPath := TPath.Combine(Result.WorkingDirectory, 'build\DelphiBuildDPROJ.ps1');
+  Result.Enabled := AOptions.Mode <> debDisabled;
+  LProjectDirectory := AProjectInfo.ProjectDir;
+  if (LProjectDirectory = '') and (AProjectInfo.ProjectPath <> '') then
+    LProjectDirectory := TPath.GetDirectoryName(AProjectInfo.ProjectPath);
+  Result.WorkingDirectory := LProjectDirectory;
+  Result.ScriptPath := ResolveBuildScriptPath(AProjectInfo, AOptions.BuildScriptPathOverride);
   Result.ProjectPath := AProjectInfo.ProjectPath;
   Result.Platform := AProjectInfo.Platform;
   Result.Configuration := AProjectInfo.Configuration;
-  Result.DelphiVersion := ADelphiVersion;
+  Result.DelphiVersion := AOptions.DelphiVersion;
   Result.ExpectedMapFilePath := AProjectInfo.MapFilePath;
   Result.AdditionalMSBuildProperties := [cDetailedMapProperty];
-  Result.ShouldExecute := Result.Enabled and
-    ((Result.ExpectedMapFilePath = '') or not TFile.Exists(Result.ExpectedMapFilePath));
+
+  case AOptions.Mode of
+    debAlways:
+      Result.ShouldExecute := Result.Enabled;
+    debWhenMapMissing:
+      Result.ShouldExecute := Result.Enabled and
+        ((Result.ExpectedMapFilePath = '') or not TFile.Exists(Result.ExpectedMapFilePath));
+  else
+    Result.ShouldExecute := False;
+  end;
+
   Result.CommandLine := BuildCommandLine(Result);
 end;
 
 function TBuildOrchestrator.EnsureDeepEvidenceBuild(const AProjectInfo: TProjectInfo;
-  ADeepEvidenceBuildEnabled: Boolean; ADelphiVersion: Integer): TDeepEvidenceBuildResult;
+  const AOptions: TDeepEvidenceBuildOptions): TDeepEvidenceBuildResult;
 var
   LPlan: TDeepEvidenceBuildPlan;
 begin
-  LPlan := CreatePlan(AProjectInfo, ADeepEvidenceBuildEnabled, ADelphiVersion);
+  LPlan := CreatePlan(AProjectInfo, AOptions);
   Result := ExecutePlan(LPlan);
+end;
+
+function TBuildOrchestrator.FindBuildScriptFromDirectory(const AStartDirectory: string): string;
+var
+  LCandidate: string;
+  LCurrentDirectory: string;
+  LParentDirectory: string;
+  LLevel: Integer;
+begin
+  Result := '';
+  if AStartDirectory = '' then
+    Exit;
+
+  LCurrentDirectory := TPath.GetFullPath(AStartDirectory);
+  for LLevel := 0 to 6 do
+  begin
+    LCandidate := TPath.Combine(LCurrentDirectory, 'DelphiBuildDPROJ.ps1');
+    if TFile.Exists(LCandidate) then
+      Exit(LCandidate);
+
+    LCandidate := TPath.Combine(LCurrentDirectory, 'build\DelphiBuildDPROJ.ps1');
+    if TFile.Exists(LCandidate) then
+      Exit(LCandidate);
+
+    LParentDirectory := TPath.GetDirectoryName(LCurrentDirectory);
+    if SameText(LParentDirectory, LCurrentDirectory) then
+      Break;
+
+    LCurrentDirectory := LParentDirectory;
+  end;
 end;
 
 function TBuildOrchestrator.ExecutePlan(const APlan: TDeepEvidenceBuildPlan): TDeepEvidenceBuildResult;
@@ -235,9 +323,36 @@ begin
   Result := TPath.GetFullPath(TPath.Combine(LProjectDir, '..'));
 end;
 
+function TBuildOrchestrator.GetModuleDirectory: string;
+var
+  LBuffer: array[0..MAX_PATH * 4] of Char;
+  LLength: Cardinal;
+begin
+  Result := '';
+  LLength := GetModuleFileName(HInstance, LBuffer, Length(LBuffer));
+  if LLength > 0 then
+    Result := TPath.GetDirectoryName(string(LBuffer));
+
+  if (Result = '') and (ParamStr(0) <> '') then
+    Result := TPath.GetDirectoryName(ParamStr(0));
+end;
+
 function TBuildOrchestrator.QuoteArgument(const AValue: string): string;
 begin
   Result := '"' + StringReplace(AValue, '"', '""', [rfReplaceAll]) + '"';
+end;
+
+function TBuildOrchestrator.ResolveBuildScriptPath(const AProjectInfo: TProjectInfo;
+  const ABuildScriptPathOverride: string): string;
+begin
+  if Trim(ABuildScriptPathOverride) <> '' then
+    Exit(TPath.GetFullPath(ABuildScriptPathOverride));
+
+  Result := FindBuildScriptFromDirectory(GetModuleDirectory);
+  if Result <> '' then
+    Exit;
+
+  Result := FindBuildScriptFromDirectory(GetRepositoryRoot(AProjectInfo));
 end;
 
 end.

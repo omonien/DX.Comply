@@ -30,6 +30,8 @@ type
   TBuildOrchestratorTests = class
   private
     FBuildOrchestrator: IBuildOrchestrator;
+    function BuildOptions(AMode: TDeepEvidenceBuildMode;
+      const ABuildScriptPathOverride: string = ''; ADelphiVersion: Integer = 0): TDeepEvidenceBuildOptions;
   public
     [Setup]
     procedure Setup;
@@ -51,6 +53,12 @@ type
     /// </summary>
     [Test]
     procedure CreatePlan_MapExists_SkipsExecution;
+
+    /// <summary>
+    /// An explicit build script override must be used verbatim.
+    /// </summary>
+    [Test]
+    procedure CreatePlan_UsesBuildScriptOverride;
   end;
 
 implementation
@@ -58,6 +66,15 @@ implementation
 uses
   System.IOUtils,
   System.SysUtils;
+
+function TBuildOrchestratorTests.BuildOptions(AMode: TDeepEvidenceBuildMode;
+  const ABuildScriptPathOverride: string; ADelphiVersion: Integer): TDeepEvidenceBuildOptions;
+begin
+  Result := TDeepEvidenceBuildOptions.Default;
+  Result.Mode := AMode;
+  Result.BuildScriptPathOverride := ABuildScriptPathOverride;
+  Result.DelphiVersion := ADelphiVersion;
+end;
 
 procedure TBuildOrchestratorTests.Setup;
 begin
@@ -77,7 +94,7 @@ begin
     LProjectInfo.Configuration := 'Debug';
     LProjectInfo.MapFilePath := 'C:\Repo\build\Win32\Debug\DX.Comply.Engine.map';
 
-    LPlan := FBuildOrchestrator.CreatePlan(LProjectInfo, False, 0);
+    LPlan := FBuildOrchestrator.CreatePlan(LProjectInfo, BuildOptions(debDisabled));
 
     Assert.IsFalse(LPlan.ShouldExecute,
       'Disabled Deep-Evidence builds must not produce an execution plan');
@@ -102,7 +119,7 @@ begin
       LProjectInfo.Configuration := 'Debug';
       LProjectInfo.MapFilePath := LMapFilePath;
 
-      LPlan := FBuildOrchestrator.CreatePlan(LProjectInfo, True, 0);
+      LPlan := FBuildOrchestrator.CreatePlan(LProjectInfo, BuildOptions(debWhenMapMissing));
 
       Assert.IsFalse(LPlan.ShouldExecute,
         'An existing map file must suppress a redundant Deep-Evidence build');
@@ -128,12 +145,11 @@ begin
     LProjectInfo.Configuration := 'Release';
     LProjectInfo.MapFilePath := 'C:\Repo\build\Win64\Release\DX.Comply.Engine.map';
 
-    LPlan := FBuildOrchestrator.CreatePlan(LProjectInfo, True, 13);
+    LPlan := FBuildOrchestrator.CreatePlan(LProjectInfo,
+      BuildOptions(debWhenMapMissing, '', 13));
 
     Assert.IsTrue(LPlan.ShouldExecute,
       'A missing map file must trigger a Deep-Evidence build plan');
-    Assert.AreEqual('C:\Repo\build\DelphiBuildDPROJ.ps1', LPlan.ScriptPath,
-      'The build script path must resolve relative to the repository root');
     Assert.AreEqual(NativeInt(1), NativeInt(Length(LPlan.AdditionalMSBuildProperties)),
       'The plan must append one MSBuild property to force detailed map generation');
     Assert.AreEqual('DCC_MapFile=3', LPlan.AdditionalMSBuildProperties[0],
@@ -142,6 +158,33 @@ begin
       'The requested Delphi version must be forwarded into the build command line');
     Assert.IsTrue(Pos('-AdditionalMSBuildProperties "DCC_MapFile=3"', LPlan.CommandLine) > 0,
       'The command line must forward the detailed map property to the build script');
+  finally
+    LProjectInfo.Free;
+  end;
+end;
+
+procedure TBuildOrchestratorTests.CreatePlan_UsesBuildScriptOverride;
+var
+  LPlan: TDeepEvidenceBuildPlan;
+  LProjectInfo: TProjectInfo;
+  LScriptPath: string;
+begin
+  LProjectInfo := TProjectInfo.Create;
+  try
+    LProjectInfo.ProjectPath := 'C:\Repo\src\DX.Comply.Engine.dproj';
+    LProjectInfo.ProjectDir := 'C:\Repo\src';
+    LProjectInfo.Platform := 'Win64';
+    LProjectInfo.Configuration := 'Release';
+    LProjectInfo.MapFilePath := 'C:\Repo\build\Win64\Release\DX.Comply.Engine.map';
+    LScriptPath := 'C:\Tools\DelphiBuildDPROJ.ps1';
+
+    LPlan := FBuildOrchestrator.CreatePlan(LProjectInfo,
+      BuildOptions(debAlways, LScriptPath, 37));
+
+    Assert.AreEqual(TPath.GetFullPath(LScriptPath), LPlan.ScriptPath,
+      'The explicit build script override must take precedence over automatic discovery');
+    Assert.IsTrue(LPlan.ShouldExecute,
+      'The Always mode must force an explicit Deep-Evidence build');
   finally
     LProjectInfo.Free;
   end;

@@ -1,4 +1,4 @@
-/// <summary>
+﻿/// <summary>
 /// DX.Comply.BuildEvidence.Reader
 /// First-pass implementation of normalized build evidence collection.
 /// </summary>
@@ -88,6 +88,7 @@ function TBuildEvidenceReader.Read(const AProjectInfo: TProjectInfo): TBuildEvid
 var
   LMapUnitName: string;
   LMapUnitNames: TArray<string>;
+  LRsmFilePath: string;
   LRuntimePackage: string;
 begin
   Result := TBuildEvidence.Create;
@@ -139,6 +140,16 @@ begin
       for LMapUnitName in LMapUnitNames do
         AddEvidenceItem(Result, besMapFile, 'Unit from map file',
           AProjectInfo.MapFilePath, '', LMapUnitName, 'LineNumbersSection');
+    end;
+
+    if not TFile.Exists(AProjectInfo.MapFilePath) then
+    begin
+      Result.Warnings.Add('No detailed MAP file found: ' + AProjectInfo.MapFilePath);
+
+      LRsmFilePath := ChangeFileExt(AProjectInfo.MapFilePath, '.rsm');
+      if TFile.Exists(LRsmFilePath) then
+        Result.Warnings.Add('Found RSM file without matching MAP file: ' + LRsmFilePath +
+          '. Deep-Evidence unit resolution currently requires a detailed MAP file.');
     end;
   end;
 

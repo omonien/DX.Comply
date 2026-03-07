@@ -71,10 +71,16 @@ type
     Platform: string;
     /// <summary>Build configuration.</summary>
     Configuration: string;
-    /// <summary>If true, explicitly trigger a build to collect Deep-Evidence inputs.</summary>
-    DeepEvidenceBuild: Boolean;
+    /// <summary>Controls whether Deep-Evidence builds are disabled, conditional, or forced.</summary>
+    DeepEvidenceMode: TDeepEvidenceBuildMode;
     /// <summary>Optional Delphi major version to use for the Deep-Evidence build.</summary>
     DeepEvidenceDelphiVersion: Integer;
+    /// <summary>Optional override path to DelphiBuildDPROJ.ps1.</summary>
+    DeepEvidenceBuildScriptPath: string;
+    /// <summary>Continue SBOM generation when the Deep-Evidence build fails.</summary>
+    ContinueOnDeepEvidenceBuildFailure: Boolean;
+    /// <summary>Emit a warning when no composition units could be resolved.</summary>
+    WarnOnEmptyCompositionEvidence: Boolean;
     /// <summary>Creates a new TSbomConfig with default values.</summary>
     class function Default: TSbomConfig; static;
   end;
@@ -105,8 +111,13 @@ type
     function LoadConfig(const AConfigPath: string): TSbomConfig;
     function CreateWriter(AFormat: TSbomFormat): ISbomWriter;
     function BuildMetadata(const AConfig: TSbomConfig): TSbomMetadata;
+    function BuildDeepEvidenceOptions: TDeepEvidenceBuildOptions;
+    function BuildEmptyCompositionWarning(const AProjectInfo: TProjectInfo;
+      const ABuildEvidence: TBuildEvidence): string;
     function EnsureDeepEvidenceBuild(const AProjectInfo: TProjectInfo): TDeepEvidenceBuildResult;
     function ReadBuildEvidence(const AProjectInfo: TProjectInfo): TBuildEvidence;
+    procedure ReportWarnings(const AWarnings, AReportedWarnings: TList<string>;
+      const AProgress: Integer);
     function ResolveCompositionEvidence(const AProjectInfo: TProjectInfo;
       const ABuildEvidence: TBuildEvidence): TCompositionEvidence;
   public
@@ -164,8 +175,11 @@ begin
   Result.Format := sfCycloneDxJson;
   Result.Platform := 'Win32';
   Result.Configuration := 'Release';
-  Result.DeepEvidenceBuild := False;
+  Result.DeepEvidenceMode := debDisabled;
   Result.DeepEvidenceDelphiVersion := 0;
+  Result.DeepEvidenceBuildScriptPath := '';
+  Result.ContinueOnDeepEvidenceBuildFailure := False;
+  Result.WarnOnEmptyCompositionEvidence := False;
   Result.ProductName := '';
   Result.ProductVersion := '';
   Result.Supplier := '';
@@ -213,17 +227,79 @@ begin
     Result := TBuildEvidence.Create;
 end;
 
+function TDxComplyGenerator.BuildDeepEvidenceOptions: TDeepEvidenceBuildOptions;
+begin
+  Result := TDeepEvidenceBuildOptions.Default;
+  Result.Mode := FConfig.DeepEvidenceMode;
+  Result.DelphiVersion := FConfig.DeepEvidenceDelphiVersion;
+  Result.BuildScriptPathOverride := FConfig.DeepEvidenceBuildScriptPath;
+end;
+
+function TDxComplyGenerator.BuildEmptyCompositionWarning(const AProjectInfo: TProjectInfo;
+  const ABuildEvidence: TBuildEvidence): string;
+var
+  LEvidenceItem: TBuildEvidenceItem;
+  LHasMapFileEvidence: Boolean;
+  LHasMapUnitEvidence: Boolean;
+begin
+  LHasMapFileEvidence := False;
+  LHasMapUnitEvidence := False;
+
+  for LEvidenceItem in ABuildEvidence.EvidenceItems do
+  begin
+    if LEvidenceItem.SourceKind <> besMapFile then
+      Continue;
+
+    LHasMapFileEvidence := True;
+    if Trim(LEvidenceItem.UnitName) <> '' then
+    begin
+      LHasMapUnitEvidence := True;
+      Break;
+    end;
+  end;
+
+  if LHasMapUnitEvidence then
+    Exit('No composition units were resolved although map evidence was present. The generated SBOM may be incomplete.');
+
+  if LHasMapFileEvidence then
+    Exit('No composition units were resolved. The detailed MAP file did not expose any unit entries that could be transformed into composition evidence.');
+
+  Result := 'No composition units were resolved. The generated SBOM contains artefact-level evidence only because no detailed MAP evidence was available.';
+  if AProjectInfo.MapFilePath <> '' then
+    Result := Result + ' Expected MAP file: ' + AProjectInfo.MapFilePath;
+end;
+
 function TDxComplyGenerator.EnsureDeepEvidenceBuild(
   const AProjectInfo: TProjectInfo): TDeepEvidenceBuildResult;
 begin
   if Assigned(FBuildOrchestrator) then
     Result := FBuildOrchestrator.EnsureDeepEvidenceBuild(AProjectInfo,
-      FConfig.DeepEvidenceBuild, FConfig.DeepEvidenceDelphiVersion)
+      BuildDeepEvidenceOptions)
   else
   begin
     Result := Default(TDeepEvidenceBuildResult);
     Result.Success := True;
     Result.Message := 'No build orchestrator assigned.';
+  end;
+end;
+
+procedure TDxComplyGenerator.ReportWarnings(const AWarnings,
+  AReportedWarnings: TList<string>; const AProgress: Integer);
+var
+  LWarning: string;
+begin
+  if not Assigned(AWarnings) or not Assigned(AReportedWarnings) then
+    Exit;
+
+  for LWarning in AWarnings do
+  begin
+    if Trim(LWarning) = '' then
+      Continue;
+    if AReportedWarnings.Contains(LWarning) then
+      Continue;
+
+    AReportedWarnings.Add(LWarning);
+    DoProgress('Warning: ' + LWarning, AProgress);
   end;
 end;
 
@@ -261,7 +337,11 @@ var
   LJson: TJSONObject;
   LContent: TStringList;
   LArray: TJSONArray;
+  LDeepEvidence: TJSONObject;
   LFormatStr: string;
+  LModeStr: string;
+  LProduct: TJSONObject;
+  LWarnings: TJSONObject;
   I: Integer;
 begin
   Result := TSbomConfig.Default;
@@ -313,7 +393,7 @@ begin
         // Product info
         if LJson.GetValue('product') <> nil then
         begin
-          var LProduct := LJson.GetValue('product') as TJSONObject;
+          LProduct := LJson.GetValue('product') as TJSONObject;
           if LProduct.GetValue('name') <> nil then
             Result.ProductName := LProduct.GetValue<string>('name');
           if LProduct.GetValue('version') <> nil then
@@ -325,11 +405,39 @@ begin
         // Deep Evidence
         if LJson.GetValue('deepEvidence') is TJSONObject then
         begin
-          var LDeepEvidence := LJson.GetValue('deepEvidence') as TJSONObject;
+          LDeepEvidence := LJson.GetValue('deepEvidence') as TJSONObject;
+          if LDeepEvidence.GetValue('mode') <> nil then
+          begin
+            LModeStr := LowerCase(LDeepEvidence.GetValue<string>('mode'));
+            if LModeStr = 'always' then
+              Result.DeepEvidenceMode := debAlways
+            else if (LModeStr = 'missing') or (LModeStr = 'when-missing') then
+              Result.DeepEvidenceMode := debWhenMapMissing
+            else
+              Result.DeepEvidenceMode := debDisabled;
+          end;
           if LDeepEvidence.GetValue('build') <> nil then
-            Result.DeepEvidenceBuild := LDeepEvidence.GetValue<Boolean>('build');
+          begin
+            if LDeepEvidence.GetValue<Boolean>('build') then
+              Result.DeepEvidenceMode := debWhenMapMissing
+            else
+              Result.DeepEvidenceMode := debDisabled;
+          end;
           if LDeepEvidence.GetValue('delphiVersion') <> nil then
             Result.DeepEvidenceDelphiVersion := LDeepEvidence.GetValue<Integer>('delphiVersion');
+          if LDeepEvidence.GetValue('buildScriptPath') <> nil then
+            Result.DeepEvidenceBuildScriptPath := LDeepEvidence.GetValue<string>('buildScriptPath');
+          if LDeepEvidence.GetValue('continueOnBuildFailure') <> nil then
+            Result.ContinueOnDeepEvidenceBuildFailure :=
+              LDeepEvidence.GetValue<Boolean>('continueOnBuildFailure');
+        end;
+
+        if LJson.GetValue('warnings') is TJSONObject then
+        begin
+          LWarnings := LJson.GetValue('warnings') as TJSONObject;
+          if LWarnings.GetValue('warnOnEmptyCompositionEvidence') <> nil then
+            Result.WarnOnEmptyCompositionEvidence :=
+              LWarnings.GetValue<Boolean>('warnOnEmptyCompositionEvidence');
         end;
       end;
     finally
@@ -361,6 +469,7 @@ var
   LMetadata: TSbomMetadata;
   LOutputPath: string;
   LFormat: TSbomFormat;
+  LReportedWarnings: TList<string>;
 begin
   Result := False;
 
@@ -377,30 +486,40 @@ begin
   LProjectInfo := Default(TProjectInfo);
   LBuildEvidence := Default(TBuildEvidence);
   LCompositionEvidence := Default(TCompositionEvidence);
+  LReportedWarnings := TList<string>.Create;
   try
     LProjectInfo := FProjectScanner.Scan(AProjectPath, FConfig.Platform, FConfig.Configuration);
   except
     on E: Exception do
     begin
       DoProgress('Error: Failed to read project file: ' + E.Message, -1);
+      LReportedWarnings.Free;
       Exit;
     end;
   end;
 
   try
-    if FConfig.DeepEvidenceBuild then
+    ReportWarnings(LProjectInfo.Warnings, LReportedWarnings, 12);
+
+    if FConfig.DeepEvidenceMode <> debDisabled then
     begin
       DoProgress('Ensuring Deep-Evidence build...', 15);
       LDeepEvidenceBuildResult := EnsureDeepEvidenceBuild(LProjectInfo);
       if not LDeepEvidenceBuildResult.Success then
       begin
-        DoProgress('Error: ' + LDeepEvidenceBuildResult.Message, -1);
-        Exit;
+        if FConfig.ContinueOnDeepEvidenceBuildFailure then
+          DoProgress('Warning: Deep-Evidence build failed and SBOM generation continues without rebuilt MAP evidence. ' +
+            LDeepEvidenceBuildResult.Message, 18)
+        else
+        begin
+          DoProgress('Error: ' + LDeepEvidenceBuildResult.Message, -1);
+          Exit;
+        end;
       end;
 
-      if LDeepEvidenceBuildResult.Executed then
+      if LDeepEvidenceBuildResult.Success and LDeepEvidenceBuildResult.Executed then
         DoProgress('Deep-Evidence build completed.', 18)
-      else
+      else if LDeepEvidenceBuildResult.Success then
         DoProgress(LDeepEvidenceBuildResult.Message, 18);
     end;
 
@@ -408,11 +527,15 @@ begin
     LBuildEvidence := ReadBuildEvidence(LProjectInfo);
     DoProgress(Format('Collected %d build evidence item(s)',
       [LBuildEvidence.EvidenceItems.Count]), 25);
+    ReportWarnings(LBuildEvidence.Warnings, LReportedWarnings, 26);
 
     DoProgress('Resolving composition evidence...', 28);
     LCompositionEvidence := ResolveCompositionEvidence(LProjectInfo, LBuildEvidence);
     DoProgress(Format('Resolved %d composition unit(s)',
       [LCompositionEvidence.Units.Count]), 29);
+    ReportWarnings(LCompositionEvidence.Warnings, LReportedWarnings, 29);
+    if FConfig.WarnOnEmptyCompositionEvidence and (LCompositionEvidence.Units.Count = 0) then
+      DoProgress('Warning: ' + BuildEmptyCompositionWarning(LProjectInfo, LBuildEvidence), 29);
 
     DoProgress('Scanning build output...', 30);
 
@@ -481,6 +604,7 @@ begin
       LArtefacts.Free;
     end;
   finally
+    LReportedWarnings.Free;
     LCompositionEvidence.Free;
     LBuildEvidence.Free;
     LProjectInfo.Free;

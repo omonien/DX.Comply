@@ -28,6 +28,7 @@ uses
   System.JSON,
   System.Generics.Collections,
   DUnitX.TestFramework,
+  DX.Comply.BuildOrchestrator,
   DX.Comply.Engine,
   DX.Comply.Engine.Intf;
 
@@ -352,10 +353,14 @@ var
   LConfig: TSbomConfig;
 begin
   LConfig := TSbomConfig.Default;
-  Assert.IsFalse(LConfig.DeepEvidenceBuild,
-    'TSbomConfig.Default.DeepEvidenceBuild must be False');
+  Assert.AreEqual(NativeInt(Ord(debDisabled)), NativeInt(Ord(LConfig.DeepEvidenceMode)),
+    'TSbomConfig.Default.DeepEvidenceMode must be debDisabled');
   Assert.AreEqual(0, LConfig.DeepEvidenceDelphiVersion,
     'TSbomConfig.Default.DeepEvidenceDelphiVersion must be 0');
+  Assert.AreEqual('', LConfig.DeepEvidenceBuildScriptPath,
+    'TSbomConfig.Default.DeepEvidenceBuildScriptPath must be empty');
+  Assert.IsFalse(LConfig.WarnOnEmptyCompositionEvidence,
+    'TSbomConfig.Default.WarnOnEmptyCompositionEvidence must be False');
 end;
 
 initialization

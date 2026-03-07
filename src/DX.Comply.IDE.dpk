@@ -49,6 +49,9 @@ contains
   DX.Comply.Schema.Validator in 'DX.Comply.Schema.Validator.pas',
   DX.Comply.Engine in 'DX.Comply.Engine.pas',
   DX.Comply.IDE.Logger in 'DX.Comply.IDE.Logger.pas',
+  DX.Comply.IDE.Settings in 'DX.Comply.IDE.Settings.pas',
+  DX.Comply.IDE.OptionsFrame in 'DX.Comply.IDE.OptionsFrame.pas',
+  DX.Comply.IDE.Options in 'DX.Comply.IDE.Options.pas',
   DX.Comply.IDE.Wizard in 'DX.Comply.IDE.Wizard.pas';
 
 end.
