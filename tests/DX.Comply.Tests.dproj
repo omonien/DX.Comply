@@ -95,6 +95,7 @@
         <DCCReference Include="DX.Comply.Tests.CycloneDx.XmlWriter.pas"/>
         <DCCReference Include="DX.Comply.Tests.Spdx.Writer.pas"/>
         <DCCReference Include="DX.Comply.Tests.Schema.Validator.pas"/>
+        <DCCReference Include="DX.Comply.Tests.IDE.Settings.pas"/>
         <DCCReference Include="DX.Comply.Tests.Engine.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>

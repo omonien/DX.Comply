@@ -37,6 +37,7 @@ uses
   DX.Comply.Tests.CycloneDx.XmlWriter in 'DX.Comply.Tests.CycloneDx.XmlWriter.pas',
   DX.Comply.Tests.Spdx.Writer in 'DX.Comply.Tests.Spdx.Writer.pas',
   DX.Comply.Tests.Schema.Validator in 'DX.Comply.Tests.Schema.Validator.pas',
+  DX.Comply.Tests.IDE.Settings in 'DX.Comply.Tests.IDE.Settings.pas',
   DX.Comply.Tests.Engine in 'DX.Comply.Tests.Engine.pas';
 
 var
