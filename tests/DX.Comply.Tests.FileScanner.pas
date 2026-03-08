@@ -67,6 +67,10 @@ type
     [Test]
     procedure Scan_DefaultExtensions_IncludesBpl;
 
+    /// <summary>Default scan must exclude non-shipped Delphi build evidence files.</summary>
+    [Test]
+    procedure Scan_DefaultExtensions_ExcludesBuildEvidenceFiles;
+
     // ---- Pattern-driven filtering --------------------------------------------
 
     /// <summary>Passing ['*.dll'] as exclude must remove dll files from results.</summary>
@@ -76,6 +80,10 @@ type
     /// <summary>Passing ['*.exe'] as include must return only exe files.</summary>
     [Test]
     procedure Scan_IncludePattern_OnlyReturnsMatching;
+
+    /// <summary>Explicit include patterns may still opt into .res files.</summary>
+    [Test]
+    procedure Scan_IncludePattern_CanOptIntoResourceFiles;
 
     // ---- Metadata correctness ------------------------------------------------
 
@@ -144,6 +152,16 @@ begin
   // 2-byte .dcu — must NOT appear in default-extension results
   TFile.WriteAllBytes(TPath.Combine(FTempDir, 'test.dcu'),
     TBytes.Create($FF, $FE));
+
+  // Build evidence and intermediate files must not be treated as shipped artefacts by default
+  TFile.WriteAllBytes(TPath.Combine(FTempDir, 'test.res'),
+    TBytes.Create($01, $02, $03));
+  TFile.WriteAllBytes(TPath.Combine(FTempDir, 'test.map'),
+    TBytes.Create($10, $11, $12));
+  TFile.WriteAllBytes(TPath.Combine(FTempDir, 'test.rsm'),
+    TBytes.Create($20, $21, $22));
+  TFile.WriteAllBytes(TPath.Combine(FTempDir, 'test.tvsconfig'),
+    TBytes.Create($30, $31, $32));
 
   // 10-byte .bpl in a subdirectory — tests recursion
   LSubDir := TPath.Combine(FTempDir, 'subdir');
@@ -253,6 +271,27 @@ begin
   end;
 end;
 
+procedure TFileScannerTests.Scan_DefaultExtensions_ExcludesBuildEvidenceFiles;
+var
+  LScanner: IFileScanner;
+  LResult: TArtefactList;
+begin
+  LScanner := TFileScanner.Create;
+  LResult := LScanner.Scan(FTempDir, [], []);
+  try
+    Assert.IsFalse(ContainsFile(LResult, 'test.res'),
+      '.res files must not be included by default because they are build evidence, not shipped artefacts');
+    Assert.IsFalse(ContainsFile(LResult, 'test.map'),
+      '.map files must not be included by default because they are build evidence, not shipped artefacts');
+    Assert.IsFalse(ContainsFile(LResult, 'test.rsm'),
+      '.rsm files must not be included by default because they are build evidence, not shipped artefacts');
+    Assert.IsFalse(ContainsFile(LResult, 'test.tvsconfig'),
+      '.tvsconfig files must not be included by default because they are configuration/evidence files, not shipped artefacts');
+  finally
+    LResult.Free;
+  end;
+end;
+
 // ---- Pattern-driven filtering -----------------------------------------------
 
 procedure TFileScannerTests.Scan_ExcludePattern_ExcludesMatchingFiles;
@@ -281,6 +320,23 @@ begin
     Assert.IsTrue(ContainsFile(LResult, 'test.exe'), '*.exe include must include the exe file');
     Assert.IsFalse(ContainsFile(LResult, 'test.dll'), '*.exe include must exclude the dll file');
     Assert.IsFalse(ContainsFile(LResult, 'test.bpl'), '*.exe include must exclude the bpl file');
+  finally
+    LResult.Free;
+  end;
+end;
+
+procedure TFileScannerTests.Scan_IncludePattern_CanOptIntoResourceFiles;
+var
+  LScanner: IFileScanner;
+  LResult: TArtefactList;
+begin
+  LScanner := TFileScanner.Create;
+  LResult := LScanner.Scan(FTempDir, ['*.res'], []);
+  try
+    Assert.IsTrue(ContainsFile(LResult, 'test.res'),
+      'Explicit include patterns must still allow resource files when the caller requests them intentionally');
+    Assert.IsFalse(ContainsFile(LResult, 'test.exe'),
+      'An explicit *.res include must limit the result set to the requested resource files');
   finally
     LResult.Free;
   end;

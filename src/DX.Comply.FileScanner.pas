@@ -1,4 +1,4 @@
-/// <summary>
+﻿/// <summary>
 /// DX.Comply.FileScanner
 /// Scans build output directories for artefacts.
 /// </summary>
@@ -7,7 +7,7 @@
 /// This unit provides TFileScanner which discovers build artefacts:
 /// - Recursively scans output directories
 /// - Applies include/exclude glob patterns
-/// - Identifies artefact types (exe, dll, bpl, dcp, resources)
+/// - Identifies shipped artefact types (exe, dll, bpl, dcp)
 /// - Computes file sizes
 ///
 /// Hash computation is delegated to IHashService.
@@ -38,9 +38,9 @@ type
   TFileScanner = class(TInterfacedObject, IFileScanner)
   private
     const
-      /// <summary>Default file extensions to include.</summary>
-      cDefaultExtensions: array[0..7] of string = (
-        '.exe', '.dll', '.bpl', '.dcp', '.res', '.rsm', '.map', '.tvsconfig'
+      /// <summary>Default shipped file extensions to include.</summary>
+      cDefaultExtensions: array[0..3] of string = (
+        '.exe', '.dll', '.bpl', '.dcp'
       );
   private
     FHashService: IHashService;
