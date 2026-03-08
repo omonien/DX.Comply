@@ -352,7 +352,7 @@ begin
       LDirectSearchPaths.Add(ABuildEvidence.Paths.DcpOutputDir);
     if ABuildEvidence.Paths.BplOutputDir <> '' then
       LDirectSearchPaths.Add(ABuildEvidence.Paths.BplOutputDir);
-    for LResolvedPath in AProjectInfo.ProjectSearchPaths do
+    for LResolvedPath in ABuildEvidence.SearchPaths do
       if not LDirectSearchPaths.Contains(LResolvedPath) then
         LDirectSearchPaths.Add(LResolvedPath);
 

@@ -68,6 +68,12 @@ type
     procedure Resolve_WithExplicitProjectUnitReference_ResolvesLocalUnit;
 
     /// <summary>
+    /// Effective compiler search paths from option files must beat source fallbacks.
+    /// </summary>
+    [Test]
+    procedure Resolve_WithCompilerOptionSearchPath_PrefersDcuEvidence;
+
+    /// <summary>
     /// Global toolchain DCU paths must win over Delphi source fallbacks.
     /// </summary>
     [Test]
@@ -264,6 +270,67 @@ begin
           'A PAS file reference must resolve to PAS evidence');
         Assert.AreEqual(rcAuthoritative, LCompositionEvidence.Units[0].Confidence,
           'Explicit project references must be treated as authoritative evidence');
+      finally
+        LCompositionEvidence.Free;
+      end;
+    finally
+      LBuildEvidence.Free;
+      LProjectInfo.Free;
+    end;
+  finally
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+procedure TUnitResolverTests.Resolve_WithCompilerOptionSearchPath_PrefersDcuEvidence;
+var
+  LEvidenceItem: TBuildEvidenceItem;
+  LBuildEvidence: TBuildEvidence;
+  LCompositionEvidence: TCompositionEvidence;
+  LLibDebugRoot: string;
+  LProjectInfo: TProjectInfo;
+  LSourceRoot: string;
+  LTempDir: string;
+  LUnitDcuPath: string;
+  LUnitSourcePath: string;
+begin
+  LTempDir := TPath.Combine(TPath.GetTempPath, TPath.GetRandomFileName);
+  LLibDebugRoot := TPath.Combine(LTempDir, 'lib\Win32\debug');
+  LSourceRoot := TPath.Combine(LTempDir, 'source');
+  TDirectory.CreateDirectory(LLibDebugRoot);
+  TDirectory.CreateDirectory(TPath.Combine(LSourceRoot, 'rtl\sys'));
+  try
+    LUnitDcuPath := TPath.Combine(LLibDebugRoot, 'System.SysUtils.dcu');
+    TFile.WriteAllBytes(LUnitDcuPath, TBytes.Create($01, $02, $03, $04));
+
+    LUnitSourcePath := TPath.Combine(LSourceRoot, 'rtl\sys\System.SysUtils.pas');
+    TFile.WriteAllText(LUnitSourcePath,
+      'unit System.SysUtils;' + sLineBreak + 'interface' + sLineBreak +
+      'implementation' + sLineBreak + 'end.');
+
+    LProjectInfo := TProjectInfo.Create;
+    LBuildEvidence := TBuildEvidence.Create;
+    try
+      LProjectInfo.Toolchain.ProductName := 'Embarcadero Delphi';
+      LProjectInfo.Toolchain.RootDir := LTempDir;
+      LProjectInfo.Toolchain.Version := '37.0';
+      LProjectInfo.GlobalSearchPaths.Add(LSourceRoot);
+      LBuildEvidence.SearchPaths.Add(LLibDebugRoot);
+
+      LEvidenceItem := Default(TBuildEvidenceItem);
+      LEvidenceItem.SourceKind := besMapFile;
+      LEvidenceItem.FilePath := TPath.Combine(LTempDir, 'Demo.map');
+      LEvidenceItem.UnitName := 'System.SysUtils';
+      LBuildEvidence.EvidenceItems.Add(LEvidenceItem);
+
+      LCompositionEvidence := FResolver.Resolve(LProjectInfo, LBuildEvidence);
+      try
+        Assert.AreEqual(NativeInt(1), NativeInt(LCompositionEvidence.Units.Count));
+        Assert.AreEqual(LUnitDcuPath, LCompositionEvidence.Units[0].ResolvedPath,
+          'Effective compiler search paths must be preferred over recursive source fallbacks');
+        Assert.AreEqual(uekDcu, LCompositionEvidence.Units[0].EvidenceKind,
+          'Compiler-derived search path hits for RTL units must resolve as DCU evidence');
       finally
         LCompositionEvidence.Free;
       end;

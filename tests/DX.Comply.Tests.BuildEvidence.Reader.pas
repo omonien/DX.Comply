@@ -66,6 +66,12 @@ type
     /// </summary>
     [Test]
     procedure Read_ProjectInfo_MissingMapFile_AddsHelpfulWarnings;
+
+    /// <summary>
+    /// Compiler option files must enrich effective search paths and unit scopes.
+    /// </summary>
+    [Test]
+    procedure Read_ProjectInfo_WithCompilerOptionFiles_ParsesEffectivePathsAndScopes;
   end;
 
 implementation
@@ -279,6 +285,102 @@ begin
   finally
     if TFile.Exists(LRsmFilePath) then
       TFile.Delete(LRsmFilePath);
+  end;
+end;
+
+procedure TBuildEvidenceReaderTests.Read_ProjectInfo_WithCompilerOptionFiles_ParsesEffectivePathsAndScopes;
+var
+  LBuildEvidence: TBuildEvidence;
+  LCfgFilePath: string;
+  LEvidenceItem: TBuildEvidenceItem;
+  LGlobalSourceRoot: string;
+  LHasCfgEvidence: Boolean;
+  LHasRspEvidence: Boolean;
+  LProjectDir: string;
+  LProjectInfo: TProjectInfo;
+  LProjectPath: string;
+  LProjectSearchPath: string;
+  LRspFilePath: string;
+  LRspSearchPath: string;
+  LTempDir: string;
+  LToolchainDebugPath: string;
+  LToolchainRoot: string;
+begin
+  LTempDir := TPath.Combine(TPath.GetTempPath, TPath.GetRandomFileName);
+  LProjectDir := TPath.Combine(LTempDir, 'project');
+  LToolchainRoot := TPath.Combine(LTempDir, 'delphi');
+  LProjectSearchPath := TPath.Combine(LProjectDir, 'cfg-units');
+  LRspSearchPath := TPath.Combine(LProjectDir, 'rsp-units');
+  LToolchainDebugPath := TPath.Combine(LToolchainRoot, 'lib\Win32\debug');
+  LGlobalSourceRoot := TPath.Combine(LToolchainRoot, 'source');
+  TDirectory.CreateDirectory(LProjectSearchPath);
+  TDirectory.CreateDirectory(LRspSearchPath);
+  TDirectory.CreateDirectory(LToolchainDebugPath);
+  TDirectory.CreateDirectory(LGlobalSourceRoot);
+  try
+    LProjectPath := TPath.Combine(LProjectDir, 'Demo.dproj');
+    LCfgFilePath := ChangeFileExt(LProjectPath, '.cfg');
+    LRspFilePath := TPath.Combine(LProjectDir, 'Demo.rsp');
+
+    TFile.WriteAllText(LCfgFilePath,
+      '-U".\cfg-units" @".\Demo.rsp"', TEncoding.UTF8);
+    TFile.WriteAllText(LRspFilePath,
+      '-U".\rsp-units"' + sLineBreak +
+      '-U"$(BDSLIB)\Win32\debug"' + sLineBreak +
+      '-NS"System;Vcl"', TEncoding.UTF8);
+
+    LProjectInfo := TProjectInfo.Create;
+    try
+      LProjectInfo.ProjectName := 'Demo';
+      LProjectInfo.ProjectPath := LProjectPath;
+      LProjectInfo.ProjectDir := LProjectDir;
+      LProjectInfo.Platform := 'Win32';
+      LProjectInfo.Configuration := 'Debug';
+      LProjectInfo.Toolchain.RootDir := LToolchainRoot;
+      LProjectInfo.ProjectSearchPaths.Add(TPath.Combine(LProjectDir, 'src'));
+      LProjectInfo.GlobalSearchPaths.Add(LGlobalSourceRoot);
+
+      LBuildEvidence := FReader.Read(LProjectInfo);
+      try
+        Assert.IsTrue(LBuildEvidence.SearchPaths.Contains(LProjectSearchPath),
+          'Project CFG files must contribute effective compiler search paths');
+        Assert.IsTrue(LBuildEvidence.SearchPaths.Contains(LRspSearchPath),
+          'Nested response files must contribute effective compiler search paths');
+        Assert.IsTrue(LBuildEvidence.SearchPaths.Contains(LToolchainDebugPath),
+          'Compiler option macros such as $(BDSLIB) must resolve into effective search paths');
+        Assert.IsTrue(LBuildEvidence.UnitScopeNames.Contains('System'),
+          'Compiler option files must contribute resolved unit scope names');
+        Assert.IsTrue(LBuildEvidence.UnitScopeNames.Contains('Vcl'),
+          'Multiple unit scopes from compiler option files must be preserved');
+        Assert.IsTrue(LBuildEvidence.SearchPaths.IndexOf(LToolchainDebugPath) <
+          LBuildEvidence.SearchPaths.IndexOf(LGlobalSourceRoot),
+          'Compiler-derived DCU paths must be searched before global source fallbacks');
+
+        LHasCfgEvidence := False;
+        LHasRspEvidence := False;
+        for LEvidenceItem in LBuildEvidence.EvidenceItems do
+        begin
+          if (LEvidenceItem.SourceKind = besCompilerResponseFile) and
+             SameText(LEvidenceItem.FilePath, LCfgFilePath) then
+            LHasCfgEvidence := True;
+          if (LEvidenceItem.SourceKind = besCompilerResponseFile) and
+             SameText(LEvidenceItem.FilePath, LRspFilePath) then
+            LHasRspEvidence := True;
+        end;
+
+        Assert.IsTrue(LHasCfgEvidence,
+          'The project CFG file must be surfaced as compiler option evidence');
+        Assert.IsTrue(LHasRspEvidence,
+          'Nested response files must be surfaced as compiler option evidence');
+      finally
+        LBuildEvidence.Free;
+      end;
+    finally
+      LProjectInfo.Free;
+    end;
+  finally
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir, True);
   end;
 end;
 

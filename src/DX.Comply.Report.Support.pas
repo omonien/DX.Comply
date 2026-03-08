@@ -71,7 +71,7 @@ begin
   case AValue of
     besProjectMetadata: Result := 'Project metadata';
     besCompilerCommandLine: Result := 'Compiler command line';
-    besCompilerResponseFile: Result := 'Compiler response file';
+    besCompilerResponseFile: Result := 'Compiler option file';
     besCompileNotification: Result := 'Compile notification';
     besMapFile: Result := 'MAP file';
     besDcuFile: Result := 'DCU file';
