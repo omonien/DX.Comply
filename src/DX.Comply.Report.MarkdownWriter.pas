@@ -72,8 +72,8 @@ var
   LHasRows: Boolean;
 begin
   LHasRows := False;
-  Lines.Add('## Build Evidence Sources');
-  Lines.Add('| Source | Display Name | Unit / Package | Detail |');
+  Lines.Add('## Build Traceability');
+  Lines.Add('| Trace Type | Reference | Scope | Trace Detail |');
   Lines.Add('| --- | --- | --- | --- |');
   for LEvidenceItem in AData.BuildEvidence.EvidenceItems do
   begin
@@ -89,7 +89,7 @@ begin
   end;
 
   if not LHasRows then
-    Lines.Add('| n/a | n/a | n/a | No non-unit build evidence sources recorded. |');
+    Lines.Add('| n/a | n/a | n/a | No non-unit build trace records were recorded. |');
   Lines.Add('');
 end;
 
@@ -117,7 +117,7 @@ begin
 
     if AConfig.IncludeCompositionEvidence and AConfig.IncludeBuildEvidence then
     begin
-      Lines.Add('| Unit | Origin | Evidence | Confidence | Composition Evidence | Build Evidence | Location |');
+      Lines.Add('| Unit | Origin | Evidence | Confidence | SBOM Trace | Build Trace | Location |');
       Lines.Add('| --- | --- | --- | --- | :---: | :---: | --- |');
       for LRow in LRows do
         Lines.Add(Format('| %s | %s | %s | %s | %s | %s | %s |', [
@@ -131,7 +131,7 @@ begin
     end
     else if AConfig.IncludeCompositionEvidence then
     begin
-      Lines.Add('| Unit | Origin | Evidence | Confidence | Composition Evidence | Location |');
+      Lines.Add('| Unit | Origin | Evidence | Confidence | SBOM Trace | Location |');
       Lines.Add('| --- | --- | --- | --- | :---: | --- |');
       for LRow in LRows do
         if LRow.HasCompositionEvidence then
@@ -145,7 +145,7 @@ begin
     end
     else
     begin
-      Lines.Add('| Unit | Origin | Evidence | Confidence | Build Evidence | Location |');
+      Lines.Add('| Unit | Origin | Evidence | Confidence | Build Trace | Location |');
       Lines.Add('| --- | --- | --- | --- | :---: | --- |');
       for LRow in LRows do
         if LRow.HasBuildEvidence then
@@ -244,6 +244,7 @@ begin
     AddKeyValue(Lines, 'Version', SafeText(AData.Metadata.ProductVersion, SafeText(AData.ProjectInfo.Version)));
     AddKeyValue(Lines, 'Platform', SafeText(AData.ProjectInfo.Platform));
     AddKeyValue(Lines, 'Configuration', SafeText(AData.ProjectInfo.Configuration));
+    AddKeyValue(Lines, 'Delphi Runtime Units', DelphiRuntimeUnitsText(AData.ProjectInfo));
     AddKeyValue(Lines, 'Delphi Toolchain', SafeText(AData.ProjectInfo.Toolchain.ProductName));
     AddKeyValue(Lines, 'Delphi Version', SafeText(AData.ProjectInfo.Toolchain.Version));
     AddKeyValue(Lines, 'Delphi Build', SafeText(AData.ProjectInfo.Toolchain.BuildVersion));
@@ -255,7 +256,7 @@ begin
     Lines.Add('| Metric | Value |');
     Lines.Add('| --- | ---: |');
     AddKeyValue(Lines, 'Artefacts', IntToStr(AData.Artefacts.Count));
-    AddKeyValue(Lines, 'Build Evidence Items', IntToStr(AData.BuildEvidence.EvidenceItems.Count));
+    AddKeyValue(Lines, 'Build Trace Records', IntToStr(AData.BuildEvidence.EvidenceItems.Count));
     AddKeyValue(Lines, 'Resolved Units', IntToStr(AData.CompositionEvidence.Units.Count));
     AddKeyValue(Lines, 'Warnings', IntToStr(LWarningsCount));
     AddKeyValue(Lines, 'Deep Evidence', DeepEvidenceStatusText(AData));

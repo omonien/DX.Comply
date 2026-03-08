@@ -53,6 +53,7 @@ function ResolutionConfidenceToString(AValue: TResolutionConfidence): string;
 function ValidationStatusText(const AData: TComplianceReportData): string;
 function DeepEvidenceStatusText(const AData: TComplianceReportData): string;
 function SafeText(const AValue: string; const AFallback: string = 'n/a'): string;
+function DelphiRuntimeUnitsText(const AProjectInfo: TProjectInfo): string;
 function HumanReadableReportTitle: string;
 function HumanReadableReportSubtitle: string;
 function HumanReadableReportGenerator: string;
@@ -70,14 +71,14 @@ function BuildEvidenceSourceKindToString(AValue: TBuildEvidenceSourceKind): stri
 begin
   case AValue of
     besProjectMetadata: Result := 'Project metadata';
-    besCompilerCommandLine: Result := 'Compiler command line';
-    besCompilerResponseFile: Result := 'Compiler option file';
-    besCompileNotification: Result := 'Compile notification';
+    besCompilerCommandLine: Result := 'Compiler invocation';
+    besCompilerResponseFile: Result := 'Compiler options file';
+    besCompileNotification: Result := 'Compiler notification';
     besMapFile: Result := 'MAP file';
     besDcuFile: Result := 'DCU file';
     besDcpFile: Result := 'DCP file';
     besBplFile: Result := 'BPL file';
-    besSearchPathFallback: Result := 'Search path fallback';
+    besSearchPathFallback: Result := 'Search path inference';
     besManualOverride: Result := 'Manual override';
   else
     Result := 'Unknown';
@@ -93,6 +94,13 @@ begin
   if AData.DeepEvidenceResult.Executed then
     Exit('Executed successfully');
   Result := SafeText(AData.DeepEvidenceResult.Message, 'Skipped');
+end;
+
+function DelphiRuntimeUnitsText(const AProjectInfo: TProjectInfo): string;
+begin
+  if AProjectInfo.UsesDebugDCUs then
+    Exit('Debug DCUs');
+  Result := 'Release DCUs';
 end;
 
 function HumanReadableReportGenerator: string;

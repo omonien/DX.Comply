@@ -70,7 +70,7 @@ var
   LHasRows: Boolean;
 begin
   LHasRows := False;
-  Lines.Add('<section><h2>Build Evidence Sources</h2><table><thead><tr><th>Source</th><th>Display Name</th><th>Unit / Package</th><th>Detail</th></tr></thead><tbody>');
+  Lines.Add('<section><h2>Build Traceability</h2><table><thead><tr><th>Trace Type</th><th>Reference</th><th>Scope</th><th>Trace Detail</th></tr></thead><tbody>');
   for LEvidenceItem in AData.BuildEvidence.EvidenceItems do
   begin
     if Trim(LEvidenceItem.UnitName) <> '' then
@@ -85,7 +85,7 @@ begin
   end;
 
   if not LHasRows then
-    Lines.Add('<tr><td>n/a</td><td>n/a</td><td>n/a</td><td>No non-unit build evidence sources recorded.</td></tr>');
+    Lines.Add('<tr><td>n/a</td><td>n/a</td><td>n/a</td><td>No non-unit build trace records were recorded.</td></tr>');
   Lines.Add('</tbody></table></section>');
 end;
 
@@ -105,11 +105,11 @@ begin
   try
     Lines.Add('<section><h2>Unit Evidence</h2><table><thead>');
     if AConfig.IncludeCompositionEvidence and AConfig.IncludeBuildEvidence then
-      Lines.Add('<tr><th>Unit</th><th>Origin</th><th>Evidence</th><th>Confidence</th><th>Composition Evidence</th><th>Build Evidence</th><th>Location</th></tr>')
+      Lines.Add('<tr><th>Unit</th><th>Origin</th><th>Evidence</th><th>Confidence</th><th>SBOM Trace</th><th>Build Trace</th><th>Location</th></tr>')
     else if AConfig.IncludeCompositionEvidence then
-      Lines.Add('<tr><th>Unit</th><th>Origin</th><th>Evidence</th><th>Confidence</th><th>Composition Evidence</th><th>Location</th></tr>')
+      Lines.Add('<tr><th>Unit</th><th>Origin</th><th>Evidence</th><th>Confidence</th><th>SBOM Trace</th><th>Location</th></tr>')
     else
-      Lines.Add('<tr><th>Unit</th><th>Origin</th><th>Evidence</th><th>Confidence</th><th>Build Evidence</th><th>Location</th></tr>');
+      Lines.Add('<tr><th>Unit</th><th>Origin</th><th>Evidence</th><th>Confidence</th><th>Build Trace</th><th>Location</th></tr>');
     Lines.Add('</thead><tbody>');
 
     for LRow in LRows do
@@ -239,7 +239,7 @@ begin
     Lines.Add('</section>');
     Lines.Add('<div class="cards">');
     AddSummaryCard(Lines, 'Artefacts', IntToStr(AData.Artefacts.Count), 'good');
-    AddSummaryCard(Lines, 'Build Evidence Items', IntToStr(AData.BuildEvidence.EvidenceItems.Count), 'good');
+    AddSummaryCard(Lines, 'Build Trace Records', IntToStr(AData.BuildEvidence.EvidenceItems.Count), 'good');
     AddSummaryCard(Lines, 'Resolved Units', IntToStr(AData.CompositionEvidence.Units.Count), 'good');
     AddSummaryCard(Lines, 'Warnings', IntToStr(LWarningsCount), 'warn');
     AddSummaryCard(Lines, 'Deep Evidence', DeepEvidenceStatusText(AData), 'warn');
@@ -249,6 +249,7 @@ begin
     Lines.Add('<tr><th>Version</th><td>' + EscapeHtml(SafeText(AData.Metadata.ProductVersion, SafeText(AData.ProjectInfo.Version))) + '</td></tr>');
     Lines.Add('<tr><th>Platform</th><td>' + EscapeHtml(SafeText(AData.ProjectInfo.Platform)) + '</td></tr>');
     Lines.Add('<tr><th>Configuration</th><td>' + EscapeHtml(SafeText(AData.ProjectInfo.Configuration)) + '</td></tr>');
+    Lines.Add('<tr><th>Delphi Runtime Units</th><td>' + EscapeHtml(DelphiRuntimeUnitsText(AData.ProjectInfo)) + '</td></tr>');
     Lines.Add('<tr><th>Delphi Toolchain</th><td>' + EscapeHtml(SafeText(AData.ProjectInfo.Toolchain.ProductName)) + '</td></tr>');
     Lines.Add('<tr><th>Delphi Version</th><td>' + EscapeHtml(SafeText(AData.ProjectInfo.Toolchain.Version)) + '</td></tr>');
     Lines.Add('<tr><th>Delphi Build</th><td>' + EscapeHtml(SafeText(AData.ProjectInfo.Toolchain.BuildVersion)) + '</td></tr>');
