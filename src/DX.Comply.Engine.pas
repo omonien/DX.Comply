@@ -542,6 +542,7 @@ function TDxComplyGenerator.BuildMetadata(const AConfig: TSbomConfig;
 var
   LBomProperties: TList<TSbomProperty>;
   LComponentProperties: TList<TSbomProperty>;
+  LUnitEvidenceRows: TConsolidatedUnitEvidenceRowList;
 
   const
     cPropertyNamespace = 'net.developer-experts.dx-comply';
@@ -605,6 +606,35 @@ var
 
     Result := Trim(AProjectInfo.MapFilePath);
   end;
+
+  procedure AddConsolidatedUnitEvidenceProperties;
+  var
+    LPropertyGroup: string;
+    LRow: TConsolidatedUnitEvidenceRow;
+    LRowIndex: Integer;
+  begin
+    LUnitEvidenceRows := BuildConsolidatedUnitEvidenceRows(ABuildEvidence,
+      ACompositionEvidence);
+    AddComponentProperty(PropertyName('unit-evidence', 'count'),
+      IntToStr(LUnitEvidenceRows.Count));
+
+    for LRowIndex := 0 to LUnitEvidenceRows.Count - 1 do
+    begin
+      LRow := LUnitEvidenceRows[LRowIndex];
+      LPropertyGroup := 'unit-evidence.' + FormatFloat('0000', LRowIndex + 1);
+      AddComponentProperty(PropertyName(LPropertyGroup, 'name'), LRow.UnitName);
+      AddComponentProperty(PropertyName(LPropertyGroup, 'origin'), LRow.Origin);
+      AddComponentProperty(PropertyName(LPropertyGroup, 'evidence'), LRow.Evidence);
+      AddComponentProperty(PropertyName(LPropertyGroup, 'confidence'),
+        LRow.Confidence);
+      AddComponentProperty(PropertyName(LPropertyGroup, 'sbom-trace'),
+        BoolToMetadataValue(LRow.HasCompositionEvidence));
+      AddComponentProperty(PropertyName(LPropertyGroup, 'build-trace'),
+        BoolToMetadataValue(LRow.HasBuildEvidence));
+      AddComponentProperty(PropertyName(LPropertyGroup, 'location'),
+        LRow.Location);
+    end;
+  end;
 begin
   Result.ProductName := AConfig.ProductName;
   Result.ProductVersion := AConfig.ProductVersion;
@@ -612,6 +642,7 @@ begin
   Result.Timestamp := DateToISO8601(Now, False);
   Result.ToolName := 'DX.Comply';
   Result.ToolVersion := '1.0.0';
+  LUnitEvidenceRows := nil;
 
   LBomProperties := TList<TSbomProperty>.Create;
   LComponentProperties := TList<TSbomProperty>.Create;
@@ -645,6 +676,7 @@ begin
       IntToStr(ABuildEvidence.SearchPaths.Count));
     AddComponentProperty(PropertyName('composition', 'resolved-unit-count'),
       IntToStr(ACompositionEvidence.Units.Count));
+    AddConsolidatedUnitEvidenceProperties;
     AddComponentProperty(PropertyName('toolchain', 'product'), AProjectInfo.Toolchain.ProductName);
     AddComponentProperty(PropertyName('toolchain', 'version'), AProjectInfo.Toolchain.Version);
     AddComponentProperty(PropertyName('toolchain', 'build-version'), AProjectInfo.Toolchain.BuildVersion);
@@ -653,6 +685,7 @@ begin
     Result.Properties := LBomProperties.ToArray;
     Result.ComponentProperties := LComponentProperties.ToArray;
   finally
+    LUnitEvidenceRows.Free;
     LComponentProperties.Free;
     LBomProperties.Free;
   end;

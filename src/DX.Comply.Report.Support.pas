@@ -59,8 +59,10 @@ function HumanReadableReportSubtitle: string;
 function HumanReadableReportGenerator: string;
 function RelativeOutputReference(const ABaseFilePath, ATargetFilePath: string): string;
 function RepositoryReferenceText(const AProjectInfo: TProjectInfo): string;
+function BuildConsolidatedUnitEvidenceRows(const ABuildEvidence: TBuildEvidence;
+  const ACompositionEvidence: TCompositionEvidence): TConsolidatedUnitEvidenceRowList; overload;
 function BuildConsolidatedUnitEvidenceRows(
-  const AData: TComplianceReportData): TConsolidatedUnitEvidenceRowList;
+  const AData: TComplianceReportData): TConsolidatedUnitEvidenceRowList; overload;
 
 implementation
 
@@ -198,8 +200,8 @@ begin
   Result := ExcludeTrailingPathDelimiter(TPath.GetFullPath(LStartDirectory));
 end;
 
-function BuildConsolidatedUnitEvidenceRows(
-  const AData: TComplianceReportData): TConsolidatedUnitEvidenceRowList;
+function BuildConsolidatedUnitEvidenceRows(const ABuildEvidence: TBuildEvidence;
+  const ACompositionEvidence: TCompositionEvidence): TConsolidatedUnitEvidenceRowList; overload;
 var
   LBuildEvidenceItem: TBuildEvidenceItem;
   LCompositionUnit: TResolvedUnitInfo;
@@ -209,7 +211,7 @@ var
 begin
   Result := TConsolidatedUnitEvidenceRowList.Create;
 
-  for LCompositionUnit in AData.CompositionEvidence.Units do
+  for LCompositionUnit in ACompositionEvidence.Units do
   begin
     LRow := Default(TConsolidatedUnitEvidenceRow);
     LRow.UnitName := LCompositionUnit.UnitName;
@@ -224,7 +226,7 @@ begin
     Result.Add(LRow);
   end;
 
-  for LBuildEvidenceItem in AData.BuildEvidence.EvidenceItems do
+  for LBuildEvidenceItem in ABuildEvidence.EvidenceItems do
   begin
     if Trim(LBuildEvidenceItem.UnitName) = '' then
       Continue;
@@ -267,6 +269,13 @@ begin
     begin
       Result := CompareText(Left.UnitName, Right.UnitName);
     end));
+end;
+
+function BuildConsolidatedUnitEvidenceRows(
+  const AData: TComplianceReportData): TConsolidatedUnitEvidenceRowList; overload;
+begin
+  Result := BuildConsolidatedUnitEvidenceRows(AData.BuildEvidence,
+    AData.CompositionEvidence);
 end;
 
 function SbomFormatToString(AValue: TSbomFormat): string;
