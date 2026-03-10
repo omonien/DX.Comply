@@ -34,6 +34,12 @@ type
     procedure LoadFromMissingFile_ReturnsDefaults;
 
     [Test]
+    procedure OptionsPageCaption_UsesSingleTreeNodeCaption;
+
+    [Test]
+    procedure ScaleDesignValue_ScalesLinearlyByTargetPPI;
+
+    [Test]
     procedure SaveToFile_ThenLoadFromFile_RoundTripsAllFields;
   end;
 
@@ -50,15 +56,16 @@ var
   LSettings: TDXComplyIDESettings;
 begin
   LSettings := TDXComplyIDESettings.Default;
-  Assert.AreEqual(Ord(abmDisabled), Ord(LSettings.AutoBuildMode));
+  Assert.AreEqual(Ord(abmAlways), Ord(LSettings.AutoBuildMode));
   Assert.IsTrue(LSettings.PromptBeforeBuild);
   Assert.IsTrue(LSettings.SaveAllModifiedFilesBeforeBuild);
   Assert.IsTrue(LSettings.UseActiveBuildConfiguration);
-  Assert.IsTrue(LSettings.ContinueWithoutDeepEvidenceOnBuildFailure);
+  Assert.IsFalse(LSettings.ContinueWithoutDeepEvidenceOnBuildFailure);
+  Assert.IsTrue(LSettings.OpenHtmlReportAfterGenerate);
   Assert.IsTrue(LSettings.WarnWhenCompositionEvidenceIsEmpty);
   Assert.AreEqual(0, LSettings.DelphiVersionOverride);
-  Assert.IsFalse(LSettings.HumanReadableReport.Enabled);
-  Assert.AreEqual(NativeInt(Ord(hrfMarkdown)), NativeInt(Ord(LSettings.HumanReadableReport.Format)));
+  Assert.IsTrue(LSettings.HumanReadableReport.Enabled);
+  Assert.AreEqual(NativeInt(Ord(hrfBoth)), NativeInt(Ord(LSettings.HumanReadableReport.Format)));
 end;
 
 procedure TIDESettingsTests.LoadFromMissingFile_ReturnsDefaults;
@@ -68,9 +75,22 @@ var
 begin
   LFilePath := TPath.Combine(TPath.GetTempPath, TPath.GetRandomFileName + '.ini');
   LSettings := TDXComplyIDESettingsStore.LoadFromFile(LFilePath);
-  Assert.AreEqual(Ord(abmDisabled), Ord(LSettings.AutoBuildMode));
+  Assert.AreEqual(Ord(abmAlways), Ord(LSettings.AutoBuildMode));
   Assert.AreEqual('', LSettings.BuildScriptPath);
   Assert.AreEqual('', LSettings.HumanReadableReport.OutputBasePath);
+end;
+
+procedure TIDESettingsTests.OptionsPageCaption_UsesSingleTreeNodeCaption;
+begin
+  Assert.AreEqual('DX' + #$2024 + 'Comply', DXComplyOptionsPageCaption);
+  Assert.IsFalse(DXComplyOptionsPageCaption.Contains('.'));
+end;
+
+procedure TIDESettingsTests.ScaleDesignValue_ScalesLinearlyByTargetPPI;
+begin
+  Assert.AreEqual(16, DXComplyScaleDesignValue(16, 96));
+  Assert.AreEqual(32, DXComplyScaleDesignValue(16, 192));
+  Assert.AreEqual(16, DXComplyScaleDesignValue(16, 0));
 end;
 
 procedure TIDESettingsTests.SaveToFile_ThenLoadFromFile_RoundTripsAllFields;
@@ -87,6 +107,7 @@ begin
     LSettings.SaveAllModifiedFilesBeforeBuild := False;
     LSettings.UseActiveBuildConfiguration := False;
     LSettings.ContinueWithoutDeepEvidenceOnBuildFailure := False;
+    LSettings.OpenHtmlReportAfterGenerate := False;
     LSettings.WarnWhenCompositionEvidenceIsEmpty := False;
     LSettings.BuildScriptPath := 'C:\Tools\DelphiBuildDPROJ.ps1';
     LSettings.DelphiVersionOverride := 37;
@@ -105,6 +126,7 @@ begin
     Assert.IsFalse(LLoadedSettings.SaveAllModifiedFilesBeforeBuild);
     Assert.IsFalse(LLoadedSettings.UseActiveBuildConfiguration);
     Assert.IsFalse(LLoadedSettings.ContinueWithoutDeepEvidenceOnBuildFailure);
+    Assert.IsFalse(LLoadedSettings.OpenHtmlReportAfterGenerate);
     Assert.IsFalse(LLoadedSettings.WarnWhenCompositionEvidenceIsEmpty);
     Assert.AreEqual(LSettings.BuildScriptPath, LLoadedSettings.BuildScriptPath);
     Assert.AreEqual(37, LLoadedSettings.DelphiVersionOverride);
