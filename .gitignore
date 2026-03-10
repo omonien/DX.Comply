@@ -111,3 +111,4 @@ GTAGS
 "*.diag.log"  
 "*.f*.dproj"  
 "msbuild-preprocess.log" 
+src/bom.json
