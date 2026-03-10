@@ -19,9 +19,15 @@ interface
 
 uses
   System.Classes,
+  System.Variants,
+  Winapi.ActiveX,
+  Vcl.ComCtrls,
   Vcl.Controls,
+  Vcl.ExtCtrls,
   Vcl.Forms,
+  Vcl.OleCtrls,
   Vcl.StdCtrls,
+  SHDocVw,
   DX.Comply.IDE.Settings,
   DX.Comply.Report.Intf;
 
@@ -30,6 +36,10 @@ type
   /// Options frame hosted inside the RAD Studio environment options dialog.
   /// </summary>
   TFrameDXComplyOptions = class(TFrame)
+    FPageControl: TPageControl;
+    FSettingsTabSheet: TTabSheet;
+    FInfoTabSheet: TTabSheet;
+    FReadmeBrowserHostPanel: TPanel;
     FPromptBeforeBuildCheckBox: TCheckBox;
     FSaveAllModifiedFilesCheckBox: TCheckBox;
     FUseActiveBuildConfigurationCheckBox: TCheckBox;
@@ -50,8 +60,15 @@ type
     FReportIncludeBuildEvidenceCheckBox: TCheckBox;
     FAboutButton: TButton;
   private
+    FReadmeBrowser: TWebBrowser;
+    FReadmeHtml: string;
+    FReadmeHtmlLoaded: Boolean;
     procedure AboutButtonClick(Sender: TObject);
     procedure BrowseScriptButtonClick(Sender: TObject);
+    procedure InitializeReadmeBrowser;
+    procedure LoadReadmeInfoPage;
+    procedure ReadmeBrowserDocumentComplete(ASender: TObject;
+      const pDisp: IDispatch; const URL: OleVariant);
   public
     /// <summary>
     /// Returns the caption used for the single DX.Comply node in the IDE options tree.
@@ -73,6 +90,7 @@ implementation
 
 uses
   DX.Comply.IDE.AboutDialog,
+  DX.Comply.IDE.ReadmeSupport,
   System.IOUtils,
   System.SysUtils,
   Vcl.Dialogs;
@@ -93,6 +111,9 @@ begin
   Align := alClient;
   FBrowseScriptButton.OnClick := BrowseScriptButtonClick;
   FAboutButton.OnClick := AboutButtonClick;
+  FPageControl.ActivePage := FSettingsTabSheet;
+  InitializeReadmeBrowser;
+  LoadReadmeInfoPage;
 end;
 
 procedure TFrameDXComplyOptions.AboutButtonClick(Sender: TObject);
@@ -113,6 +134,47 @@ begin
   finally
     LDialog.Free;
   end;
+end;
+
+procedure TFrameDXComplyOptions.InitializeReadmeBrowser;
+begin
+  FReadmeBrowser := TWebBrowser.Create(Self);
+  FReadmeBrowserHostPanel.InsertControl(FReadmeBrowser);
+  FReadmeBrowser.Align := alClient;
+  FReadmeBrowser.TabStop := False;
+  FReadmeBrowser.Silent := True;
+  FReadmeBrowser.OnDocumentComplete := ReadmeBrowserDocumentComplete;
+end;
+
+procedure TFrameDXComplyOptions.LoadReadmeInfoPage;
+begin
+  FReadmeHtml := BuildDXComplyReadmeHtmlDocument;
+  FReadmeHtmlLoaded := False;
+  if Assigned(FReadmeBrowser) then
+    FReadmeBrowser.Navigate('about:blank');
+end;
+
+procedure TFrameDXComplyOptions.ReadmeBrowserDocumentComplete(ASender: TObject;
+  const pDisp: IDispatch; const URL: OleVariant);
+var
+  LDocument: OleVariant;
+  LUrl: string;
+begin
+  if FReadmeHtmlLoaded or (Trim(FReadmeHtml) = '') then
+    Exit;
+
+  LUrl := VarToStrDef(URL, '');
+  if (LUrl <> '') and not SameText(LUrl, 'about:blank') then
+    Exit;
+
+  if not Assigned(FReadmeBrowser.Document) then
+    Exit;
+
+  LDocument := FReadmeBrowser.Document;
+  FReadmeHtmlLoaded := True;
+  LDocument.Open;
+  LDocument.Write(VarArrayOf([FReadmeHtml]));
+  LDocument.Close;
 end;
 
 procedure TFrameDXComplyOptions.LoadSettings(const ASettings: TDXComplyIDESettings);

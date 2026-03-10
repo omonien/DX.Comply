@@ -67,6 +67,10 @@ type
     /// </summary>
     procedure AddProjectMenuItems;
     /// <summary>
+    /// Assigns the DX.Comply bitmap to the Project menu root entry.
+    /// </summary>
+    procedure AssignProjectMenuBitmap;
+    /// <summary>
     /// Removes the previously injected Project menu items on unload.
     /// </summary>
     procedure RemoveProjectMenuItems;
@@ -171,7 +175,8 @@ uses
   DX.Comply.IDE.AboutDialog,
   DX.Comply.IDE.BuildConfirmationDialog,
   DX.Comply.IDE.Options,
-  DX.Comply.IDE.OptionsFrame;
+  DX.Comply.IDE.OptionsFrame,
+  DX.Comply.IDE.PathSupport;
 
 var
   /// <summary>
@@ -239,6 +244,7 @@ begin
 
     FProjectMenuItem := TMenuItem.Create(nil);
     FProjectMenuItem.Caption := cProjectMenuCaption;
+    AssignProjectMenuBitmap;
 
     LSubMenuItem := TMenuItem.Create(FProjectMenuItem);
     LSubMenuItem.Caption := 'Generate documentation...';
@@ -258,6 +264,42 @@ begin
     LProjectMenu.Add(FProjectMenuItem);
   except
     // Never crash the IDE during menu manipulation.
+  end;
+end;
+
+procedure TDxComplyWizard.AssignProjectMenuBitmap;
+var
+  LBitmapPath: string;
+  LMenuBitmap: TBitmap;
+  LSourceBitmap: TBitmap;
+  LMenuBitmapSize: Integer;
+begin
+  if not Assigned(FProjectMenuItem) then
+    Exit;
+
+  LBitmapPath := FindDXComplyAssetFile('DX.Comply.Icon.bmp');
+  if LBitmapPath = '' then
+    Exit;
+
+  LSourceBitmap := TBitmap.Create;
+  LMenuBitmap := TBitmap.Create;
+  try
+    LSourceBitmap.LoadFromFile(LBitmapPath);
+    LMenuBitmapSize := GetSystemMetrics(SM_CXMENUCHECK);
+    if LMenuBitmapSize <= 0 then
+      LMenuBitmapSize := 16;
+
+    LMenuBitmap.SetSize(LMenuBitmapSize, LMenuBitmapSize);
+    LMenuBitmap.PixelFormat := pf24bit;
+    LMenuBitmap.Canvas.Brush.Color := clWhite;
+    LMenuBitmap.Canvas.FillRect(Rect(0, 0, LMenuBitmap.Width,
+      LMenuBitmap.Height));
+    LMenuBitmap.Canvas.StretchDraw(Rect(0, 0, LMenuBitmap.Width,
+      LMenuBitmap.Height), LSourceBitmap);
+    FProjectMenuItem.Bitmap.Assign(LMenuBitmap);
+  finally
+    LMenuBitmap.Free;
+    LSourceBitmap.Free;
   end;
 end;
 

@@ -263,16 +263,6 @@
     WordWrap = True
     OnClick = LinkLabelClick
   end
-  object OpenRepositoryButton: TButton
-    Left = 592
-    Top = 466
-    Width = 148
-    Height = 30
-    Anchors = [akRight, akBottom]
-    Caption = 'Open Repository'
-    TabOrder = 1
-    OnClick = OpenRepositoryButtonClick
-  end
   object CloseButton: TButton
     Left = 748
     Top = 466
@@ -283,6 +273,6 @@
     Caption = 'Close'
     Default = True
     ModalResult = 1
-    TabOrder = 2
+    TabOrder = 1
   end
 end

@@ -30,6 +30,8 @@
 requires
   rtl,
   vcl,
+  vclie,
+  vcledge,
   designide,
   xmlrtl;
 
@@ -54,6 +56,8 @@ contains
   DX.Comply.Engine in 'DX.Comply.Engine.pas',
   DX.Comply.IDE.Logger in 'DX.Comply.IDE.Logger.pas',
   DX.Comply.IDE.AboutDialog in 'DX.Comply.IDE.AboutDialog.pas',
+  DX.Comply.IDE.PathSupport in 'DX.Comply.IDE.PathSupport.pas',
+  DX.Comply.IDE.ReadmeSupport in 'DX.Comply.IDE.ReadmeSupport.pas',
   DX.Comply.IDE.BuildConfirmationDialog in 'DX.Comply.IDE.BuildConfirmationDialog.pas',
   DX.Comply.IDE.Settings in 'DX.Comply.IDE.Settings.pas',
   DX.Comply.IDE.OptionsFrame in 'DX.Comply.IDE.OptionsFrame.pas',

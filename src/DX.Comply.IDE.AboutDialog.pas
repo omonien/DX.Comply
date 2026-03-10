@@ -19,12 +19,10 @@ interface
 
 uses
   System.Classes,
-  System.IOUtils,
   Vcl.Controls,
   Vcl.ExtCtrls,
   Vcl.Forms,
   Vcl.Graphics,
-  Vcl.Imaging.pngimage,
   Vcl.StdCtrls;
 
 type
@@ -49,11 +47,9 @@ type
     CraOverviewLinkLabel: TLabel;
     CraRegulationCaptionLabel: TLabel;
     CraRegulationLinkLabel: TLabel;
-    OpenRepositoryButton: TButton;
     CloseButton: TButton;
     procedure FormCreate(Sender: TObject);
     procedure LinkLabelClick(Sender: TObject);
-    procedure OpenRepositoryButtonClick(Sender: TObject);
   private
     procedure ConfigureLinkLabel(ALabel: TLabel; const AUrl: string);
     procedure LoadHeaderGraphic;
@@ -72,7 +68,8 @@ uses
   System.SysUtils,
   Winapi.ShellAPI,
   Winapi.Windows,
-  DX.Comply.IDE.Logger;
+  DX.Comply.IDE.Logger,
+  DX.Comply.IDE.PathSupport;
 
 type
   /// <summary>
@@ -105,40 +102,6 @@ const
     'and keep it ready for CRA documentation and audit review workflows.';
   cHeaderBitmapFileName = 'DX.Comply.Icon.bmp';
   cHeaderPngFileName = 'DX.Comply.Icon.png';
-
-function GetCurrentModuleFilePath: string;
-var
-  LLength: Integer;
-begin
-  SetLength(Result, 1024);
-  LLength := GetModuleFileName(HInstance, PChar(Result), Length(Result));
-  if LLength <= 0 then
-    Exit('');
-
-  SetLength(Result, LLength);
-end;
-
-function FindAssetFile(const AFileName: string): string;
-var
-  LCandidatePath: string;
-  LCurrentDirectory: string;
-  LParentDirectory: string;
-begin
-  Result := '';
-  LCurrentDirectory := ExtractFileDir(GetCurrentModuleFilePath);
-  while LCurrentDirectory <> '' do
-  begin
-    LCandidatePath := TPath.Combine(LCurrentDirectory,
-      TPath.Combine('assets', AFileName));
-    if TFile.Exists(LCandidatePath) then
-      Exit(LCandidatePath);
-
-    LParentDirectory := ExtractFileDir(LCurrentDirectory);
-    if SameText(LParentDirectory, LCurrentDirectory) then
-      Break;
-    LCurrentDirectory := LParentDirectory;
-  end;
-end;
 
 function OpenInDefaultBrowser(const ATarget: string): Boolean;
 begin
@@ -213,7 +176,7 @@ begin
   Result.CompanyName := 'Olaf Monien';
   Result.ProductVersion := '1.0.0.0';
 
-  LModuleFilePath := GetCurrentModuleFilePath;
+  LModuleFilePath := GetDXComplyModuleFilePath;
   if LModuleFilePath = '' then
     Exit;
 
@@ -284,9 +247,9 @@ procedure TFormDXComplyAboutDialog.LoadHeaderGraphic;
 var
   LAssetPath: string;
 begin
-  LAssetPath := FindAssetFile(cHeaderBitmapFileName);
+  LAssetPath := FindDXComplyAssetFile(cHeaderBitmapFileName);
   if LAssetPath = '' then
-    LAssetPath := FindAssetFile(cHeaderPngFileName);
+    LAssetPath := FindDXComplyAssetFile(cHeaderPngFileName);
   if LAssetPath = '' then
     Exit;
 
@@ -297,12 +260,6 @@ begin
       TIDELogger.Warning('DX.Comply: Failed to load About dialog header image: ' +
         E.Message);
   end;
-end;
-
-procedure TFormDXComplyAboutDialog.OpenRepositoryButtonClick(Sender: TObject);
-begin
-  if not OpenInDefaultBrowser(cRepositoryUrl) then
-    TIDELogger.Warning('DX.Comply: Failed to open external link: ' + cRepositoryUrl);
 end;
 
 procedure ShowDXComplyAboutDialog;
