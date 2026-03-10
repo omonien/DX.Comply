@@ -1,4 +1,4 @@
-/// <summary>
+﻿/// <summary>
 /// DX.Comply.Tests.CycloneDx.Writer
 /// DUnitX tests for TCycloneDxJsonWriter.
 /// </summary>
@@ -92,6 +92,10 @@ type
     /// <summary>metadata.tools must be present in the output JSON.</summary>
     [Test]
     procedure Write_MetadataContainsToolInfo;
+
+    /// <summary>DX.Comply metadata properties must be written to metadata.properties and metadata.component.properties.</summary>
+    [Test]
+    procedure Write_MetadataContainsDxComplyProperties;
 
     /// <summary>A dependencies array must be present in the output JSON.</summary>
     [Test]
@@ -363,6 +367,50 @@ begin
     LMeta := LJson.GetValue('metadata') as TJSONObject;
     Assert.IsNotNull(LMeta.GetValue('tools'),
       'metadata.tools must be present');
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TCycloneDxWriterTests.Write_MetadataContainsDxComplyProperties;
+var
+  LBomProperties: TJSONArray;
+  LComponent: TJSONObject;
+  LJson: TJSONObject;
+  LMeta: TJSONObject;
+  LProperties: TJSONArray;
+begin
+  SetLength(FMetadata.Properties, 2);
+  FMetadata.Properties[0] := TSbomProperty.Create(
+    'net.developer-experts.dx-comply:deep-evidence.requested', 'true');
+  FMetadata.Properties[1] := TSbomProperty.Create(
+    'net.developer-experts.dx-comply:deep-evidence.command-line', 'powershell -File build.ps1');
+  SetLength(FMetadata.ComponentProperties, 1);
+  FMetadata.ComponentProperties[0] := TSbomProperty.Create(
+    'net.developer-experts.dx-comply:build.configuration', 'Release');
+
+  FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo);
+
+  LJson := LoadOutputJson;
+  Assert.IsNotNull(LJson);
+  try
+    LMeta := LJson.GetValue('metadata') as TJSONObject;
+    LBomProperties := LMeta.GetValue('properties') as TJSONArray;
+    LComponent := LMeta.GetValue('component') as TJSONObject;
+    LProperties := LComponent.GetValue('properties') as TJSONArray;
+
+    Assert.IsNotNull(LBomProperties,
+      'metadata.properties must be present when BOM metadata properties are provided');
+    Assert.IsNotNull(LProperties,
+      'metadata.component.properties must be present when component properties are provided');
+    Assert.AreEqual('net.developer-experts.dx-comply:deep-evidence.requested',
+      (LBomProperties.Items[0] as TJSONObject).GetValue<string>('name'));
+    Assert.AreEqual('true',
+      (LBomProperties.Items[0] as TJSONObject).GetValue<string>('value'));
+    Assert.AreEqual('net.developer-experts.dx-comply:deep-evidence.command-line',
+      (LBomProperties.Items[1] as TJSONObject).GetValue<string>('name'));
+    Assert.AreEqual('net.developer-experts.dx-comply:build.configuration',
+      (LProperties.Items[0] as TJSONObject).GetValue<string>('name'));
   finally
     LJson.Free;
   end;

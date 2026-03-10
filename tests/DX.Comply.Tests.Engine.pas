@@ -96,6 +96,10 @@ type
     [Test]
     procedure Generate_OutputFileContainsValidJson;
 
+    /// <summary>The generated SBOM must include DX.Comply Deep-Evidence metadata properties.</summary>
+    [Test]
+    procedure Generate_OutputFileContainsDxComplyMetadataProperties;
+
     // ---- GenerateFromConfig -------------------------------------------------
 
     /// <summary>GenerateFromConfig with a missing config must fall back to defaults and succeed.</summary>
@@ -293,6 +297,67 @@ begin
       Assert.IsNotNull(LJson, 'Output file must contain valid parseable JSON');
       Assert.AreEqual('CycloneDX', LJson.GetValue<string>('bomFormat'),
         'bomFormat must be CycloneDX');
+    finally
+      LJson.Free;
+    end;
+  finally
+    LGen.Free;
+  end;
+end;
+
+procedure TEngineTests.Generate_OutputFileContainsDxComplyMetadataProperties;
+var
+  LBomProperties: TJSONArray;
+  LComponent: TJSONObject;
+  LGen: TDxComplyGenerator;
+  LContent: string;
+  LJson: TJSONObject;
+  LMeta: TJSONObject;
+  LComponentProperties: TJSONArray;
+
+  function FindPropertyValue(const AProperties: TJSONArray; const AName: string): string;
+  var
+    I: Integer;
+    LProperty: TJSONObject;
+  begin
+    Result := '';
+    for I := 0 to AProperties.Count - 1 do
+    begin
+      if not (AProperties.Items[I] is TJSONObject) then
+        Continue;
+
+      LProperty := TJSONObject(AProperties.Items[I]);
+      if SameText(LProperty.GetValue<string>('name'), AName) then
+        Exit(LProperty.GetValue<string>('value'));
+    end;
+  end;
+begin
+  LGen := TDxComplyGenerator.Create;
+  try
+    LGen.OnProgress := OnProgress;
+    Assert.IsTrue(LGen.Generate(FEngineDprojPath, FOutputFile),
+      'Generate must succeed for the engine dproj');
+
+    LContent := TFile.ReadAllText(FOutputFile, TEncoding.UTF8);
+    LJson := TJSONObject.ParseJSONValue(LContent) as TJSONObject;
+    try
+      Assert.IsNotNull(LJson, 'Output file must contain valid parseable JSON');
+
+      LMeta := LJson.GetValue('metadata') as TJSONObject;
+      LBomProperties := LMeta.GetValue('properties') as TJSONArray;
+      LComponent := LMeta.GetValue('component') as TJSONObject;
+      LComponentProperties := LComponent.GetValue('properties') as TJSONArray;
+
+      Assert.IsNotNull(LBomProperties,
+        'DX.Comply BOM metadata properties must be present on metadata.properties');
+      Assert.IsNotNull(LComponentProperties,
+        'DX.Comply component metadata properties must be present on metadata.component.properties');
+      Assert.AreEqual('false', FindPropertyValue(LBomProperties,
+        'net.developer-experts.dx-comply:deep-evidence.requested'));
+      Assert.AreEqual('Release', FindPropertyValue(LComponentProperties,
+        'net.developer-experts.dx-comply:build.configuration'));
+      Assert.AreEqual('Win32', FindPropertyValue(LComponentProperties,
+        'net.developer-experts.dx-comply:build.platform'));
     finally
       LJson.Free;
     end;

@@ -1,4 +1,4 @@
-/// <summary>
+﻿/// <summary>
 /// DX.Comply.Tests.CycloneDx.XmlWriter
 /// DUnitX tests for TCycloneDxXmlWriter.
 /// </summary>
@@ -68,6 +68,9 @@ type
 
     [Test]
     procedure Write_ContainsToolInfo;
+
+    [Test]
+    procedure Write_ContainsDxComplyProperties;
 
     [Test]
     procedure Write_SingleArtefact_ContainsComponent;
@@ -217,6 +220,28 @@ begin
   LContent := LoadOutputContent;
   Assert.IsTrue(Pos('<name>DX.Comply</name>', LContent) > 0);
   Assert.IsTrue(Pos('<vendor>Olaf Monien</vendor>', LContent) > 0);
+end;
+
+procedure TCycloneDxXmlWriterTests.Write_ContainsDxComplyProperties;
+var
+  LContent: string;
+begin
+  SetLength(FMetadata.Properties, 2);
+  FMetadata.Properties[0] := TSbomProperty.Create(
+    'net.developer-experts.dx-comply:deep-evidence.requested', 'true');
+  FMetadata.Properties[1] := TSbomProperty.Create(
+    'net.developer-experts.dx-comply:deep-evidence.command-line', 'powershell -File build.ps1');
+  SetLength(FMetadata.ComponentProperties, 1);
+  FMetadata.ComponentProperties[0] := TSbomProperty.Create(
+    'net.developer-experts.dx-comply:build.configuration', 'Release');
+
+  FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo);
+  LContent := LoadOutputContent;
+
+  Assert.IsTrue(Pos('<properties>', LContent) > 0);
+  Assert.IsTrue(Pos('<property name="net.developer-experts.dx-comply:deep-evidence.requested">true</property>', LContent) > 0);
+  Assert.IsTrue(Pos('<property name="net.developer-experts.dx-comply:deep-evidence.command-line">powershell -File build.ps1</property>', LContent) > 0);
+  Assert.IsTrue(Pos('<property name="net.developer-experts.dx-comply:build.configuration">Release</property>', LContent) > 0);
 end;
 
 procedure TCycloneDxXmlWriterTests.Write_SingleArtefact_ContainsComponent;
