@@ -36,8 +36,14 @@ type
     FileSize: Int64;
     /// <summary>SHA-256 hash as hexadecimal string.</summary>
     Hash: string;
-    /// <summary>Artefact type (exe, dll, bpl, dcp, resource).</summary>
+    /// <summary>Artefact type (exe, dll, bpl, dcp, resource, unit-evidence).</summary>
     ArtefactType: string;
+    /// <summary>Unit origin label for composition evidence (e.g. Embarcadero RTL).</summary>
+    Origin: string;
+    /// <summary>Evidence kind label for composition evidence (e.g. DCU, PAS).</summary>
+    Evidence: string;
+    /// <summary>Resolution confidence label for composition evidence (e.g. Strong).</summary>
+    Confidence: string;
   end;
 
   /// <summary>

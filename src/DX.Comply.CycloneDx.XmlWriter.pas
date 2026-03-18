@@ -199,7 +199,7 @@ var
 begin
   if AArtefact.ArtefactType = 'application' then
     LComponentType := 'application'
-  else if (AArtefact.ArtefactType = 'library') or (AArtefact.ArtefactType = 'package') then
+  else if (AArtefact.ArtefactType = 'library') or (AArtefact.ArtefactType = 'unit-evidence') or (AArtefact.ArtefactType = 'package') then
     LComponentType := 'library'
   else
     LComponentType := 'file';
@@ -227,13 +227,37 @@ begin
     CloseTag('hashes');
   end;
 
-  if AArtefact.FileSize >= 0 then
+  if (AArtefact.FileSize >= 0) or (Trim(AArtefact.Origin) <> '') then
   begin
     OpenTag('properties');
-    OpenTag('property', 'name="file:size"');
-    Dec(FIndentLevel);
-    FLines[FLines.Count - 1] := StringOfChar(' ', FIndentLevel * 2) +
-      '<property name="file:size">' + IntToStr(AArtefact.FileSize) + '</property>';
+    if AArtefact.FileSize >= 0 then
+    begin
+      OpenTag('property', 'name="file:size"');
+      Dec(FIndentLevel);
+      FLines[FLines.Count - 1] := StringOfChar(' ', FIndentLevel * 2) +
+        '<property name="file:size">' + IntToStr(AArtefact.FileSize) + '</property>';
+    end;
+    if Trim(AArtefact.Origin) <> '' then
+    begin
+      OpenTag('property', 'name="net.developer-experts.dx-comply:origin"');
+      Dec(FIndentLevel);
+      FLines[FLines.Count - 1] := StringOfChar(' ', FIndentLevel * 2) +
+        '<property name="net.developer-experts.dx-comply:origin">' + EscapeXml(AArtefact.Origin) + '</property>';
+    end;
+    if Trim(AArtefact.Evidence) <> '' then
+    begin
+      OpenTag('property', 'name="net.developer-experts.dx-comply:evidence"');
+      Dec(FIndentLevel);
+      FLines[FLines.Count - 1] := StringOfChar(' ', FIndentLevel * 2) +
+        '<property name="net.developer-experts.dx-comply:evidence">' + EscapeXml(AArtefact.Evidence) + '</property>';
+    end;
+    if Trim(AArtefact.Confidence) <> '' then
+    begin
+      OpenTag('property', 'name="net.developer-experts.dx-comply:confidence"');
+      Dec(FIndentLevel);
+      FLines[FLines.Count - 1] := StringOfChar(' ', FIndentLevel * 2) +
+        '<property name="net.developer-experts.dx-comply:confidence">' + EscapeXml(AArtefact.Confidence) + '</property>';
+    end;
     CloseTag('properties');
   end;
 

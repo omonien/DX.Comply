@@ -35,6 +35,7 @@ type
     Evidence: string;
     Confidence: string;
     Location: string;
+    HashSha256: string;
     HasCompositionEvidence: Boolean;
     HasBuildEvidence: Boolean;
   end;
@@ -59,6 +60,7 @@ function HumanReadableReportSubtitle: string;
 function HumanReadableReportGenerator: string;
 function RelativeOutputReference(const ABaseFilePath, ATargetFilePath: string): string;
 function RepositoryReferenceText(const AProjectInfo: TProjectInfo): string;
+function PrimaryArtefactCount(const AArtefacts: TArtefactList): Integer;
 function BuildConsolidatedUnitEvidenceRows(const ABuildEvidence: TBuildEvidence;
   const ACompositionEvidence: TCompositionEvidence): TConsolidatedUnitEvidenceRowList; overload;
 function BuildConsolidatedUnitEvidenceRows(
@@ -200,6 +202,18 @@ begin
   Result := ExcludeTrailingPathDelimiter(TPath.GetFullPath(LStartDirectory));
 end;
 
+function PrimaryArtefactCount(const AArtefacts: TArtefactList): Integer;
+var
+  LArtefact: TArtefactInfo;
+begin
+  Result := 0;
+  if not Assigned(AArtefacts) then
+    Exit;
+  for LArtefact in AArtefacts do
+    if LArtefact.ArtefactType <> 'unit-evidence' then
+      Inc(Result);
+end;
+
 function BuildConsolidatedUnitEvidenceRows(const ABuildEvidence: TBuildEvidence;
   const ACompositionEvidence: TCompositionEvidence): TConsolidatedUnitEvidenceRowList; overload;
 var
@@ -222,6 +236,7 @@ begin
       LRow.Location := LCompositionUnit.ResolvedPath
     else
       LRow.Location := LCompositionUnit.ContainerPath;
+    LRow.HashSha256 := LCompositionUnit.SecondaryHashSha256;
     LRow.HasCompositionEvidence := True;
     Result.Add(LRow);
   end;
@@ -296,6 +311,7 @@ begin
     uekDcu: Result := 'DCU';
     uekDcp: Result := 'DCP';
     uekBpl: Result := 'BPL';
+    uekMap: Result := 'MAP';
   else
     Result := 'Unknown';
   end;

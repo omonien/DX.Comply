@@ -56,11 +56,15 @@ begin
   Lines.Add('| Relative Path | Type | Size | SHA-256 |');
   Lines.Add('| --- | --- | ---: | --- |');
   for LArtefact in AData.Artefacts do
+  begin
+    if LArtefact.ArtefactType = 'unit-evidence' then
+      Continue;
     Lines.Add(Format('| %s | %s | %d | %s |', [
       EscapeMarkdown(SafeText(LArtefact.RelativePath, LArtefact.FilePath)),
       EscapeMarkdown(SafeText(LArtefact.ArtefactType)),
       LArtefact.FileSize,
       EscapeMarkdown(SafeText(LArtefact.Hash))]));
+  end;
   Lines.Add('');
 end;
 
@@ -88,43 +92,46 @@ begin
 
     if AConfig.IncludeCompositionEvidence and AConfig.IncludeBuildEvidence then
     begin
-      Lines.Add('| Unit | Origin | Evidence | Confidence | SBOM Trace | Build Trace | Location |');
-      Lines.Add('| --- | --- | --- | --- | :---: | :---: | --- |');
+      Lines.Add('| Unit | Origin | Evidence | Confidence | SHA-256 | SBOM Trace | Build Trace | Location |');
+      Lines.Add('| --- | --- | --- | --- | --- | :---: | :---: | --- |');
       for LRow in LRows do
-        Lines.Add(Format('| %s | %s | %s | %s | %s | %s | %s |', [
+        Lines.Add(Format('| %s | %s | %s | %s | %s | %s | %s | %s |', [
           EscapeMarkdown(SafeText(LRow.UnitName)),
           EscapeMarkdown(SafeText(LRow.Origin)),
           EscapeMarkdown(SafeText(LRow.Evidence)),
           EscapeMarkdown(SafeText(LRow.Confidence)),
+          EscapeMarkdown(SafeText(LRow.HashSha256, '')),
           Checkmark(LRow.HasCompositionEvidence),
           Checkmark(LRow.HasBuildEvidence),
           EscapeMarkdown(SafeText(LRow.Location))]));
     end
     else if AConfig.IncludeCompositionEvidence then
     begin
-      Lines.Add('| Unit | Origin | Evidence | Confidence | SBOM Trace | Location |');
-      Lines.Add('| --- | --- | --- | --- | :---: | --- |');
+      Lines.Add('| Unit | Origin | Evidence | Confidence | SHA-256 | SBOM Trace | Location |');
+      Lines.Add('| --- | --- | --- | --- | --- | :---: | --- |');
       for LRow in LRows do
         if LRow.HasCompositionEvidence then
-          Lines.Add(Format('| %s | %s | %s | %s | %s | %s |', [
+          Lines.Add(Format('| %s | %s | %s | %s | %s | %s | %s |', [
             EscapeMarkdown(SafeText(LRow.UnitName)),
             EscapeMarkdown(SafeText(LRow.Origin)),
             EscapeMarkdown(SafeText(LRow.Evidence)),
             EscapeMarkdown(SafeText(LRow.Confidence)),
+            EscapeMarkdown(SafeText(LRow.HashSha256, '')),
             Checkmark(True),
             EscapeMarkdown(SafeText(LRow.Location))]));
     end
     else
     begin
-      Lines.Add('| Unit | Origin | Evidence | Confidence | Build Trace | Location |');
-      Lines.Add('| --- | --- | --- | --- | :---: | --- |');
+      Lines.Add('| Unit | Origin | Evidence | Confidence | SHA-256 | Build Trace | Location |');
+      Lines.Add('| --- | --- | --- | --- | --- | :---: | --- |');
       for LRow in LRows do
         if LRow.HasBuildEvidence then
-          Lines.Add(Format('| %s | %s | %s | %s | %s | %s |', [
+          Lines.Add(Format('| %s | %s | %s | %s | %s | %s | %s |', [
             EscapeMarkdown(SafeText(LRow.UnitName)),
             EscapeMarkdown(SafeText(LRow.Origin)),
             EscapeMarkdown(SafeText(LRow.Evidence)),
             EscapeMarkdown(SafeText(LRow.Confidence)),
+            EscapeMarkdown(SafeText(LRow.HashSha256, '')),
             Checkmark(True),
             EscapeMarkdown(SafeText(LRow.Location))]));
     end;
@@ -230,7 +237,7 @@ begin
     Lines.Add('## Summary');
     Lines.Add('| Metric | Value |');
     Lines.Add('| --- | ---: |');
-    AddKeyValue(Lines, 'Artefacts', IntToStr(AData.Artefacts.Count));
+    AddKeyValue(Lines, 'Artefacts', IntToStr(PrimaryArtefactCount(AData.Artefacts)));
     AddKeyValue(Lines, 'Resolved Units', IntToStr(AData.CompositionEvidence.Units.Count));
     AddKeyValue(Lines, 'Warnings', IntToStr(LWarningsCount));
     AddKeyValue(Lines, 'Deep Evidence', DeepEvidenceStatusText(AData));

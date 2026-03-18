@@ -140,6 +140,9 @@ type
       AFormat: THumanReadableReportFormat): string;
     function ResolveCompositionEvidence(const AProjectInfo: TProjectInfo;
       const ABuildEvidence: TBuildEvidence): TCompositionEvidence;
+    procedure AddCompositionEvidenceToArtefacts(
+      const ACompositionEvidence: TCompositionEvidence;
+      const AArtefacts: TArtefactList);
   public
     /// <summary>
     /// Creates a new TDxComplyGenerator instance.
@@ -220,8 +223,8 @@ begin
   FProjectScanner := TProjectScanner.Create;
   FBuildEvidenceReader := TBuildEvidenceReader.Create;
   FBuildOrchestrator := TBuildOrchestrator.Create;
-  FUnitResolver := TUnitResolver.Create;
   FHashService := THashService.Create;
+  FUnitResolver := TUnitResolver.Create(FHashService);
   FFileScanner := TFileScanner.Create(FHashService);
 end;
 
@@ -355,6 +358,37 @@ begin
     Result := FUnitResolver.Resolve(AProjectInfo, ABuildEvidence)
   else
     Result := TCompositionEvidence.Create;
+end;
+
+procedure TDxComplyGenerator.AddCompositionEvidenceToArtefacts(
+  const ACompositionEvidence: TCompositionEvidence;
+  const AArtefacts: TArtefactList);
+var
+  LArtefact: TArtefactInfo;
+  LResolvedUnit: TResolvedUnitInfo;
+begin
+  for LResolvedUnit in ACompositionEvidence.Units do
+  begin
+    if LResolvedUnit.ResolvedPath = '' then
+      Continue;
+
+    LArtefact := Default(TArtefactInfo);
+    LArtefact.FilePath := LResolvedUnit.ResolvedPath;
+    LArtefact.RelativePath := TPath.GetFileName(LResolvedUnit.ResolvedPath);
+    LArtefact.Hash := LResolvedUnit.SecondaryHashSha256;
+
+    if TFile.Exists(LResolvedUnit.ResolvedPath) then
+      LArtefact.FileSize := TFile.GetSize(LResolvedUnit.ResolvedPath)
+    else
+      LArtefact.FileSize := -1;
+
+    LArtefact.ArtefactType := 'unit-evidence';
+    LArtefact.Origin := UnitOriginKindToString(LResolvedUnit.OriginKind);
+    LArtefact.Evidence := UnitEvidenceKindToString(LResolvedUnit.EvidenceKind);
+    LArtefact.Confidence := ResolutionConfidenceToString(LResolvedUnit.Confidence);
+
+    AArtefacts.Add(LArtefact);
+  end;
 end;
 
 procedure TDxComplyGenerator.DoProgress(const AMessage: string; const AProgress: Integer);
@@ -542,7 +576,6 @@ function TDxComplyGenerator.BuildMetadata(const AConfig: TSbomConfig;
 var
   LBomProperties: TList<TSbomProperty>;
   LComponentProperties: TList<TSbomProperty>;
-  LUnitEvidenceRows: TConsolidatedUnitEvidenceRowList;
 
   const
     cPropertyNamespace = 'net.developer-experts.dx-comply';
@@ -608,32 +641,9 @@ var
   end;
 
   procedure AddConsolidatedUnitEvidenceProperties;
-  var
-    LPropertyGroup: string;
-    LRow: TConsolidatedUnitEvidenceRow;
-    LRowIndex: Integer;
   begin
-    LUnitEvidenceRows := BuildConsolidatedUnitEvidenceRows(ABuildEvidence,
-      ACompositionEvidence);
     AddComponentProperty(PropertyName('unit-evidence', 'count'),
-      IntToStr(LUnitEvidenceRows.Count));
-
-    for LRowIndex := 0 to LUnitEvidenceRows.Count - 1 do
-    begin
-      LRow := LUnitEvidenceRows[LRowIndex];
-      LPropertyGroup := 'unit-evidence.' + FormatFloat('0000', LRowIndex + 1);
-      AddComponentProperty(PropertyName(LPropertyGroup, 'name'), LRow.UnitName);
-      AddComponentProperty(PropertyName(LPropertyGroup, 'origin'), LRow.Origin);
-      AddComponentProperty(PropertyName(LPropertyGroup, 'evidence'), LRow.Evidence);
-      AddComponentProperty(PropertyName(LPropertyGroup, 'confidence'),
-        LRow.Confidence);
-      AddComponentProperty(PropertyName(LPropertyGroup, 'sbom-trace'),
-        BoolToMetadataValue(LRow.HasCompositionEvidence));
-      AddComponentProperty(PropertyName(LPropertyGroup, 'build-trace'),
-        BoolToMetadataValue(LRow.HasBuildEvidence));
-      AddComponentProperty(PropertyName(LPropertyGroup, 'location'),
-        LRow.Location);
-    end;
+      IntToStr(ACompositionEvidence.Units.Count));
   end;
 begin
   Result.ProductName := AConfig.ProductName;
@@ -642,8 +652,6 @@ begin
   Result.Timestamp := DateToISO8601(Now, False);
   Result.ToolName := 'DX.Comply';
   Result.ToolVersion := '1.0.0';
-  LUnitEvidenceRows := nil;
-
   LBomProperties := TList<TSbomProperty>.Create;
   LComponentProperties := TList<TSbomProperty>.Create;
   try
@@ -685,7 +693,6 @@ begin
     Result.Properties := LBomProperties.ToArray;
     Result.ComponentProperties := LComponentProperties.ToArray;
   finally
-    LUnitEvidenceRows.Free;
     LComponentProperties.Free;
     LBomProperties.Free;
   end;
@@ -790,14 +797,15 @@ begin
       LDeepEvidenceBuildResult := EnsureDeepEvidenceBuild(LProjectInfo);
       if not LDeepEvidenceBuildResult.Success then
       begin
+        DoProgress('Error: ' + LDeepEvidenceBuildResult.Message, -1);
+        if LDeepEvidenceBuildResult.CommandLine <> '' then
+          DoProgress('Command: ' + LDeepEvidenceBuildResult.CommandLine, -1);
+        if LDeepEvidenceBuildResult.Output <> '' then
+          DoProgress('Build output: ' + LDeepEvidenceBuildResult.Output, -1);
         if FConfig.ContinueOnDeepEvidenceBuildFailure then
-          DoProgress('Warning: Deep-Evidence build failed and SBOM generation continues without rebuilt MAP evidence. ' +
-            LDeepEvidenceBuildResult.Message, 18)
+          DoProgress('Warning: Continuing SBOM generation without rebuilt MAP evidence.', 18)
         else
-        begin
-          DoProgress('Error: ' + LDeepEvidenceBuildResult.Message, -1);
           Exit;
-        end;
       end;
 
       if LDeepEvidenceBuildResult.Success and LDeepEvidenceBuildResult.Executed then
@@ -849,6 +857,8 @@ begin
         LFormat := FConfig.Format;
 
       DoProgress('Generating SBOM...', 70);
+
+      AddCompositionEvidenceToArtefacts(LCompositionEvidence, LArtefacts);
 
       // Create writer and generate SBOM
       FSbomWriter := CreateWriter(LFormat);

@@ -54,11 +54,15 @@ var
 begin
   Lines.Add('<section><h2>Artefacts</h2><div class="table-wrap"><table><thead><tr><th>Relative Path</th><th>Type</th><th>Size</th><th>SHA-256</th></tr></thead><tbody>');
   for LArtefact in AData.Artefacts do
+  begin
+    if LArtefact.ArtefactType = 'unit-evidence' then
+      Continue;
     Lines.Add(Format('<tr><td>%s</td><td>%s</td><td>%d</td><td><code>%s</code></td></tr>', [
       EscapeHtml(SafeText(LArtefact.RelativePath, LArtefact.FilePath)),
       EscapeHtml(SafeText(LArtefact.ArtefactType)),
       LArtefact.FileSize,
       EscapeHtml(SafeText(LArtefact.Hash))]));
+  end;
   Lines.Add('</tbody></table></div></section>');
 end;
 
@@ -78,38 +82,41 @@ begin
   try
     Lines.Add('<section><h2>Unit Evidence</h2><div class="table-wrap"><table><thead>');
     if AConfig.IncludeCompositionEvidence and AConfig.IncludeBuildEvidence then
-      Lines.Add('<tr><th>Unit</th><th>Origin</th><th>Evidence</th><th>Confidence</th><th>SBOM Trace</th><th>Build Trace</th><th>Location</th></tr>')
+      Lines.Add('<tr><th>Unit</th><th>Origin</th><th>Evidence</th><th>Confidence</th><th>SHA-256</th><th>SBOM Trace</th><th>Build Trace</th><th>Location</th></tr>')
     else if AConfig.IncludeCompositionEvidence then
-      Lines.Add('<tr><th>Unit</th><th>Origin</th><th>Evidence</th><th>Confidence</th><th>SBOM Trace</th><th>Location</th></tr>')
+      Lines.Add('<tr><th>Unit</th><th>Origin</th><th>Evidence</th><th>Confidence</th><th>SHA-256</th><th>SBOM Trace</th><th>Location</th></tr>')
     else
-      Lines.Add('<tr><th>Unit</th><th>Origin</th><th>Evidence</th><th>Confidence</th><th>Build Trace</th><th>Location</th></tr>');
+      Lines.Add('<tr><th>Unit</th><th>Origin</th><th>Evidence</th><th>Confidence</th><th>SHA-256</th><th>Build Trace</th><th>Location</th></tr>');
     Lines.Add('</thead><tbody>');
 
     for LRow in LRows do
     begin
       if AConfig.IncludeCompositionEvidence and AConfig.IncludeBuildEvidence then
-        Lines.Add(Format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td style="text-align:center">%s</td><td style="text-align:center">%s</td><td>%s</td></tr>', [
+        Lines.Add(Format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td><code>%s</code></td><td style="text-align:center">%s</td><td style="text-align:center">%s</td><td>%s</td></tr>', [
           EscapeHtml(SafeText(LRow.UnitName)),
           EscapeHtml(SafeText(LRow.Origin)),
           EscapeHtml(SafeText(LRow.Evidence)),
           EscapeHtml(SafeText(LRow.Confidence)),
+          EscapeHtml(SafeText(LRow.HashSha256, '')),
           Checkmark(LRow.HasCompositionEvidence),
           Checkmark(LRow.HasBuildEvidence),
           EscapeHtml(SafeText(LRow.Location))]))
       else if AConfig.IncludeCompositionEvidence and LRow.HasCompositionEvidence then
-        Lines.Add(Format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td style="text-align:center">%s</td><td>%s</td></tr>', [
+        Lines.Add(Format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td><code>%s</code></td><td style="text-align:center">%s</td><td>%s</td></tr>', [
           EscapeHtml(SafeText(LRow.UnitName)),
           EscapeHtml(SafeText(LRow.Origin)),
           EscapeHtml(SafeText(LRow.Evidence)),
           EscapeHtml(SafeText(LRow.Confidence)),
+          EscapeHtml(SafeText(LRow.HashSha256, '')),
           Checkmark(True),
           EscapeHtml(SafeText(LRow.Location))]))
       else if AConfig.IncludeBuildEvidence and LRow.HasBuildEvidence then
-        Lines.Add(Format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td style="text-align:center">%s</td><td>%s</td></tr>', [
+        Lines.Add(Format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td><code>%s</code></td><td style="text-align:center">%s</td><td>%s</td></tr>', [
           EscapeHtml(SafeText(LRow.UnitName)),
           EscapeHtml(SafeText(LRow.Origin)),
           EscapeHtml(SafeText(LRow.Evidence)),
           EscapeHtml(SafeText(LRow.Confidence)),
+          EscapeHtml(SafeText(LRow.HashSha256, '')),
           Checkmark(True),
           EscapeHtml(SafeText(LRow.Location))]));
     end;
@@ -233,11 +240,20 @@ begin
     Lines.Add('</tbody></table></div>');
     Lines.Add('</section>');
     Lines.Add('<div class="cards">');
-    AddSummaryCard(Lines, 'Artefacts', IntToStr(AData.Artefacts.Count), 'good');
+    AddSummaryCard(Lines, 'Artefacts', IntToStr(PrimaryArtefactCount(AData.Artefacts)), 'good');
     AddSummaryCard(Lines, 'Resolved Units', IntToStr(AData.CompositionEvidence.Units.Count), 'good');
-    AddSummaryCard(Lines, 'Warnings', IntToStr(LWarningsCount), 'warn');
-    AddSummaryCard(Lines, 'Deep Evidence', DeepEvidenceStatusText(AData), 'warn');
-    AddSummaryCard(Lines, 'Validation', ValidationStatusText(AData), 'bad');
+    if LWarningsCount = 0 then
+      AddSummaryCard(Lines, 'Warnings', '0', 'good')
+    else
+      AddSummaryCard(Lines, 'Warnings', IntToStr(LWarningsCount), 'warn');
+    if AData.DeepEvidenceResult.Success then
+      AddSummaryCard(Lines, 'Deep Evidence', DeepEvidenceStatusText(AData), 'good')
+    else
+      AddSummaryCard(Lines, 'Deep Evidence', DeepEvidenceStatusText(AData), 'bad');
+    if AData.ValidationResult.IsValid then
+      AddSummaryCard(Lines, 'Validation', ValidationStatusText(AData), 'good')
+    else
+      AddSummaryCard(Lines, 'Validation', ValidationStatusText(AData), 'bad');
     Lines.Add('</div>');
     Lines.Add('<section><h2>Project Overview</h2><div class="table-wrap"><table><tbody>');
     Lines.Add('<tr><th>Version</th><td>' + EscapeHtml(SafeText(AData.Metadata.ProductVersion, SafeText(AData.ProjectInfo.Version))) + '</td></tr>');

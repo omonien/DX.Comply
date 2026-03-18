@@ -170,9 +170,9 @@ begin
   // Component type
   if AArtefact.ArtefactType = 'application' then
     LComponent.AddPair('type', 'application')
-  else if AArtefact.ArtefactType = 'library' then
-    LComponent.AddPair('type', 'library')
-  else if AArtefact.ArtefactType = 'package' then
+  else if (AArtefact.ArtefactType = 'library') or
+    (AArtefact.ArtefactType = 'unit-evidence') or
+    (AArtefact.ArtefactType = 'package') then
     LComponent.AddPair('type', 'library')
   else
     LComponent.AddPair('type', 'file');
@@ -203,16 +203,42 @@ begin
     LComponent.AddPair('hashes', LHashArray);
   end;
 
-  // File properties
+  // Properties
+  LProperties := TJSONArray.Create;
+
   if AArtefact.FileSize >= 0 then
   begin
-    LProperties := TJSONArray.Create;
     LProp := TJSONObject.Create;
     LProp.AddPair('name', 'file:size');
     LProp.AddPair('value', IntToStr(AArtefact.FileSize));
     LProperties.Add(LProp);
-    LComponent.AddPair('properties', LProperties);
   end;
+  if Trim(AArtefact.Origin) <> '' then
+  begin
+    LProp := TJSONObject.Create;
+    LProp.AddPair('name', 'net.developer-experts.dx-comply:origin');
+    LProp.AddPair('value', EscapeJsonString(AArtefact.Origin));
+    LProperties.Add(LProp);
+  end;
+  if Trim(AArtefact.Evidence) <> '' then
+  begin
+    LProp := TJSONObject.Create;
+    LProp.AddPair('name', 'net.developer-experts.dx-comply:evidence');
+    LProp.AddPair('value', EscapeJsonString(AArtefact.Evidence));
+    LProperties.Add(LProp);
+  end;
+  if Trim(AArtefact.Confidence) <> '' then
+  begin
+    LProp := TJSONObject.Create;
+    LProp.AddPair('name', 'net.developer-experts.dx-comply:confidence');
+    LProp.AddPair('value', EscapeJsonString(AArtefact.Confidence));
+    LProperties.Add(LProp);
+  end;
+
+  if LProperties.Count > 0 then
+    LComponent.AddPair('properties', LProperties)
+  else
+    LProperties.Free;
 
   Result := LComponent;
 end;
