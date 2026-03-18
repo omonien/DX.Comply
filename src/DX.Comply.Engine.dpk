@@ -29,7 +29,7 @@
 {$DESCRIPTION 'DX.Comply SBOM Generation Engine'}
 {$RUNONLY}
 {$IMPLICITBUILD ON}
-{$LIBSUFFIX AUTO}
+{$LIBSUFFIX '370'}
 
 requires
   rtl,

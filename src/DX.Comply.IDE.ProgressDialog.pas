@@ -221,22 +221,40 @@ begin
 end;
 
 procedure TFormDXComplyProgressDialog.BuildUI;
-const
-  cClientWidth   = 640;
-  cClientHeight  = 500;
-  cHeaderHeight  = 56;
-  cProgressHeight = 60;
-  cFooterHeight  = 46;
+
+  /// <summary>
+  /// Scales a 96-DPI design-time pixel value to the current monitor PPI.
+  /// </summary>
+  function S(AValue: Integer): Integer;
+  begin
+    Result := MulDiv(AValue, Self.CurrentPPI, 96);
+  end;
+
 var
   LSepBelowProgress: TPanel;
   LFooterSep: TPanel;
+  LLogWrapper: TPanel;
+  LScaledWidth: Integer;
+  LScaledMargin: Integer;
+  LBarWidth: Integer;
+  LPercentWidth: Integer;
+  LButtonWidth: Integer;
+  LButtonHeight: Integer;
 begin
-  Caption := 'DX.Comply — CRA Documentation Generator';
-  ClientWidth := cClientWidth;
-  ClientHeight := cClientHeight;
+  // Pre-calculate frequently used scaled values
+  LScaledWidth := S(640);
+  LScaledMargin := S(16);
+  LPercentWidth := S(44);
+  LButtonWidth := S(88);
+  LButtonHeight := S(30);
+  LBarWidth := LScaledWidth - LScaledMargin * 2 - LPercentWidth - S(8);
+
+  Caption := 'DX.Comply - CRA Documentation Generator';
+  ClientWidth := LScaledWidth;
+  ClientHeight := S(480);
   BorderStyle := bsDialog;
   Position := poScreenCenter;
-  Color := $F0F0F0;
+  Color := clWhite;
   Font.Name := 'Segoe UI';
   Font.Size := 9;
 
@@ -244,7 +262,7 @@ begin
   FPanelHeader := TPanel.Create(Self);
   FPanelHeader.Parent := Self;
   FPanelHeader.Align := alTop;
-  FPanelHeader.Height := cHeaderHeight;
+  FPanelHeader.Height := S(60);
   FPanelHeader.BevelOuter := bvNone;
   FPanelHeader.Color := cColorHeader;
   FPanelHeader.ParentBackground := False;
@@ -252,55 +270,54 @@ begin
   FLabelTitle := TLabel.Create(FPanelHeader);
   FLabelTitle.Parent := FPanelHeader;
   FLabelTitle.Caption := 'DX.Comply';
-  FLabelTitle.Font.Name := 'Segoe UI';
-  FLabelTitle.Font.Size := 13;
+  FLabelTitle.Font.Name := 'Segoe UI Semibold';
+  FLabelTitle.Font.Size := 14;
   FLabelTitle.Font.Style := [fsBold];
   FLabelTitle.Font.Color := cColorTitle;
   FLabelTitle.ParentFont := False;
-  FLabelTitle.Left := cMargin;
-  FLabelTitle.Top := 7;
+  FLabelTitle.Left := LScaledMargin;
+  FLabelTitle.Top := S(8);
   FLabelTitle.AutoSize := True;
 
   FLabelSubtitle := TLabel.Create(FPanelHeader);
   FLabelSubtitle.Parent := FPanelHeader;
-  FLabelSubtitle.Caption := 'Generating CRA compliance documentation...';
+  FLabelSubtitle.Caption := 'Generating CRA compliance documentation';
   FLabelSubtitle.Font.Name := 'Segoe UI';
   FLabelSubtitle.Font.Size := 9;
   FLabelSubtitle.Font.Color := cColorSubtitle;
   FLabelSubtitle.ParentFont := False;
-  FLabelSubtitle.Left := cMargin;
-  FLabelSubtitle.Top := 34;
+  FLabelSubtitle.Left := LScaledMargin;
+  FLabelSubtitle.Top := S(36);
   FLabelSubtitle.AutoSize := True;
 
   // === Progress section ===
   FPanelProgress := TPanel.Create(Self);
   FPanelProgress.Parent := Self;
   FPanelProgress.Align := alTop;
-  FPanelProgress.Height := cProgressHeight;
+  FPanelProgress.Height := S(64);
   FPanelProgress.BevelOuter := bvNone;
-  FPanelProgress.Color := $F0F0F0;
+  FPanelProgress.Color := clWhite;
   FPanelProgress.ParentBackground := False;
 
   FLabelStep := TLabel.Create(FPanelProgress);
   FLabelStep.Parent := FPanelProgress;
-  FLabelStep.Caption := 'Starting...';
+  FLabelStep.Caption := 'Initializing...';
   FLabelStep.Font.Name := 'Segoe UI';
   FLabelStep.Font.Size := 9;
-  FLabelStep.Font.Style := [fsBold];
+  FLabelStep.Font.Color := cColorNeutral;
   FLabelStep.ParentFont := False;
-  FLabelStep.Left := cMargin;
-  FLabelStep.Top := 6;
-  FLabelStep.Width := cClientWidth - cMargin * 2 - 54;
+  FLabelStep.Left := LScaledMargin;
+  FLabelStep.Top := S(8);
+  FLabelStep.Width := LBarWidth;
   FLabelStep.AutoSize := False;
   FLabelStep.EllipsisPosition := epEndEllipsis;
 
   FProgressBar := TProgressBar.Create(FPanelProgress);
   FProgressBar.Parent := FPanelProgress;
-  FProgressBar.Left := cMargin;
-  FProgressBar.Top := 26;
-  FProgressBar.Width := cClientWidth - cMargin * 2 - 54;
-  FProgressBar.Height := 20;
-  FProgressBar.Anchors := [akLeft, akTop, akRight];
+  FProgressBar.Left := LScaledMargin;
+  FProgressBar.Top := S(32);
+  FProgressBar.Width := LBarWidth;
+  FProgressBar.Height := S(18);
   FProgressBar.Min := 0;
   FProgressBar.Max := 100;
   FProgressBar.Position := 0;
@@ -311,10 +328,12 @@ begin
   FLabelPercent.Caption := '0%';
   FLabelPercent.Font.Name := 'Segoe UI';
   FLabelPercent.Font.Size := 9;
+  FLabelPercent.Font.Color := cColorNeutral;
   FLabelPercent.ParentFont := False;
-  FLabelPercent.Left := FProgressBar.Left + FProgressBar.Width + 6;
-  FLabelPercent.Top := 29;
-  FLabelPercent.Width := 42;
+  FLabelPercent.Alignment := taRightJustify;
+  FLabelPercent.Left := FProgressBar.Left + FProgressBar.Width + S(8);
+  FLabelPercent.Top := S(34);
+  FLabelPercent.Width := LPercentWidth;
 
   // Thin separator between progress and log
   LSepBelowProgress := TPanel.Create(Self);
@@ -328,9 +347,9 @@ begin
   FPanelFooter := TPanel.Create(Self);
   FPanelFooter.Parent := Self;
   FPanelFooter.Align := alBottom;
-  FPanelFooter.Height := cFooterHeight;
+  FPanelFooter.Height := S(48);
   FPanelFooter.BevelOuter := bvNone;
-  FPanelFooter.Color := $F0F0F0;
+  FPanelFooter.Color := clWhite;
   FPanelFooter.ParentBackground := False;
 
   LFooterSep := TPanel.Create(FPanelFooter);
@@ -347,31 +366,41 @@ begin
   FLabelStatus.Font.Size := 9;
   FLabelStatus.Font.Color := cColorNeutral;
   FLabelStatus.ParentFont := False;
-  FLabelStatus.Left := cMargin;
-  FLabelStatus.Top := 14;
+  FLabelStatus.Left := LScaledMargin;
+  FLabelStatus.Top := S(14);
   FLabelStatus.AutoSize := True;
 
   FButtonAction := TButton.Create(FPanelFooter);
   FButtonAction.Parent := FPanelFooter;
   FButtonAction.Caption := 'Abort';
-  FButtonAction.Width := 88;
-  FButtonAction.Height := 28;
-  FButtonAction.Left := cClientWidth - 88 - cMargin;
-  FButtonAction.Top := 8;
+  FButtonAction.Width := LButtonWidth;
+  FButtonAction.Height := LButtonHeight;
+  FButtonAction.Left := LScaledWidth - LButtonWidth - LScaledMargin;
+  FButtonAction.Top := S(9);
   FButtonAction.Cancel := True;
   FButtonAction.OnClick := OnActionClick;
 
   // === Scrollable log (fills remaining space) ===
-  FMemoLog := TMemo.Create(Self);
-  FMemoLog.Parent := Self;
+  LLogWrapper := TPanel.Create(Self);
+  LLogWrapper.Parent := Self;
+  LLogWrapper.Align := alClient;
+  LLogWrapper.BevelOuter := bvNone;
+  LLogWrapper.Color := clWhite;
+  LLogWrapper.Padding.Left := LScaledMargin;
+  LLogWrapper.Padding.Right := LScaledMargin;
+  LLogWrapper.Padding.Top := S(4);
+  LLogWrapper.Padding.Bottom := S(4);
+
+  FMemoLog := TMemo.Create(LLogWrapper);
+  FMemoLog.Parent := LLogWrapper;
   FMemoLog.Align := alClient;
   FMemoLog.ReadOnly := True;
   FMemoLog.ScrollBars := ssVertical;
   FMemoLog.WordWrap := False;
   FMemoLog.Font.Name := 'Consolas';
   FMemoLog.Font.Size := 9;
-  FMemoLog.Color := $FAFAFA;
-  FMemoLog.BorderStyle := bsNone;
+  FMemoLog.Color := $F5F5F5;
+  FMemoLog.BorderStyle := bsSingle;
   FMemoLog.Lines.Clear;
 end;
 
@@ -419,7 +448,8 @@ begin
 
   if FThread.CancelRequested then
   begin
-    FLabelStep.Caption := 'Generation was cancelled.';
+    FLabelSubtitle.Caption := 'Generation cancelled';
+    FLabelStep.Caption := 'Generation was cancelled by user.';
     FLabelStep.Font.Color := cColorError;
     FLabelStatus.Caption := 'Cancelled';
     FLabelStatus.Font.Color := cColorError;
@@ -429,14 +459,20 @@ begin
   begin
     FProgressBar.Position := 100;
     FLabelPercent.Caption := '100%';
-    FLabelStep.Caption := 'CRA documentation generated successfully.';
+    FPanelHeader.Color := cColorSuccess;
+    FLabelSubtitle.Caption := 'CRA documentation generated successfully';
+    FLabelSubtitle.Font.Color := cColorTitle;
+    FLabelStep.Caption := 'All tasks completed.';
     FLabelStep.Font.Color := cColorSuccess;
     FLabelStatus.Caption := 'Completed successfully';
     FLabelStatus.Font.Color := cColorSuccess;
   end
   else
   begin
-    FLabelStep.Caption := 'Generation failed — see log for details.';
+    FPanelHeader.Color := cColorError;
+    FLabelSubtitle.Caption := 'Generation failed';
+    FLabelSubtitle.Font.Color := cColorTitle;
+    FLabelStep.Caption := 'Generation failed - see log for details.';
     FLabelStep.Font.Color := cColorError;
     FLabelStatus.Caption := 'Failed';
     FLabelStatus.Font.Color := cColorError;

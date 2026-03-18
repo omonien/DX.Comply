@@ -316,8 +316,6 @@ begin
   Result.WarnOnEmptyCompositionEvidence := ASettings.WarnWhenCompositionEvidenceIsEmpty;
   Result.HumanReadableReport := ASettings.HumanReadableReport;
   Result.DeepEvidenceMode := debAlways;
-  if AForceDeepEvidence then
-    Result.DeepEvidenceMode := debAlways;
 
   if ASettings.UseActiveBuildConfiguration and Assigned(AProject) then
   begin

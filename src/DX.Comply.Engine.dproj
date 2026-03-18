@@ -43,7 +43,7 @@
         <DCC_ExeOutput>..\build\$(Platform)\$(Config)</DCC_ExeOutput>
         <DCC_Namespace>System;Xml;Data;Datasnap;Web;Soap;$(DCC_Namespace)</DCC_Namespace>
         <DCC_UnitSearchPath>..\src;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
-        <DllSuffix>$(Auto)</DllSuffix>
+        <DllSuffix>370</DllSuffix>
         <GenDLL>true</GenDLL>
         <GenPackage>true</GenPackage>
         <VerInfo_Build>0</VerInfo_Build>
