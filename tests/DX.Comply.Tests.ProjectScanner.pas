@@ -319,10 +319,10 @@ begin
   LProjectInfo := FScanner.Scan(FEngineDprojPath, 'Win32', 'Debug');
   try
     LExpectedMapPath := TPath.Combine(LProjectInfo.OutputDir,
-      LProjectInfo.ProjectName + '.map');
+      LProjectInfo.ProjectName + LProjectInfo.DllSuffix + '.map');
 
     Assert.AreEqual(LExpectedMapPath, LProjectInfo.MapFilePath,
-      'MapFilePath must be inferred from OutputDir and ProjectName');
+      'MapFilePath must be inferred from OutputDir, ProjectName and DllSuffix');
   finally
     LProjectInfo.Free;
   end;

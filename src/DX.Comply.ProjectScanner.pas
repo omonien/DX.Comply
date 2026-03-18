@@ -981,7 +981,8 @@ begin
   if (AProjectInfo.OutputDir = '') or (AProjectInfo.ProjectName = '') then
     Exit;
 
-  Result := TPath.Combine(AProjectInfo.OutputDir, AProjectInfo.ProjectName + '.map');
+  Result := TPath.Combine(AProjectInfo.OutputDir,
+    AProjectInfo.ProjectName + AProjectInfo.DllSuffix + '.map');
 end;
 
 function TProjectScanner.Scan(const AProjectPath, APlatform, AConfiguration: string): TProjectInfo;
@@ -1094,6 +1095,7 @@ begin
       FWarnings.Add('No output directory found in .dproj. Using default: ..\build\$(Platform)\$(Config)');
     end;
 
+    Result.DllSuffix := GetPropertyValue('DllSuffix', '');
     Result.MapFilePath := BuildExpectedMapFilePath(Result);
 
     // Extract explicit project unit references.

@@ -108,6 +108,8 @@ type
     DcpOutputDir: string;
     /// <summary>Output directory for generated compiled units (.dcu).</summary>
     DcuOutputDir: string;
+    /// <summary>DllSuffix / LibSuffix appended to BPL and MAP file names.</summary>
+    DllSuffix: string;
     /// <summary>Expected or resolved map file path for the selected build.</summary>
     MapFilePath: string;
     /// <summary>Project version (if specified).</summary>
