@@ -40,6 +40,12 @@ type
     /// </summary>
     [Test]
     procedure CompositionEvidence_Create_InitializesOwnedLists;
+
+    /// <summary>
+    /// Default(TResolvedUnitInfo) must zero-initialize enums to their Unknown values.
+    /// </summary>
+    [Test]
+    procedure DefaultResolvedUnitInfo_EnumsAreUnknown;
   end;
 
 implementation
@@ -78,6 +84,20 @@ begin
   finally
     LCompositionEvidence.Free;
   end;
+end;
+
+procedure TBuildEvidenceIntfTests.DefaultResolvedUnitInfo_EnumsAreUnknown;
+var
+  LUnit: TResolvedUnitInfo;
+begin
+  LUnit := Default(TResolvedUnitInfo);
+
+  Assert.AreEqual(uekUnknown, LUnit.EvidenceKind,
+    'Default(TResolvedUnitInfo).EvidenceKind must be uekUnknown');
+  Assert.AreEqual(uokUnknown, LUnit.OriginKind,
+    'Default(TResolvedUnitInfo).OriginKind must be uokUnknown');
+  Assert.AreEqual(rcUnknown, LUnit.Confidence,
+    'Default(TResolvedUnitInfo).Confidence must be rcUnknown');
 end;
 
 initialization

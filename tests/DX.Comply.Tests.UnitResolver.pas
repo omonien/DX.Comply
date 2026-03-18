@@ -23,6 +23,7 @@ uses
   DUnitX.TestFramework,
   DX.Comply.Engine.Intf,
   DX.Comply.BuildEvidence.Intf,
+  DX.Comply.HashService,
   DX.Comply.UnitResolver;
 
 type
@@ -84,6 +85,18 @@ type
     /// </summary>
     [Test]
     procedure Resolve_WithGlobalToolchainSourcePath_ClassifiesEmbarcaderoRtl;
+
+    /// <summary>
+    /// Resolved units with existing files must receive SHA-256 and SHA-512 hashes.
+    /// </summary>
+    [Test]
+    procedure Resolve_WithHashService_ComputesHashesForResolvedFiles;
+
+    /// <summary>
+    /// Unresolved units (no file on disk) must not receive hashes.
+    /// </summary>
+    [Test]
+    procedure Resolve_UnresolvedUnit_HasEmptyHashes;
   end;
 
 implementation
@@ -215,8 +228,10 @@ begin
         'Map-file evidence items must be transformed into resolved units');
       Assert.AreEqual('DX.Comply.Engine', LCompositionEvidence.Units[0].UnitName,
         'The first resolved unit must come from the first map evidence item');
-      Assert.AreEqual(rcStrong, LCompositionEvidence.Units[0].Confidence,
-        'Map-file membership should produce strong confidence for unit presence');
+      Assert.AreEqual(rcHeuristic, LCompositionEvidence.Units[0].Confidence,
+        'Unresolved MAP-only units should produce heuristic confidence');
+      Assert.AreEqual(uekMap, LCompositionEvidence.Units[0].EvidenceKind,
+        'Unresolved MAP-only units must have MAP evidence kind');
       Assert.AreEqual(besMapFile, LCompositionEvidence.Units[0].EvidenceSources[0],
         'Resolved units created from map evidence must retain besMapFile as their source');
     finally
@@ -458,6 +473,105 @@ begin
   finally
     if TDirectory.Exists(LTempDir) then
       TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+procedure TUnitResolverTests.Resolve_WithHashService_ComputesHashesForResolvedFiles;
+var
+  LEvidenceItem: TBuildEvidenceItem;
+  LBuildEvidence: TBuildEvidence;
+  LCompositionEvidence: TCompositionEvidence;
+  LHashService: IHashService;
+  LProjectInfo: TProjectInfo;
+  LResolver: IUnitResolver;
+  LTempDir: string;
+  LUnitPath: string;
+begin
+  LTempDir := TPath.Combine(TPath.GetTempPath, TPath.GetRandomFileName);
+  TDirectory.CreateDirectory(LTempDir);
+  try
+    LUnitPath := TPath.Combine(LTempDir, 'Demo.Main.pas');
+    TFile.WriteAllText(LUnitPath, 'unit Demo.Main; interface implementation end.');
+
+    LHashService := THashService.Create;
+    LResolver := TUnitResolver.Create(LHashService);
+
+    LProjectInfo := TProjectInfo.Create;
+    LBuildEvidence := TBuildEvidence.Create;
+    try
+    var LReference: TProjectUnitReference;
+      LProjectInfo.ProjectDir := LTempDir;
+      LReference.UnitName := 'Demo.Main';
+      LReference.FilePath := LUnitPath;
+      LReference.Source := 'MainSource';
+      LProjectInfo.ExplicitUnitReferences.Add(LReference);
+
+      LEvidenceItem := Default(TBuildEvidenceItem);
+      LEvidenceItem.SourceKind := besMapFile;
+      LEvidenceItem.FilePath := TPath.Combine(LTempDir, 'Demo.map');
+      LEvidenceItem.UnitName := 'Demo.Main';
+      LBuildEvidence.EvidenceItems.Add(LEvidenceItem);
+
+      LCompositionEvidence := LResolver.Resolve(LProjectInfo, LBuildEvidence);
+      try
+        Assert.AreEqual(NativeInt(1), NativeInt(LCompositionEvidence.Units.Count));
+        Assert.IsTrue(LCompositionEvidence.Units[0].SecondaryHashSha256 <> '',
+          'Resolved units with existing files must have a SHA-256 hash');
+        Assert.IsTrue(LCompositionEvidence.Units[0].PrimaryHashSha512 <> '',
+          'Resolved units with existing files must have a SHA-512 hash');
+        Assert.AreEqual(NativeInt(64),
+          NativeInt(Length(LCompositionEvidence.Units[0].SecondaryHashSha256)),
+          'SHA-256 hash must be 64 hex characters');
+        Assert.AreEqual(NativeInt(128),
+          NativeInt(Length(LCompositionEvidence.Units[0].PrimaryHashSha512)),
+          'SHA-512 hash must be 128 hex characters');
+      finally
+        LCompositionEvidence.Free;
+      end;
+    finally
+      LBuildEvidence.Free;
+      LProjectInfo.Free;
+    end;
+  finally
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+procedure TUnitResolverTests.Resolve_UnresolvedUnit_HasEmptyHashes;
+var
+  LEvidenceItem: TBuildEvidenceItem;
+  LBuildEvidence: TBuildEvidence;
+  LCompositionEvidence: TCompositionEvidence;
+  LHashService: IHashService;
+  LProjectInfo: TProjectInfo;
+  LResolver: IUnitResolver;
+begin
+  LHashService := THashService.Create;
+  LResolver := TUnitResolver.Create(LHashService);
+
+  LProjectInfo := TProjectInfo.Create;
+  LBuildEvidence := TBuildEvidence.Create;
+  try
+    LEvidenceItem := Default(TBuildEvidenceItem);
+    LEvidenceItem.SourceKind := besMapFile;
+    LEvidenceItem.FilePath := 'C:\nonexistent\Demo.map';
+    LEvidenceItem.UnitName := 'Nonexistent.Unit';
+    LBuildEvidence.EvidenceItems.Add(LEvidenceItem);
+
+    LCompositionEvidence := LResolver.Resolve(LProjectInfo, LBuildEvidence);
+    try
+      Assert.AreEqual(NativeInt(1), NativeInt(LCompositionEvidence.Units.Count));
+      Assert.AreEqual('', LCompositionEvidence.Units[0].SecondaryHashSha256,
+        'Unresolved units must not have a SHA-256 hash');
+      Assert.AreEqual('', LCompositionEvidence.Units[0].PrimaryHashSha512,
+        'Unresolved units must not have a SHA-512 hash');
+    finally
+      LCompositionEvidence.Free;
+    end;
+  finally
+    LBuildEvidence.Free;
+    LProjectInfo.Free;
   end;
 end;
 

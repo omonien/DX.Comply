@@ -372,74 +372,15 @@ end;
 
 procedure TEngineTests.Generate_OutputFileContainsUnitEvidenceProperties;
 var
-  LComponent: TJSONObject;
-  LComponentProperties: TJSONArray;
+  LComponents: TJSONArray;
+  LComponentObj: TJSONObject;
   LConfig: TSbomConfig;
   LGen: TDxComplyGenerator;
   LContent: string;
   LJson: TJSONObject;
-  LMeta: TJSONObject;
-  LBuildTraceValue: string;
-  LSbomTraceValue: string;
+  LFoundLibrary: Boolean;
   LTestsDprojPath: string;
-  LUnitEvidenceGroup: string;
-
-  function FindPropertyValue(const AProperties: TJSONArray; const AName: string): string;
-  var
-    I: Integer;
-    LProperty: TJSONObject;
-  begin
-    Result := '';
-    for I := 0 to AProperties.Count - 1 do
-    begin
-      if not (AProperties.Items[I] is TJSONObject) then
-        Continue;
-
-      LProperty := TJSONObject(AProperties.Items[I]);
-      if SameText(LProperty.GetValue<string>('name'), AName) then
-        Exit(LProperty.GetValue<string>('value'));
-    end;
-  end;
-
-  function FindFirstUnitEvidenceGroup(const AProperties: TJSONArray;
-    const AUnitNamePrefix: string): string;
-  const
-    cUnitEvidencePrefix = 'net.developer-experts.dx-comply:unit-evidence.';
-    cNameSuffix = '.name';
-  var
-    I: Integer;
-    LName: string;
-    LProperty: TJSONObject;
-  begin
-    Result := '';
-    for I := 0 to AProperties.Count - 1 do
-    begin
-      if not (AProperties.Items[I] is TJSONObject) then
-        Continue;
-
-      LProperty := TJSONObject(AProperties.Items[I]);
-      LName := LProperty.GetValue<string>('name');
-      if Length(LName) <= Length(cNameSuffix) then
-        Continue;
-
-      if Copy(LName, 1, Length(cUnitEvidencePrefix)) <> cUnitEvidencePrefix then
-        Continue;
-
-      if Copy(LName, Length(LName) - Length(cNameSuffix) + 1,
-        Length(cNameSuffix)) <> cNameSuffix then
-        Continue;
-
-      if Trim(LProperty.GetValue<string>('value')) = '' then
-        Continue;
-
-      if (AUnitNamePrefix <> '') and
-        (Copy(LProperty.GetValue<string>('value'), 1,
-        Length(AUnitNamePrefix)) <> AUnitNamePrefix) then
-        Continue;
-
-      Exit(Copy(LName, 1, Length(LName) - Length(cNameSuffix)));
-    end;
-  end;
+  I: Integer;
 begin
   LTestsDprojPath := TPath.Combine(
     TPath.GetDirectoryName(TPath.GetDirectoryName(FEngineDprojPath)),
@@ -462,31 +403,26 @@ begin
     try
       Assert.IsNotNull(LJson, 'Output file must contain valid parseable JSON');
 
-      LMeta := LJson.GetValue('metadata') as TJSONObject;
-      LComponent := LMeta.GetValue('component') as TJSONObject;
-      LComponentProperties := LComponent.GetValue('properties') as TJSONArray;
+      LComponents := LJson.GetValue('components') as TJSONArray;
+      Assert.IsNotNull(LComponents, 'SBOM must contain a components array');
+      Assert.IsTrue(LComponents.Count > 1,
+        'SBOM must contain more than just the primary artefact');
 
-      Assert.IsNotNull(LComponentProperties,
-        'metadata.component.properties must be present for consolidated unit evidence');
-      Assert.AreNotEqual('', FindPropertyValue(LComponentProperties,
-        'net.developer-experts.dx-comply:unit-evidence.count'),
-        'Formal SBOM metadata must persist the consolidated unit-evidence count');
+      LFoundLibrary := False;
+      for I := 0 to LComponents.Count - 1 do
+      begin
+        LComponentObj := LComponents.Items[I] as TJSONObject;
+        if LComponentObj.GetValue<string>('type') = 'library' then
+        begin
+          LFoundLibrary := True;
+          Assert.IsTrue(LComponentObj.GetValue('hashes') <> nil,
+            'Library components must include hashes');
+          Break;
+        end;
+      end;
 
-      LUnitEvidenceGroup := FindFirstUnitEvidenceGroup(LComponentProperties,
-        'DUnitX.');
-      Assert.AreNotEqual('', LUnitEvidenceGroup,
-        'Formal SBOM metadata must persist concrete consolidated DUnitX unit-evidence rows');
-      Assert.AreNotEqual('', FindPropertyValue(LComponentProperties,
-        LUnitEvidenceGroup + '.name'));
-
-      LSbomTraceValue := FindPropertyValue(LComponentProperties,
-        LUnitEvidenceGroup + '.sbom-trace');
-      LBuildTraceValue := FindPropertyValue(LComponentProperties,
-        LUnitEvidenceGroup + '.build-trace');
-      Assert.IsTrue(SameText(LSbomTraceValue, 'true') or SameText(LBuildTraceValue, 'true'),
-        'Each persisted unit-evidence row must originate from SBOM or build evidence.');
-      Assert.AreNotEqual('', FindPropertyValue(LComponentProperties,
-        LUnitEvidenceGroup + '.location'));
+      Assert.IsTrue(LFoundLibrary,
+        'SBOM must contain library components for resolved unit evidence');
     finally
       LJson.Free;
     end;
