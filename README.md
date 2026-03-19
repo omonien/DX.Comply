@@ -83,7 +83,7 @@ DX.Comply produces standards-compliant **CycloneDX 1.5** SBOMs. Each linked unit
 
 1. Install the `DX.Comply.IDE` design-time package.
 2. **Open your project** in RAD Studio.
-3. Choose **Project > Generate SBOM (DX.Comply)** from the main menu.
+3. Choose **Project > DX.Comply > Generate documentation...** from the main menu.
 4. Confirm the Deep-Evidence build dialog — DX.Comply builds your project with detailed MAP generation, scans all evidence, and produces the SBOM.
 5. Done. Your `bom.json`, `bom.report.html`, and `bom.report.md` are in your project folder.
 

@@ -351,7 +351,13 @@ begin
       Exit;
     end;
 
-    LProjectPath := LProject.FileName;
+    LProjectPath := Trim(LProject.FileName);
+    if LProjectPath = '' then
+    begin
+      TIDELogger.Error('DX.Comply: The active project has no file name. Save the project first.');
+      Exit;
+    end;
+
     if not LProjectPath.EndsWith('.dproj', True) then
     begin
       TIDELogger.Error('DX.Comply: The active project is not a .dproj file: ' + LProjectPath);
@@ -565,6 +571,20 @@ begin
       if not LPlan.ShouldExecute then
       begin
         TIDELogger.Info('DX.Comply: Deep-Evidence auto-build is not required for the current project state.');
+        Exit;
+      end;
+
+      if LPlan.ScriptPath = '' then
+      begin
+        TIDELogger.Warning('DX.Comply: Build script (DelphiBuildDPROJ.ps1) not found. ' +
+          'Configure the path under Tools > Options > DX' + #$2024 + 'Comply, or place it ' +
+          'in a "build" folder next to your project. Skipping Deep-Evidence build.');
+        if AForceDeepEvidence and not ASettings.ContinueWithoutDeepEvidenceOnBuildFailure then
+        begin
+          Result := False;
+          Exit;
+        end;
+        AConfig.DeepEvidenceMode := debDisabled;
         Exit;
       end;
 
