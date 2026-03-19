@@ -31,6 +31,7 @@ interface
 
 uses
   System.SysUtils,
+  System.StrUtils,
   System.Classes,
   System.IOUtils,
   System.UITypes,
@@ -229,11 +230,12 @@ begin
     if not Assigned(LMainMenu) then
       Exit;
 
-    // Locate the top-level 'Project' menu by caption, stripping accelerators.
+    // Locate the top-level 'Project' menu. The Name property is language-independent,
+    // whereas Caption is localized (e.g., "Projekt" in German, "Projet" in French).
     LProjectMenu := nil;
     for I := 0 to LMainMenu.Items.Count - 1 do
     begin
-      if SameText(StringReplace(LMainMenu.Items[I].Caption, '&', '', [rfReplaceAll]), 'Project') then
+      if ContainsText(LMainMenu.Items[I].Name, 'Project') then
       begin
         LProjectMenu := LMainMenu.Items[I];
         Break;

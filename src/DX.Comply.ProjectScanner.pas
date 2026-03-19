@@ -308,9 +308,10 @@ begin
     // Read raw bytes to detect encoding
     LBytes := TFile.ReadAllBytes(AProjectPath);
 
-    // Detect BOM
+    // Detect BOM — fall back to system default (ANSI) for legacy .dproj files
+    // that were saved without BOM by older Delphi versions.
     LEncoding := nil;
-    TEncoding.GetBufferEncoding(LBytes, LEncoding, TEncoding.UTF8);
+    TEncoding.GetBufferEncoding(LBytes, LEncoding, TEncoding.Default);
 
     LContent.LoadFromFile(AProjectPath, LEncoding);
     FXmlText := LContent.Text;
