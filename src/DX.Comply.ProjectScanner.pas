@@ -534,7 +534,7 @@ begin
   if (Trim(AMainSourcePath) = '') or not TFile.Exists(AMainSourcePath) then
     Exit;
 
-  LContent := TFile.ReadAllText(AMainSourcePath, TEncoding.UTF8);
+  LContent := TFile.ReadAllText(AMainSourcePath);
   LMatches := TRegEx.Matches(LContent,
     '([A-Za-z0-9_.]+)\s+in\s+''([^'']+\.(?:pas|dcu|dcp|bpl))''',
     [roIgnoreCase, roSingleLine]);
