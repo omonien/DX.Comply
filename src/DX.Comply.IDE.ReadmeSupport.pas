@@ -187,7 +187,11 @@ begin
     LHtmlLines.Add('<html><head><meta charset="utf-8" />');
     LHtmlLines.Add('<meta http-equiv="X-UA-Compatible" content="IE=edge" />');
     LHtmlLines.Add('<title>' + EscapeHtml(ATitle) + '</title>');
-    LHtmlLines.Add('<style>body{font-family:Segoe UI,Tahoma,Arial,sans-serif;margin:0;background:#ffffff;color:#1f2937;line-height:1.55;}main{max-width:1100px;margin:0 auto;padding:24px;}h1,h2,h3,h4,h5,h6{color:#0f172a;margin:1.2em 0 0.5em;}p,ul,ol,blockquote,pre,.table-wrap{margin:0 0 1em;}blockquote{border-left:4px solid #7dd3fc;background:#f0f9ff;padding:12px 16px;}code{font-family:Cascadia Mono,Consolas,monospace;background:#f3f4f6;padding:1px 4px;}pre{background:#0f172a;color:#e2e8f0;padding:16px;overflow:auto;}pre code{background:transparent;padding:0;color:inherit;}table{border-collapse:collapse;width:100%;}th,td{border:1px solid #d1d5db;padding:8px 10px;vertical-align:top;}th{background:#f8fafc;text-align:left;}a{color:#0369a1;text-decoration:none;}a:hover{text-decoration:underline;}hr{border:none;border-top:1px solid #d1d5db;margin:1.5em 0;}</style></head><body><main>');
+    LHtmlLines.Add('<style>body{font-family:Segoe UI,Tahoma,Arial,sans-serif;margin:0;background:#ffffff;color:#1f2937;line-height:1.55;}main{max-width:1100px;margin:0 auto;'+
+      'padding:24px;}h1,h2,h3,h4,h5,h6{color:#0f172a;margin:1.2em 0 0.5em;}p,ul,ol,blockquote,pre,.table-wrap{margin:0 0 1em;}blockquote{border-left:4px solid #7dd3fc;'+
+      'background:#f0f9ff;padding:12px 16px;}code{font-family:Cascadia Mono,Consolas,monospace;background:#f3f4f6;padding:1px 4px;}pre{background:#0f172a;color:#e2e8f0;'+
+      'padding:16px;overflow:auto;}pre code{background:transparent;padding:0;color:inherit;}table{border-collapse:collapse;width:100%;}th,td{border:1px solid #d1d5db;'+
+      'padding:8px 10px;vertical-align:top;}th{background:#f8fafc;text-align:left;}a{color:#0369a1;text-decoration:none;}a:hover{text-decoration:underline;}hr{border:none;border-top:1px solid #d1d5db;margin:1.5em 0;}</style></head><body><main>');
 
     LListKind := lkNone;
     I := 0;
