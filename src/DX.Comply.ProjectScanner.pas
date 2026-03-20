@@ -801,12 +801,15 @@ begin
   // 2. Platform-specific (Condition contains '$(Base_Win32)' etc.)
   if FCurrentPlatform <> '' then
   begin
-    LBlock := GetPropertyGroupContent('$(Base_' + FCurrentPlatform + ')');
-    if LBlock <> '' then
+    LBlocks := GetPropertyGroupContents('$(Base_' + FCurrentPlatform + ')');
+    for I := 0 to High(LBlocks) do
     begin
-      LValue := GetElementValue(LBlock, AName);
-      if LValue <> '' then
-        Result := LValue;
+      LBlock := LBlocks[I];
+      begin
+        LValue := GetElementValue(LBlock, AName);
+        if LValue <> '' then
+          Result := LValue;
+      end;
     end;
   end;
 
