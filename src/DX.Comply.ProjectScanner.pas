@@ -864,7 +864,18 @@ begin
   //    e.g. Condition="'$(Configuration)|$(Platform)'=='Release|Win32'"
   if FCurrentConfig <> '' then
   begin
-    LBlock := GetPropertyGroupContent(FCurrentConfig + '|' + FCurrentPlatform);
+    if FCurrentPlatform <> '' then
+    begin
+      LBlock := GetPropertyGroupContent(FCurrentConfig + '|' + FCurrentPlatform);
+      if LBlock <> '' then
+      begin
+        LValue := GetElementValue(LBlock, AName);
+        if LValue <> '' then
+          Result := LValue;
+      end;
+    end;
+    // AnyCPU fallback — used by old .dproj files without platform-specific blocks
+    LBlock := GetPropertyGroupContent(FCurrentConfig + '|AnyCPU');
     if LBlock <> '' then
     begin
       LValue := GetElementValue(LBlock, AName);

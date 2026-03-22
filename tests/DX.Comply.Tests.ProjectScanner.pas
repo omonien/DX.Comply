@@ -133,6 +133,16 @@ type
     /// <summary>When scanning with Win64, OutputDir must contain 'Win64'.</summary>
     [Test]
     procedure Scan_Win64Platform_OutputDirContainsWin64;
+
+    // ---- Legacy Delphi 2007 format ------------------------------------------
+
+    /// <summary>Must extract properties from $(Configuration)|$(Platform) conditions.</summary>
+    [Test]
+    procedure Scan_LegacyConfigPlatformCondition_ExtractsOutputDir;
+
+    /// <summary>Must extract properties from AnyCPU fallback conditions.</summary>
+    [Test]
+    procedure Scan_LegacyAnyCPUCondition_ExtractsOutputDir;
   end;
 
 implementation
@@ -465,6 +475,87 @@ begin
       'OutputDir must contain Win64 when the Win64 platform is requested');
   finally
     LProjectInfo.Free;
+  end;
+end;
+
+// ---- Legacy Delphi 2007 format -----------------------------------------------
+
+procedure TProjectScannerTests.Scan_LegacyConfigPlatformCondition_ExtractsOutputDir;
+var
+  LTempDir: string;
+  LTempDproj: string;
+  LProjectInfo: TProjectInfo;
+  LScanner: IProjectScanner;
+const
+  cLegacyDproj =
+    '<?xml version="1.0" encoding="utf-8"?>' + sLineBreak +
+    '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">' + sLineBreak +
+    '  <PropertyGroup>' + sLineBreak +
+    '    <MainSource>LegacyApp.dpr</MainSource>' + sLineBreak +
+    '    <ProjectGuid>{00000000-0000-0000-0000-000000000001}</ProjectGuid>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '  <PropertyGroup Condition="''$(Configuration)|$(Platform)''==''Release|Win32''">' + sLineBreak +
+    '    <DCC_ExeOutput>.\output\release</DCC_ExeOutput>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '  <PropertyGroup Condition="''$(Configuration)|$(Platform)''==''Debug|Win32''">' + sLineBreak +
+    '    <DCC_ExeOutput>.\output\debug</DCC_ExeOutput>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '</Project>';
+begin
+  LTempDir := TPath.Combine(TPath.GetTempPath, 'DXComplyTest_Legacy');
+  ForceDirectories(LTempDir);
+  LTempDproj := TPath.Combine(LTempDir, 'LegacyApp.dproj');
+  try
+    TFile.WriteAllText(LTempDproj, cLegacyDproj, TEncoding.UTF8);
+    LScanner := TProjectScanner.Create;
+    LProjectInfo := LScanner.Scan(LTempDproj, 'Win32', 'Release');
+    try
+      Assert.IsTrue(Pos('release', LowerCase(LProjectInfo.OutputDir)) > 0,
+        'Legacy $(Configuration)|$(Platform) condition must resolve the Release output directory');
+    finally
+      LProjectInfo.Free;
+    end;
+  finally
+    TFile.Delete(LTempDproj);
+    TDirectory.Delete(LTempDir);
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_LegacyAnyCPUCondition_ExtractsOutputDir;
+var
+  LTempDir: string;
+  LTempDproj: string;
+  LProjectInfo: TProjectInfo;
+  LScanner: IProjectScanner;
+const
+  cAnyCpuDproj =
+    '<?xml version="1.0" encoding="utf-8"?>' + sLineBreak +
+    '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">' + sLineBreak +
+    '  <PropertyGroup>' + sLineBreak +
+    '    <MainSource>OldApp.dpr</MainSource>' + sLineBreak +
+    '    <ProjectGuid>{00000000-0000-0000-0000-000000000002}</ProjectGuid>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '  <PropertyGroup Condition="''$(Configuration)|$(Platform)''==''Release|AnyCPU''">' + sLineBreak +
+    '    <DCC_ExeOutput>.\bin</DCC_ExeOutput>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '</Project>';
+begin
+  LTempDir := TPath.Combine(TPath.GetTempPath, 'DXComplyTest_AnyCPU');
+  ForceDirectories(LTempDir);
+  LTempDproj := TPath.Combine(LTempDir, 'OldApp.dproj');
+  try
+    TFile.WriteAllText(LTempDproj, cAnyCpuDproj, TEncoding.UTF8);
+    LScanner := TProjectScanner.Create;
+    LProjectInfo := LScanner.Scan(LTempDproj, 'Win32', 'Release');
+    try
+      Assert.IsTrue(Pos('bin', LowerCase(LProjectInfo.OutputDir)) > 0,
+        'AnyCPU fallback condition must resolve the output directory when no platform-specific block exists');
+    finally
+      LProjectInfo.Free;
+    end;
+  finally
+    TFile.Delete(LTempDproj);
+    TDirectory.Delete(LTempDir);
   end;
 end;
 

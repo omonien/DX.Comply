@@ -86,6 +86,8 @@ type
     WarnOnEmptyCompositionEvidence: Boolean;
     /// <summary>Optional human-readable companion report settings.</summary>
     HumanReadableReport: THumanReadableReportConfig;
+    /// <summary>Optional override directory for the MAP file location.</summary>
+    MapFileDir: string;
     /// <summary>Creates a new TSbomConfig with default values.</summary>
     class function Default: TSbomConfig; static;
   end;
@@ -560,6 +562,10 @@ begin
             Result.HumanReadableReport.IncludeBuildEvidence :=
               LReport.GetValue<Boolean>('includeBuildEvidence');
         end;
+
+        // MAP file directory override
+        if LJson.GetValue('mapDir') <> nil then
+          Result.MapFileDir := LJson.GetValue<string>('mapDir');
       end;
     finally
       LJson.Free;
@@ -779,6 +785,12 @@ begin
   LReportedWarnings := TList<string>.Create;
   try
     LProjectInfo := FProjectScanner.Scan(AProjectPath, FConfig.Platform, FConfig.Configuration);
+
+    // Apply MapFileDir override — allows legacy projects to specify where the
+    // MAP file is located when automatic detection from the .dproj fails.
+    if FConfig.MapFileDir <> '' then
+      LProjectInfo.MapFilePath := TPath.Combine(FConfig.MapFileDir,
+        LProjectInfo.ProjectName + LProjectInfo.DllSuffix + '.map');
   except
     on E: Exception do
     begin

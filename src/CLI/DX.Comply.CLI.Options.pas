@@ -48,6 +48,7 @@ type
     FHelp: Boolean;
     FVerbose: Boolean;
     FNoPause: Boolean;
+    FMapDir: string;
     FParseError: string;
     /// <summary>
     /// Converts a format string token to the corresponding TSbomFormat enum
@@ -90,6 +91,7 @@ type
     property Help: Boolean read FHelp;
     property Verbose: Boolean read FVerbose;
     property NoPause: Boolean read FNoPause;
+    property MapDir: string read FMapDir;
     property ParseError: string read FParseError;
   end;
 
@@ -212,6 +214,8 @@ begin
         AppendPattern(FExcludePatterns, LValue)
       else if LKey = 'config' then
         FConfigFile := LValue
+      else if LKey = 'map-dir' then
+        FMapDir := LValue
       else
       begin
         FParseError := 'Unknown option: --' + LKey;
@@ -267,6 +271,7 @@ begin
   Writeln('  --supplier=<name>             Supplier/company name');
   Writeln('  --include=<pattern>           File include pattern (repeatable)');
   Writeln('  --exclude=<pattern>           File exclude pattern (repeatable)');
+  Writeln('  --map-dir=<path>              Directory containing the pre-built MAP file');
   Writeln('  --ci                          CI mode: use .dxcomply.json config file');
   Writeln('  --config=<path>               Path to .dxcomply.json (default: .dxcomply.json)');
   Writeln('  --help, -h                    Show this help');
@@ -299,6 +304,7 @@ begin
   Result.Supplier        := FSupplier;
   Result.IncludePatterns := FIncludePatterns;
   Result.ExcludePatterns := FExcludePatterns;
+  Result.MapFileDir      := FMapDir;
 end;
 
 end.

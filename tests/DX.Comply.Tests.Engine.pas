@@ -131,6 +131,14 @@ type
     /// <summary>Deep-Evidence builds must be disabled by default.</summary>
     [Test]
     procedure Config_Default_DeepEvidenceBuildDisabled;
+
+    /// <summary>MapFileDir must be empty by default.</summary>
+    [Test]
+    procedure Config_Default_MapFileDirEmpty;
+
+    /// <summary>MapFileDir override must redirect the expected MAP file path.</summary>
+    [Test]
+    procedure Config_MapFileDirOverride_RedirectsMapFilePath;
   end;
 
 implementation
@@ -569,6 +577,31 @@ begin
   Assert.AreEqual(NativeInt(Ord(hrfMarkdown)),
     NativeInt(Ord(LConfig.HumanReadableReport.Format)),
     'TSbomConfig.Default.HumanReadableReport.Format must be hrfMarkdown');
+end;
+
+procedure TEngineTests.Config_Default_MapFileDirEmpty;
+var
+  LConfig: TSbomConfig;
+begin
+  LConfig := TSbomConfig.Default;
+  Assert.AreEqual('', LConfig.MapFileDir,
+    'TSbomConfig.Default.MapFileDir must be empty');
+end;
+
+procedure TEngineTests.Config_MapFileDirOverride_RedirectsMapFilePath;
+var
+  LGenerator: TDxComplyGenerator;
+  LConfig: TSbomConfig;
+begin
+  LConfig := TSbomConfig.Default;
+  LConfig.MapFileDir := 'C:\CustomMapDir';
+  LGenerator := TDxComplyGenerator.Create(LConfig);
+  try
+    Assert.AreEqual('C:\CustomMapDir', LGenerator.Config.MapFileDir,
+      'MapFileDir must be preserved in the generator config');
+  finally
+    LGenerator.Free;
+  end;
 end;
 
 initialization
