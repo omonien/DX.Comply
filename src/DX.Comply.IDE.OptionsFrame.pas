@@ -43,11 +43,7 @@ type
     FUseActiveBuildConfigurationCheckBox: TCheckBox;
     FOpenHtmlReportAfterGenerateCheckBox: TCheckBox;
     FWarnWhenCompositionEmptyCheckBox: TCheckBox;
-    BuildScriptPathLabel: TLabel;
-    FBuildScriptPathEdit: TEdit;
-    FBrowseScriptButton: TButton;
-    DelphiVersionLabel: TLabel;
-    FDelphiVersionEdit: TEdit;
+    FContinueOnBuildFailureCheckBox: TCheckBox;
     FReportEnabledCheckBox: TCheckBox;
     ReportFormatLabel: TLabel;
     FReportFormatComboBox: TComboBox;
@@ -60,7 +56,6 @@ type
   private
     FReadmeBrowser: TWebBrowser;
     procedure AboutButtonClick(Sender: TObject);
-    procedure BrowseScriptButtonClick(Sender: TObject);
     procedure InitializeReadmeBrowser;
     procedure LoadReadmeInfoPage;
     /// <summary>
@@ -107,7 +102,6 @@ constructor TFrameDXComplyOptions.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
   Align := alClient;
-  FBrowseScriptButton.OnClick := BrowseScriptButtonClick;
   FAboutButton.OnClick := AboutButtonClick;
   FPageControl.ActivePage := FSettingsTabSheet;
   InitializeReadmeBrowser;
@@ -117,21 +111,6 @@ end;
 procedure TFrameDXComplyOptions.AboutButtonClick(Sender: TObject);
 begin
   ShowDXComplyAboutDialog;
-end;
-
-procedure TFrameDXComplyOptions.BrowseScriptButtonClick(Sender: TObject);
-var
-  LDialog: TOpenDialog;
-begin
-  LDialog := TOpenDialog.Create(nil);
-  try
-    LDialog.Filter := 'PowerShell scripts (*.ps1)|*.ps1|All files (*.*)|*.*';
-    LDialog.FileName := FBuildScriptPathEdit.Text;
-    if LDialog.Execute then
-      FBuildScriptPathEdit.Text := LDialog.FileName;
-  finally
-    LDialog.Free;
-  end;
 end;
 
 procedure TFrameDXComplyOptions.InitializeReadmeBrowser;
@@ -168,8 +147,7 @@ begin
   FUseActiveBuildConfigurationCheckBox.Checked := ASettings.UseActiveBuildConfiguration;
   FOpenHtmlReportAfterGenerateCheckBox.Checked := ASettings.OpenHtmlReportAfterGenerate;
   FWarnWhenCompositionEmptyCheckBox.Checked := ASettings.WarnWhenCompositionEvidenceIsEmpty;
-  FBuildScriptPathEdit.Text := ASettings.BuildScriptPath;
-  FDelphiVersionEdit.Text := IntToStr(ASettings.DelphiVersionOverride);
+  FContinueOnBuildFailureCheckBox.Checked := ASettings.ContinueWithoutDeepEvidenceOnBuildFailure;
   FReportEnabledCheckBox.Checked := ASettings.HumanReadableReport.Enabled;
   case ASettings.HumanReadableReport.Format of
     hrfHtml: FReportFormatComboBox.ItemIndex := 1;
@@ -190,11 +168,9 @@ begin
   Result.PromptBeforeBuild := FPromptBeforeBuildCheckBox.Checked;
   Result.SaveAllModifiedFilesBeforeBuild := FSaveAllModifiedFilesCheckBox.Checked;
   Result.UseActiveBuildConfiguration := FUseActiveBuildConfigurationCheckBox.Checked;
-  Result.ContinueWithoutDeepEvidenceOnBuildFailure := False;
+  Result.ContinueWithoutDeepEvidenceOnBuildFailure := FContinueOnBuildFailureCheckBox.Checked;
   Result.OpenHtmlReportAfterGenerate := FOpenHtmlReportAfterGenerateCheckBox.Checked;
   Result.WarnWhenCompositionEvidenceIsEmpty := FWarnWhenCompositionEmptyCheckBox.Checked;
-  Result.BuildScriptPath := Trim(FBuildScriptPathEdit.Text);
-  Result.DelphiVersionOverride := StrToIntDef(Trim(FDelphiVersionEdit.Text), -1);
   Result.HumanReadableReport.Enabled := FReportEnabledCheckBox.Checked;
   case FReportFormatComboBox.ItemIndex of
     1: Result.HumanReadableReport.Format := hrfHtml;
@@ -209,24 +185,7 @@ begin
 end;
 
 function TFrameDXComplyOptions.ValidateSettings(out AMessage: string): Boolean;
-var
-  LSettings: TDXComplyIDESettings;
 begin
-  LSettings := SaveSettings;
-  Result := False;
-
-  if LSettings.DelphiVersionOverride < 0 then
-  begin
-    AMessage := 'The Delphi version override must be 0 or a positive integer.';
-    Exit;
-  end;
-
-  if (LSettings.BuildScriptPath <> '') and not TFile.Exists(LSettings.BuildScriptPath) then
-  begin
-    AMessage := 'The configured build script path does not exist: ' + LSettings.BuildScriptPath;
-    Exit;
-  end;
-
   AMessage := '';
   Result := True;
 end;

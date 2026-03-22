@@ -298,30 +298,19 @@ end;
 
 procedure TProjectScanner.LoadProjectFile(const AProjectPath: string);
 var
-  LContent: TStringList;
   LBytes: TBytes;
   LEncoding: TEncoding;
+  LPreambleSize: Integer;
 begin
-  // Try loading with automatic BOM detection first
-  LContent := TStringList.Create;
-  try
-    // Read raw bytes to detect encoding
-    LBytes := TFile.ReadAllBytes(AProjectPath);
+  LBytes := TFile.ReadAllBytes(AProjectPath);
 
-    // Detect BOM — fall back to system default (ANSI) for legacy .dproj files
-    // that were saved without BOM by older Delphi versions.
-    LEncoding := nil;
-    TEncoding.GetBufferEncoding(LBytes, LEncoding, TEncoding.Default);
+  // Detect BOM. Fall back to UTF-8 because .dproj files are XML and modern
+  // Delphi versions save them as UTF-8 (with or without BOM). Legacy ANSI
+  // project files that contain only ASCII will decode identically under UTF-8.
+  LEncoding := nil;
+  LPreambleSize := TEncoding.GetBufferEncoding(LBytes, LEncoding, TEncoding.UTF8);
 
-    LContent.LoadFromFile(AProjectPath, LEncoding);
-    FXmlText := LContent.Text;
-
-    // Remove BOM character if still present at the start
-    if (Length(FXmlText) > 0) and (Ord(FXmlText[1]) = $FEFF) then
-      FXmlText := FXmlText.Substring(1);
-  finally
-    LContent.Free;
-  end;
+  FXmlText := LEncoding.GetString(LBytes, LPreambleSize, Length(LBytes) - LPreambleSize);
 end;
 
 function TProjectScanner.DetectConfigKey(const AConfigName: string): string;
@@ -534,7 +523,7 @@ begin
   if (Trim(AMainSourcePath) = '') or not TFile.Exists(AMainSourcePath) then
     Exit;
 
-  LContent := TFile.ReadAllText(AMainSourcePath, TEncoding.UTF8);
+  LContent := TFile.ReadAllText(AMainSourcePath);
   LMatches := TRegEx.Matches(LContent,
     '([A-Za-z0-9_.]+)\s+in\s+''([^'']+\.(?:pas|dcu|dcp|bpl))''',
     [roIgnoreCase, roSingleLine]);
@@ -801,10 +790,10 @@ begin
   // 2. Platform-specific (Condition contains '$(Base_Win32)' etc.)
   if FCurrentPlatform <> '' then
   begin
-    LBlock := GetPropertyGroupContent('$(Base_' + FCurrentPlatform + ')');
-    if LBlock <> '' then
+    LBlocks := GetPropertyGroupContents('$(Base_' + FCurrentPlatform + ')');
+    for I := 0 to High(LBlocks) do
     begin
-      LValue := GetElementValue(LBlock, AName);
+      LValue := GetElementValue(LBlocks[I], AName);
       if LValue <> '' then
         Result := LValue;
     end;
@@ -813,10 +802,10 @@ begin
   // 3. Config-specific — use the detected Cfg_N key
   if FConfigKey <> '' then
   begin
-    LBlock := GetPropertyGroupContent('$(' + FConfigKey + ')');
-    if LBlock <> '' then
+    LBlocks := GetPropertyGroupContents('$(' + FConfigKey + ')');
+    for I := 0 to High(LBlocks) do
     begin
-      LValue := GetElementValue(LBlock, AName);
+      LValue := GetElementValue(LBlocks[I], AName);
       if LValue <> '' then
         Result := LValue;
     end;
@@ -839,6 +828,7 @@ function TProjectScanner.ExtractRuntimePackages: TList<string>;
 var
   LPackages: TList<string>;
   LBlock, LPackageStr: string;
+  LBlocks: TArray<string>;
   LPackageArray: TArray<string>;
   I: Integer;
 begin
@@ -853,10 +843,10 @@ begin
   // Also check platform-specific UsePackage
   if FCurrentPlatform <> '' then
   begin
-    LBlock := GetPropertyGroupContent('$(Base_' + FCurrentPlatform + ')');
-    if LBlock <> '' then
+    LBlocks := GetPropertyGroupContents('$(Base_' + FCurrentPlatform + ')');
+    for I := 0 to High(LBlocks) do
     begin
-      var LPlatformPackages := GetElementValue(LBlock, 'DCC_UsePackage');
+      var LPlatformPackages := GetElementValue(LBlocks[I], 'DCC_UsePackage');
       if LPlatformPackages <> '' then
       begin
         if LPackageStr <> '' then
