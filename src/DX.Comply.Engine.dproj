@@ -48,10 +48,10 @@
         <GenPackage>true</GenPackage>
         <VerInfo_Build>0</VerInfo_Build>
         <VerInfo_IncludeVerInfo>true</VerInfo_IncludeVerInfo>
-        <VerInfo_Keys>CompanyName=Olaf Monien;FileDescription=DX.Comply SBOM Generation Engine;FileVersion=1.0.0.0;InternalName=DX.Comply.Engine;LegalCopyright=Copyright © 2026 Olaf Monien;LegalTrademarks=;OriginalFilename=DX.Comply.Engine.bpl;ProductName=DX.Comply;ProductVersion=1.0.0.0;Comments=MIT License</VerInfo_Keys>
+        <VerInfo_Keys>CompanyName=Olaf Monien;FileDescription=DX.Comply SBOM Generation Engine;FileVersion=1.1.0.0;InternalName=DX.Comply.Engine;LegalCopyright=Copyright © 2026 Olaf Monien;LegalTrademarks=;OriginalFilename=DX.Comply.Engine.bpl;ProductName=DX.Comply;ProductVersion=1.1.0.0;Comments=MIT License</VerInfo_Keys>
         <VerInfo_Locale>1031</VerInfo_Locale>
         <VerInfo_MajorVer>1</VerInfo_MajorVer>
-        <VerInfo_MinorVer>0</VerInfo_MinorVer>
+        <VerInfo_MinorVer>1</VerInfo_MinorVer>
         <VerInfo_Release>0</VerInfo_Release>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Base_Win32)'!=''">
@@ -60,7 +60,7 @@
         <DCC_UsePackage>rtl;xmlrtl;$(DCC_UsePackage)</DCC_UsePackage>
         <Icon_MainIcon>$(BDS)\bin\delphi_PROJECTICON.ico</Icon_MainIcon>
         <Manifest_File>$(BDS)\bin\default_app.manifest</Manifest_File>
-        <VerInfo_Keys>CompanyName=Olaf Monien;FileDescription=DX.Comply SBOM Generation Engine;FileVersion=1.0.0.0;InternalName=DX.Comply.Engine;LegalCopyright=Copyright © 2026 Olaf Monien;LegalTrademarks=;OriginalFilename=DX.Comply.Engine.bpl;ProductName=DX.Comply;ProductVersion=1.0.0.0;Comments=MIT License</VerInfo_Keys>
+        <VerInfo_Keys>CompanyName=Olaf Monien;FileDescription=DX.Comply SBOM Generation Engine;FileVersion=1.1.0.0;InternalName=DX.Comply.Engine;LegalCopyright=Copyright © 2026 Olaf Monien;LegalTrademarks=;OriginalFilename=DX.Comply.Engine.bpl;ProductName=DX.Comply;ProductVersion=1.1.0.0;Comments=MIT License</VerInfo_Keys>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Base_Win64)'!=''">
         <AppEnableHighDPI>true</AppEnableHighDPI>
@@ -68,7 +68,7 @@
         <DCC_UsePackage>rtl;xmlrtl;$(DCC_UsePackage)</DCC_UsePackage>
         <Icon_MainIcon>$(BDS)\bin\delphi_PROJECTICON.ico</Icon_MainIcon>
         <Manifest_File>$(BDS)\bin\default_app.manifest</Manifest_File>
-        <VerInfo_Keys>CompanyName=Olaf Monien;FileDescription=DX.Comply SBOM Generation Engine;FileVersion=1.0.0.0;InternalName=DX.Comply.Engine;LegalCopyright=Copyright © 2026 Olaf Monien;LegalTrademarks=;OriginalFilename=DX.Comply.Engine.bpl;ProductName=DX.Comply;ProductVersion=1.0.0.0;Comments=MIT License</VerInfo_Keys>
+        <VerInfo_Keys>CompanyName=Olaf Monien;FileDescription=DX.Comply SBOM Generation Engine;FileVersion=1.1.0.0;InternalName=DX.Comply.Engine;LegalCopyright=Copyright © 2026 Olaf Monien;LegalTrademarks=;OriginalFilename=DX.Comply.Engine.bpl;ProductName=DX.Comply;ProductVersion=1.1.0.0;Comments=MIT License</VerInfo_Keys>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Cfg_1)'!=''">
         <DCC_DebugInformation>1</DCC_DebugInformation>
