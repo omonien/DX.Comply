@@ -78,6 +78,11 @@ type
     /// </summary>
     function GetPropertyGroupContent(const ACondition: string): string;
     /// <summary>
+    /// Returns the content of the first PropertyGroup without a Condition attribute.
+    /// Used for legacy Delphi 2007 projects where defaults live in unconditional blocks.
+    /// </summary>
+    function GetUnconditionalPropertyGroupContent: string;
+    /// <summary>
     /// Reads the text content of element AName from AXmlBlock.
     /// </summary>
     function GetElementValue(const AXmlBlock, AName: string): string;
@@ -679,6 +684,29 @@ begin
   end;
 end;
 
+function TProjectScanner.GetUnconditionalPropertyGroupContent: string;
+var
+  LPattern: string;
+  LMatch: TMatch;
+  LMatches: TMatchCollection;
+begin
+  Result := '';
+  LPattern := '<PropertyGroup(?:\s[^>]*)?>.*?</PropertyGroup>';
+  LMatches := TRegEx.Matches(FXmlText, LPattern, [roIgnoreCase, roSingleLine]);
+
+  for LMatch in LMatches do
+  begin
+    // Skip groups that have a Condition attribute
+    if TRegEx.IsMatch(LMatch.Value, 'Condition\s*=\s*"', [roIgnoreCase]) then
+      Continue;
+    // Skip the Project Extensions group
+    if Pos('<ProjectExtensions', LMatch.Value) > 0 then
+      Continue;
+    Result := LMatch.Value;
+    Exit;
+  end;
+end;
+
 function TProjectScanner.GetElementValue(const AXmlBlock, AName: string): string;
 var
   LPattern: string;
@@ -774,6 +802,15 @@ var
 begin
   Result := ADefault;
 
+  // 0. Unconditional PropertyGroup (no Condition attribute — Delphi 2007 default)
+  LBlock := GetUnconditionalPropertyGroupContent;
+  if LBlock <> '' then
+  begin
+    LValue := GetElementValue(LBlock, AName);
+    if LValue <> '' then
+      Result := LValue;
+  end;
+
   // 1. Base PropertyGroup (Condition contains '$(Base)')
   LBlocks := GetPropertyGroupContents('$(Base)');
   for I := 0 to High(LBlocks) do
@@ -818,6 +855,19 @@ begin
     for I := 0 to High(LBlocks) do
     begin
       LValue := GetElementValue(LBlocks[I], AName);
+      if LValue <> '' then
+        Result := LValue;
+    end;
+  end;
+
+  // 5. Legacy format (Delphi 2007): $(Configuration)|$(Platform) conditions
+  //    e.g. Condition="'$(Configuration)|$(Platform)'=='Release|Win32'"
+  if FCurrentConfig <> '' then
+  begin
+    LBlock := GetPropertyGroupContent(FCurrentConfig + '|' + FCurrentPlatform);
+    if LBlock <> '' then
+    begin
+      LValue := GetElementValue(LBlock, AName);
       if LValue <> '' then
         Result := LValue;
     end;
