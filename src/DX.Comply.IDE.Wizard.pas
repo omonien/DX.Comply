@@ -129,9 +129,16 @@ type
       const ASettings: TDXComplyIDESettings; const AConfig: TSbomConfig);
     /// <summary>
     /// Attempts a Deep-Evidence build via the OTA project builder on the main thread.
-    /// Temporarily forces DCC_MapFile=3 and restores the original value after the build.
+    /// Temporarily forces DCC_MapFile=3 and switches to AConfiguration if non-empty.
+    /// Restores the original configuration and MAP setting after the build.
     /// </summary>
-    function TryOTADeepEvidenceBuild(const AExpectedMapFilePath: string): Boolean;
+    function TryOTADeepEvidenceBuild(const AConfiguration: string;
+      const AExpectedMapFilePath: string): Boolean;
+    /// <summary>
+    /// Returns the list of build configuration names from the active project.
+    /// </summary>
+    function GetProjectConfigurations(out AConfigurations: TArray<string>;
+      out AActiveConfiguration: string): Boolean;
     /// <summary>
     /// Prepares optional Deep-Evidence automation and adjusts the config if the user declines it.
     /// </summary>
@@ -536,14 +543,55 @@ begin
     TIDELogger.Warning('DX.Comply: Failed to open the HTML report in the default browser: ' + LHtmlReportPath);
 end;
 
-function TDxComplyWizard.TryOTADeepEvidenceBuild(
+function TDxComplyWizard.GetProjectConfigurations(
+  out AConfigurations: TArray<string>;
+  out AActiveConfiguration: string): Boolean;
+var
+  LProject: IOTAProject;
+  LConfigs: IOTAProjectOptionsConfigurations;
+  I: Integer;
+  LConfig: IOTABuildConfiguration;
+begin
+  Result := False;
+  SetLength(AConfigurations, 0);
+  AActiveConfiguration := '';
+
+  LProject := GetActiveProject;
+  if not Assigned(LProject) then
+    Exit;
+
+  if not Supports(LProject.ProjectOptions, IOTAProjectOptionsConfigurations, LConfigs) then
+    Exit;
+
+  if Assigned(LConfigs.ActiveConfiguration) then
+    AActiveConfiguration := LConfigs.ActiveConfiguration.Name;
+
+  for I := 0 to LConfigs.ConfigurationCount - 1 do
+  begin
+    LConfig := LConfigs.Configurations[I];
+    if SameText(LConfig.Name, 'Base') then
+      Continue;
+    SetLength(AConfigurations, Length(AConfigurations) + 1);
+    AConfigurations[High(AConfigurations)] := LConfig.Name;
+  end;
+
+  Result := Length(AConfigurations) > 0;
+end;
+
+function TDxComplyWizard.TryOTADeepEvidenceBuild(const AConfiguration: string;
   const AExpectedMapFilePath: string): Boolean;
 var
   LProject: IOTAProject;
   LProjectOptions: IOTAProjectOptions;
+  LConfigs: IOTAProjectOptionsConfigurations;
   LOriginalMapFileValue: Variant;
+  LOriginalConfig: IOTABuildConfiguration;
+  LTargetConfig: IOTABuildConfiguration;
+  LConfigSwitched: Boolean;
+  I: Integer;
 begin
   Result := False;
+  LConfigSwitched := False;
   LProject := GetActiveProject;
   if not Assigned(LProject) then
   begin
@@ -556,6 +604,32 @@ begin
   begin
     TIDELogger.Warning('DX.Comply: OTA build skipped - project options not available.');
     Exit;
+  end;
+
+  LOriginalConfig := nil;
+  if (AConfiguration <> '') and
+    Supports(LProjectOptions, IOTAProjectOptionsConfigurations, LConfigs) then
+  begin
+    LOriginalConfig := LConfigs.ActiveConfiguration;
+    if not SameText(LOriginalConfig.Name, AConfiguration) then
+    begin
+      LTargetConfig := nil;
+      for I := 0 to LConfigs.ConfigurationCount - 1 do
+      begin
+        if SameText(LConfigs.Configurations[I].Name, AConfiguration) then
+        begin
+          LTargetConfig := LConfigs.Configurations[I];
+          Break;
+        end;
+      end;
+
+      if Assigned(LTargetConfig) then
+      begin
+        LConfigs.ActiveConfiguration := LTargetConfig;
+        LConfigSwitched := True;
+        TIDELogger.Info('DX.Comply: Switched to configuration "' + AConfiguration + '" for MAP build.');
+      end;
+    end;
   end;
 
   LOriginalMapFileValue := LProjectOptions.Values['DCC_MapFile'];
@@ -580,6 +654,12 @@ begin
       TIDELogger.Warning('DX.Comply: OTA Deep-Evidence build failed.');
   finally
     LProjectOptions.Values['DCC_MapFile'] := LOriginalMapFileValue;
+    if LConfigSwitched and Assigned(LOriginalConfig) then
+    begin
+      LConfigs.ActiveConfiguration := LOriginalConfig;
+      TIDELogger.Info('DX.Comply: Restored original configuration "' +
+        LOriginalConfig.Name + '".');
+    end;
   end;
 end;
 
@@ -587,6 +667,11 @@ function TDxComplyWizard.TryPrepareDeepEvidenceBuild(const AProjectPath: string;
   const ASettings: TDXComplyIDESettings; var AConfig: TSbomConfig;
   AForceDeepEvidence: Boolean): Boolean;
 var
+  LConfigurations: TArray<string>;
+  LActiveConfiguration: string;
+  LSelectedConfiguration: string;
+  LDisablePrompt: Boolean;
+  LUpdatedSettings: TDXComplyIDESettings;
   LProjectInfo: TProjectInfo;
   LProjectScanner: IProjectScanner;
 begin
@@ -595,28 +680,47 @@ begin
     Exit;
 
   try
-    LProjectScanner := TProjectScanner.Create;
-    LProjectInfo := LProjectScanner.Scan(AProjectPath, AConfig.Platform, AConfig.Configuration);
-    try
-      TIDELogger.Info('DX.Comply: Deep-Evidence build prepared for ' +
-        AConfig.Configuration + '/' + AConfig.Platform + '.');
-      if Trim(LProjectInfo.MapFilePath) <> '' then
-        TIDELogger.Info('DX.Comply: Expected MAP file: ' + LProjectInfo.MapFilePath);
+    if not GetProjectConfigurations(LConfigurations, LActiveConfiguration) then
+      LActiveConfiguration := AConfig.Configuration;
 
+    LSelectedConfiguration := LActiveConfiguration;
+
+    LProjectScanner := TProjectScanner.Create;
+    LProjectInfo := LProjectScanner.Scan(AProjectPath, AConfig.Platform, LActiveConfiguration);
+    try
       if ASettings.PromptBeforeBuild then
       begin
-        if MessageDlg('DX.Comply will compile the project with detailed MAP output ' +
-          'to collect Deep-Evidence data.' + sLineBreak + sLineBreak +
-          'Project: ' + AProjectPath + sLineBreak +
-          'Configuration: ' + AConfig.Configuration + ' / ' + AConfig.Platform + sLineBreak +
-          sLineBreak + 'Continue?',
-          mtConfirmation, [mbYes, mbNo], 0) <> mrYes then
+        if not ShowDXComplyBuildConfirmationDialog(AProjectPath,
+          LConfigurations, LActiveConfiguration,
+          AConfig.Platform, LProjectInfo.MapFilePath,
+          LSelectedConfiguration, LDisablePrompt) then
         begin
           TIDELogger.Warning('DX.Comply: CRA compliance generation was cancelled by the user.');
           Result := False;
           Exit;
         end;
+
+        if LDisablePrompt then
+        begin
+          LUpdatedSettings := ASettings;
+          LUpdatedSettings.PromptBeforeBuild := False;
+          TDXComplyIDESettingsStore.Save(LUpdatedSettings);
+          TIDELogger.Info('DX.Comply: The build confirmation dialog was disabled in IDE settings.');
+        end;
       end;
+
+      AConfig.Configuration := LSelectedConfiguration;
+      TIDELogger.Info('DX.Comply: Deep-Evidence build prepared for ' +
+        LSelectedConfiguration + '/' + AConfig.Platform + '.');
+
+      if not SameText(LSelectedConfiguration, LActiveConfiguration) then
+      begin
+        LProjectInfo.Free;
+        LProjectInfo := LProjectScanner.Scan(AProjectPath, AConfig.Platform, LSelectedConfiguration);
+      end;
+
+      if Trim(LProjectInfo.MapFilePath) <> '' then
+        TIDELogger.Info('DX.Comply: Expected MAP file: ' + LProjectInfo.MapFilePath);
 
       if ASettings.SaveAllModifiedFilesBeforeBuild then
       begin
@@ -624,7 +728,7 @@ begin
         SaveModifiedFiles;
       end;
 
-      if TryOTADeepEvidenceBuild(LProjectInfo.MapFilePath) then
+      if TryOTADeepEvidenceBuild(LSelectedConfiguration, LProjectInfo.MapFilePath) then
       begin
         AConfig.DeepEvidenceMode := debDisabled;
         TIDELogger.Info('DX.Comply: OTA build succeeded. Engine-level build skipped.');

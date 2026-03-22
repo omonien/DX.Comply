@@ -103,17 +103,18 @@
     Font.Style = [fsBold]
     ParentFont = False
   end
-  object ConfigurationValueLabel: TLabel
+  object ConfigurationComboBox: TComboBox
     Left = 280
-    Top = 300
+    Top = 296
     Width = 960
-    Height = 32
+    Height = 40
     Margins.Left = 6
     Margins.Top = 6
     Margins.Right = 6
     Margins.Bottom = 6
-    AutoSize = False
-    Caption = 'ConfigurationValueLabel'
+    Style = csDropDownList
+    Anchors = [akLeft, akTop, akRight]
+    TabOrder = 3
   end
   object PlatformCaptionLabel: TLabel
     Left = 40

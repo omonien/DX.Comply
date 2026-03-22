@@ -78,6 +78,7 @@ jobs:
 generate-sbom:
   stage: compliance
   script:
+    - msbuild src/MyApp.dproj /p:Config=Release /p:Platform=Win32 /p:DCC_MapFile=3
     - >
       dxcomply
       --project=src/MyApp.dproj
@@ -108,10 +109,6 @@ store the configuration in `.dxcomply.json` at the repository root.
     "build/**/Debug/**",
     "**/*.dcu"
   ],
-  "deepEvidence": {
-    "build": true,
-    "delphiVersion": 13
-  },
   "product": {
     "name": "My Application",
     "version": "2.1.0",

@@ -50,7 +50,7 @@ Every SBOM generation follows the same pipeline, regardless of whether it was tr
 | `DX.Comply.Engine.pas` | `TDxComplyGenerator` facade — orchestrates the full pipeline |
 | `DX.Comply.Engine.Intf.pas` | Shared types: `TProjectInfo`, `TArtefactInfo`, `TSbomMetadata` |
 | `DX.Comply.ProjectScanner.pas` | Regex-based `.dproj` parser — extracts paths, toolchain, version, DllSuffix |
-| `DX.Comply.BuildOrchestrator.pas` | Invokes `DelphiBuildDPROJ.ps1` with `DCC_MapFile=3` for Deep-Evidence builds |
+| `DX.Comply.BuildOrchestrator.pas` | Plan construction and script-based build execution (used by CLI fallback) |
 | `DX.Comply.BuildEvidence.Reader.pas` | Reads MAP files, compiler CFG/RSP files; collects evidence items |
 | `DX.Comply.MapFile.Reader.pas` | Extracts unit names from MAP segment entries (`M=Unit`) and line-number sections |
 | `DX.Comply.UnitResolver.pas` | Resolves units to files, classifies origin (RTL/VCL/FMX/Local/ThirdParty), computes SHA-256/SHA-512 hashes |
@@ -64,9 +64,15 @@ Every SBOM generation follows the same pipeline, regardless of whether it was tr
 
 ## Deep-Evidence build
 
-When enabled, DX.Comply triggers an explicit build of the target project with `DCC_MapFile=3` (detailed MAP) before collecting evidence. This ensures a MAP file exists even for projects that don't normally produce one. The build is executed via the shared `DelphiBuildDPROJ.ps1` PowerShell script.
+When enabled, DX.Comply triggers an explicit build of the target project with `DCC_MapFile=3` (detailed MAP) before collecting evidence. This ensures a MAP file exists even for projects that don't normally produce one.
 
-The build orchestrator captures stdout/stderr from the PowerShell process so that compiler errors are visible directly in the IDE progress dialog.
+### IDE plugin
+
+The IDE plugin compiles the project directly via the OTA (`IOTAProject.ProjectBuilder`). Before the build starts, a confirmation dialog lets the user choose which build configuration to use as the basis for MAP generation. The active IDE configuration is pre-selected. DX.Comply temporarily sets `DCC_MapFile=3`, builds the project, and restores the original setting afterwards. The selected configuration is also restored after the build completes.
+
+### CLI tool
+
+The CLI tool does **not** compile the project. It expects the MAP file to already exist — either from a prior build with `DCC_MapFile=3` in the IDE or via MSBuild in a CI pipeline. This design keeps the CLI lightweight and enables support for legacy Delphi versions (including Delphi 7) where no IDE plugin is available.
 
 ## Unit origin classification
 
