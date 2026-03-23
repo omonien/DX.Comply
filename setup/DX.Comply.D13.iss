@@ -3,7 +3,7 @@
 ; and registers the IDE package in the Delphi 13 Known Packages.
 
 #define MyAppName "DX.Comply"
-#define MyAppVersion "1.1.0"
+#define MyAppVersion "1.1.1"
 #define MyAppPublisher "Olaf Monien"
 #define MyAppURL "https://github.com/omonien/DX.Comply"
 #define BDSVersion "37.0"
