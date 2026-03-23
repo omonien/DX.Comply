@@ -49,6 +49,7 @@ type
     FVerbose: Boolean;
     FNoPause: Boolean;
     FMapDir: string;
+    FNoCompositionEvidence: Boolean;
     FParseError: string;
     /// <summary>
     /// Converts a format string token to the corresponding TSbomFormat enum
@@ -92,6 +93,7 @@ type
     property Verbose: Boolean read FVerbose;
     property NoPause: Boolean read FNoPause;
     property MapDir: string read FMapDir;
+    property NoCompositionEvidence: Boolean read FNoCompositionEvidence;
     property ParseError: string read FParseError;
   end;
 
@@ -175,6 +177,12 @@ begin
     if LArg = '--ci' then
     begin
       FCiMode := True;
+      Continue;
+    end;
+
+    if LArg = '--no-composition-evidence' then
+    begin
+      FNoCompositionEvidence := True;
       Continue;
     end;
 
@@ -272,10 +280,11 @@ begin
   Writeln('  --include=<pattern>           File include pattern (repeatable)');
   Writeln('  --exclude=<pattern>           File exclude pattern (repeatable)');
   Writeln('  --map-dir=<path>              Directory containing the pre-built MAP file');
+  Writeln('  --no-composition-evidence     Omit source/DCU units from SBOM (binary-only)');
   Writeln('  --ci                          CI mode: use .dxcomply.json config file');
   Writeln('  --config=<path>               Path to .dxcomply.json (default: .dxcomply.json)');
   Writeln('  --help, -h                    Show this help');
-  Writeln('  --verbose                     Enable verbose output');
+  Writeln('  --verbose                     Print all progress messages (default: errors only)');
   Writeln('  --no-pause                    Suppress "Press Enter to quit" prompt');
   Writeln;
   Writeln('Examples:');
@@ -302,9 +311,10 @@ begin
   Result.ProductName     := FProductName;
   Result.ProductVersion  := FProductVersion;
   Result.Supplier        := FSupplier;
-  Result.IncludePatterns := FIncludePatterns;
-  Result.ExcludePatterns := FExcludePatterns;
-  Result.MapFileDir      := FMapDir;
+  Result.IncludePatterns             := FIncludePatterns;
+  Result.ExcludePatterns             := FExcludePatterns;
+  Result.MapFileDir                  := FMapDir;
+  Result.IncludeCompositionEvidence  := not FNoCompositionEvidence;
 end;
 
 end.

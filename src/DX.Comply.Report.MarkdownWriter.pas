@@ -238,9 +238,13 @@ begin
     Lines.Add('| Metric | Value |');
     Lines.Add('| --- | ---: |');
     AddKeyValue(Lines, 'Artefacts', IntToStr(PrimaryArtefactCount(AData.Artefacts)));
-    AddKeyValue(Lines, 'Resolved Units', IntToStr(AData.CompositionEvidence.Units.Count));
+    if AData.CompositionEvidenceIncluded then
+      AddKeyValue(Lines, 'Resolved Units', IntToStr(AData.CompositionEvidence.Units.Count))
+    else
+      AddKeyValue(Lines, 'Composition Evidence', 'Excluded (binary-only)');
     AddKeyValue(Lines, 'Warnings', IntToStr(LWarningsCount));
-    AddKeyValue(Lines, 'Deep Evidence', DeepEvidenceStatusText(AData));
+    if AData.DeepEvidenceResult.Executed or not AData.DeepEvidenceResult.Success and AData.DeepEvidenceRequested then
+      AddKeyValue(Lines, 'Deep Evidence Build', DeepEvidenceStatusText(AData));
     AddKeyValue(Lines, 'Validation', ValidationStatusText(AData));
     Lines.Add('');
     AddValidation(Lines, AData);

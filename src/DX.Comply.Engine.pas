@@ -88,6 +88,12 @@ type
     HumanReadableReport: THumanReadableReportConfig;
     /// <summary>Optional override directory for the MAP file location.</summary>
     MapFileDir: string;
+    /// <summary>
+    /// When False, composition-evidence units (PAS/DCU) are omitted from the
+    /// SBOM output. Useful for generating a binary-only SBOM.
+    /// Default is True (evidence included).
+    /// </summary>
+    IncludeCompositionEvidence: Boolean;
     /// <summary>Creates a new TSbomConfig with default values.</summary>
     class function Default: TSbomConfig; static;
   end;
@@ -214,6 +220,7 @@ begin
   Result.Supplier := '';
   SetLength(Result.IncludePatterns, 0);
   SetLength(Result.ExcludePatterns, 0);
+  Result.IncludeCompositionEvidence := True;
 end;
 
 { TDxComplyGenerator }
@@ -283,6 +290,7 @@ begin
   Result.DeepEvidenceRequested := FConfig.DeepEvidenceMode <> debDisabled;
   Result.DeepEvidenceResult := ADeepEvidenceBuildResult;
   Result.ValidationResult := AValidationResult;
+  Result.CompositionEvidenceIncluded := FConfig.IncludeCompositionEvidence;
 end;
 
 function TDxComplyGenerator.BuildEmptyCompositionWarning(const AProjectInfo: TProjectInfo;
@@ -566,6 +574,11 @@ begin
         // MAP file directory override
         if LJson.GetValue('mapDir') <> nil then
           Result.MapFileDir := LJson.GetValue<string>('mapDir');
+
+        // Composition evidence inclusion
+        if LJson.GetValue('includeCompositionEvidence') <> nil then
+          Result.IncludeCompositionEvidence :=
+            LJson.GetValue<Boolean>('includeCompositionEvidence');
       end;
     finally
       LJson.Free;
@@ -870,7 +883,8 @@ begin
 
       DoProgress('Generating SBOM...', 70);
 
-      AddCompositionEvidenceToArtefacts(LCompositionEvidence, LArtefacts);
+      if FConfig.IncludeCompositionEvidence then
+        AddCompositionEvidenceToArtefacts(LCompositionEvidence, LArtefacts);
 
       // Create writer and generate SBOM
       FSbomWriter := CreateWriter(LFormat);

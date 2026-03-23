@@ -59,6 +59,11 @@ type
     DeepEvidenceRequested: Boolean;
     DeepEvidenceResult: TDeepEvidenceBuildResult;
     ValidationResult: TValidationResult;
+    /// <summary>
+    /// False when the SBOM was generated with composition evidence excluded
+    /// (binary-only mode via --no-composition-evidence or config key).
+    /// </summary>
+    CompositionEvidenceIncluded: Boolean;
   end;
 
   /// <summary>
