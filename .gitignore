@@ -113,3 +113,6 @@ GTAGS
 "*.diag.log"
 "*.f*.dproj"
 "msbuild-preprocess.log"
+
+# GSD planning (local only)
+.planning/
