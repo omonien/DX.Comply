@@ -676,9 +676,6 @@ var
   LProjectScanner: IProjectScanner;
 begin
   Result := True;
-  if AConfig.DeepEvidenceMode = debDisabled then
-    Exit;
-
   try
     if not GetProjectConfigurations(LConfigurations, LActiveConfiguration) then
       LActiveConfiguration := AConfig.Configuration;
@@ -730,7 +727,7 @@ begin
 
       if TryOTADeepEvidenceBuild(LSelectedConfiguration, LProjectInfo.MapFilePath) then
       begin
-        AConfig.DeepEvidenceMode := debDisabled;
+        AConfig.DeepEvidenceMode := debWhenMapMissing;
         TIDELogger.Info('DX.Comply: OTA build succeeded. Engine-level build skipped.');
       end
       else
@@ -742,7 +739,7 @@ begin
           Result := False;
           Exit;
         end;
-        AConfig.DeepEvidenceMode := debDisabled;
+        AConfig.DeepEvidenceMode := debWhenMapMissing;
       end;
     finally
       LProjectInfo.Free;

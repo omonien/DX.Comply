@@ -130,7 +130,7 @@ type
 
     /// <summary>Deep-Evidence builds must be disabled by default.</summary>
     [Test]
-    procedure Config_Default_DeepEvidenceBuildDisabled;
+    procedure Config_Default_DeepEvidenceBuildWhenMapMissing;
 
     /// <summary>MapFileDir must be empty by default.</summary>
     [Test]
@@ -410,7 +410,7 @@ begin
   LConfig.Format := sfCycloneDxJson;
   LConfig.Configuration := 'Debug';
   LConfig.Platform := 'Win32';
-  LConfig.DeepEvidenceMode := debDisabled;
+  LConfig.DeepEvidenceMode := debWhenMapMissing;
 
   LGen := TDxComplyGenerator.Create(LConfig);
   try
@@ -571,13 +571,13 @@ begin
     'TSbomConfig.Default.OutputPath must be ''bom.json''');
 end;
 
-procedure TEngineTests.Config_Default_DeepEvidenceBuildDisabled;
+procedure TEngineTests.Config_Default_DeepEvidenceBuildWhenMapMissing;
 var
   LConfig: TSbomConfig;
 begin
   LConfig := TSbomConfig.Default;
-  Assert.AreEqual(NativeInt(Ord(debDisabled)), NativeInt(Ord(LConfig.DeepEvidenceMode)),
-    'TSbomConfig.Default.DeepEvidenceMode must be debDisabled');
+  Assert.AreEqual(NativeInt(Ord(debWhenMapMissing)), NativeInt(Ord(LConfig.DeepEvidenceMode)),
+    'TSbomConfig.Default.DeepEvidenceMode must be debWhenMapMissing');
   Assert.AreEqual(0, LConfig.DeepEvidenceDelphiVersion,
     'TSbomConfig.Default.DeepEvidenceDelphiVersion must be 0');
   Assert.AreEqual('', LConfig.DeepEvidenceBuildScriptPath,
@@ -642,7 +642,7 @@ begin
   LConfig.OutputPath := FOutputFile;
   LConfig.Configuration := 'Debug';
   LConfig.Platform := 'Win32';
-  LConfig.DeepEvidenceMode := debDisabled;
+  LConfig.DeepEvidenceMode := debWhenMapMissing;
   LConfig.IncludeCompositionEvidence := False;
 
   LGen := TDxComplyGenerator.Create(LConfig);

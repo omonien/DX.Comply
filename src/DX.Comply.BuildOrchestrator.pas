@@ -26,9 +26,7 @@ type
   /// Controls when a Deep-Evidence build should be executed.
   /// </summary>
   TDeepEvidenceBuildMode = (
-    /// <summary>Do not attempt an explicit Deep-Evidence build.</summary>
-    debDisabled,
-    /// <summary>Execute only when the expected map file is missing.</summary>
+    /// <summary>Execute only when the expected map file is missing (default).</summary>
     debWhenMapMissing,
     /// <summary>Always execute before SBOM generation.</summary>
     debAlways
@@ -146,7 +144,7 @@ uses
 
 class function TDeepEvidenceBuildOptions.Default: TDeepEvidenceBuildOptions;
 begin
-  Result.Mode := debDisabled;
+  Result.Mode := debWhenMapMissing;
   Result.DelphiVersion := 0;
   Result.BuildScriptPathOverride := '';
 end;
@@ -174,7 +172,7 @@ var
   LProjectDirectory: string;
 begin
   Result := Default(TDeepEvidenceBuildPlan);
-  Result.Enabled := AOptions.Mode <> debDisabled;
+  Result.Enabled := True;
   LProjectDirectory := AProjectInfo.ProjectDir;
   if (LProjectDirectory = '') and (AProjectInfo.ProjectPath <> '') then
     LProjectDirectory := TPath.GetDirectoryName(AProjectInfo.ProjectPath);
@@ -255,12 +253,6 @@ begin
   Result.Success := True;
   Result.CommandLine := APlan.CommandLine;
   Result.MapFilePath := APlan.ExpectedMapFilePath;
-
-  if not APlan.Enabled then
-  begin
-    Result.Message := 'Deep-Evidence build disabled.';
-    Exit;
-  end;
 
   if not APlan.ShouldExecute then
   begin

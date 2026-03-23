@@ -37,12 +37,6 @@ type
     procedure Setup;
 
     /// <summary>
-    /// Disabled Deep-Evidence builds must not produce an execution plan.
-    /// </summary>
-    [Test]
-    procedure CreatePlan_DeepEvidenceDisabled_SkipsExecution;
-
-    /// <summary>
     /// A missing map file must produce a build plan that forces detailed map generation.
     /// </summary>
     [Test]
@@ -79,28 +73,6 @@ end;
 procedure TBuildOrchestratorTests.Setup;
 begin
   FBuildOrchestrator := TBuildOrchestrator.Create;
-end;
-
-procedure TBuildOrchestratorTests.CreatePlan_DeepEvidenceDisabled_SkipsExecution;
-var
-  LPlan: TDeepEvidenceBuildPlan;
-  LProjectInfo: TProjectInfo;
-begin
-  LProjectInfo := TProjectInfo.Create;
-  try
-    LProjectInfo.ProjectPath := 'C:\Repo\src\DX.Comply.Engine.dproj';
-    LProjectInfo.ProjectDir := 'C:\Repo\src';
-    LProjectInfo.Platform := 'Win32';
-    LProjectInfo.Configuration := 'Debug';
-    LProjectInfo.MapFilePath := 'C:\Repo\build\Win32\Debug\DX.Comply.Engine.map';
-
-    LPlan := FBuildOrchestrator.CreatePlan(LProjectInfo, BuildOptions(debDisabled));
-
-    Assert.IsFalse(LPlan.ShouldExecute,
-      'Disabled Deep-Evidence builds must not produce an execution plan');
-  finally
-    LProjectInfo.Free;
-  end;
 end;
 
 procedure TBuildOrchestratorTests.CreatePlan_MapExists_SkipsExecution;

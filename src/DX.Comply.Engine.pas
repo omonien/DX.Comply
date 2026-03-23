@@ -209,10 +209,10 @@ begin
   Result.Format := sfCycloneDxJson;
   Result.Platform := 'Win32';
   Result.Configuration := 'Release';
-  Result.DeepEvidenceMode := debDisabled;
+  Result.DeepEvidenceMode := debWhenMapMissing;
   Result.DeepEvidenceDelphiVersion := 0;
   Result.DeepEvidenceBuildScriptPath := '';
-  Result.ContinueOnDeepEvidenceBuildFailure := False;
+  Result.ContinueOnDeepEvidenceBuildFailure := True;
   Result.WarnOnEmptyCompositionEvidence := False;
   Result.HumanReadableReport := THumanReadableReportConfig.Default;
   Result.ProductName := '';
@@ -516,14 +516,14 @@ begin
             else if (LModeStr = 'missing') or (LModeStr = 'when-missing') then
               Result.DeepEvidenceMode := debWhenMapMissing
             else
-              Result.DeepEvidenceMode := debDisabled;
+              Result.DeepEvidenceMode := debWhenMapMissing;
           end;
           if LDeepEvidence.GetValue('build') <> nil then
           begin
             if LDeepEvidence.GetValue<Boolean>('build') then
               Result.DeepEvidenceMode := debWhenMapMissing
             else
-              Result.DeepEvidenceMode := debDisabled;
+              Result.DeepEvidenceMode := debWhenMapMissing;
           end;
           if LDeepEvidence.GetValue('delphiVersion') <> nil then
             Result.DeepEvidenceDelphiVersion := LDeepEvidence.GetValue<Integer>('delphiVersion');
@@ -791,28 +791,24 @@ begin
   try
     ReportWarnings(LProjectInfo.Warnings, LReportedWarnings, 12);
 
-    if FConfig.DeepEvidenceMode <> debDisabled then
+    DoProgress('Ensuring MAP file...', 15);
+    LDeepEvidenceBuildResult := EnsureDeepEvidenceBuild(LProjectInfo);
+    if not LDeepEvidenceBuildResult.Success then
     begin
-      DoProgress('Ensuring Deep-Evidence build...', 15);
-      LDeepEvidenceBuildResult := EnsureDeepEvidenceBuild(LProjectInfo);
-      if not LDeepEvidenceBuildResult.Success then
-      begin
-        DoProgress('Error: ' + LDeepEvidenceBuildResult.Message, -1);
-        if LDeepEvidenceBuildResult.CommandLine <> '' then
-          DoProgress('Command: ' + LDeepEvidenceBuildResult.CommandLine, -1);
-        if LDeepEvidenceBuildResult.Output <> '' then
-          DoProgress('Build output: ' + LDeepEvidenceBuildResult.Output, -1);
-        if FConfig.ContinueOnDeepEvidenceBuildFailure then
-          DoProgress('Warning: Continuing SBOM generation without rebuilt MAP evidence.', 18)
-        else
-          Exit;
-      end;
-
-      if LDeepEvidenceBuildResult.Success and LDeepEvidenceBuildResult.Executed then
-        DoProgress('Deep-Evidence build completed.', 18)
-      else if LDeepEvidenceBuildResult.Success then
-        DoProgress(LDeepEvidenceBuildResult.Message, 18);
-    end;
+      DoProgress('Error: ' + LDeepEvidenceBuildResult.Message, -1);
+      if LDeepEvidenceBuildResult.CommandLine <> '' then
+        DoProgress('Command: ' + LDeepEvidenceBuildResult.CommandLine, -1);
+      if LDeepEvidenceBuildResult.Output <> '' then
+        DoProgress('Build output: ' + LDeepEvidenceBuildResult.Output, -1);
+      if FConfig.ContinueOnDeepEvidenceBuildFailure then
+        DoProgress('Warning: Continuing SBOM generation without rebuilt MAP evidence.', 18)
+      else
+        Exit;
+    end
+    else if LDeepEvidenceBuildResult.Executed then
+      DoProgress('MAP build completed.', 18)
+    else
+      DoProgress(LDeepEvidenceBuildResult.Message, 18);
 
     DoProgress('Preparing build evidence...', 20);
     LBuildEvidence := ReadBuildEvidence(LProjectInfo);
