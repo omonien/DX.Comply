@@ -55,6 +55,7 @@ var
   LGenerator: TDxComplyGenerator;
   LConfig: TSbomConfig;
   LSuccess: Boolean;
+  LVerbose: Boolean;
   {$IFNDEF CI}
   LNoPause: Boolean;
   {$ENDIF}
@@ -91,6 +92,8 @@ begin
     // Capture before the try/finally so it is accessible after LOptions.Free.
     LNoPause := LOptions.NoPause;
     {$ENDIF}
+    // Capture verbose flag before LOptions is freed.
+    LVerbose := LOptions.Verbose;
     LConfig  := LOptions.ToSbomConfig;
 
     LGenerator := TDxComplyGenerator.Create(LConfig);
@@ -98,7 +101,9 @@ begin
       LGenerator.OnProgress :=
         procedure(const AMessage: string; const AProgress: Integer)
         begin
-          OnProgress(AMessage, AProgress);
+          // Without --verbose only errors and the final done message are printed.
+          if LVerbose or (AProgress < 0) or (AProgress = 100) then
+            OnProgress(AMessage, AProgress);
         end;
 
       if LOptions.CiMode and TFile.Exists(LOptions.ConfigFile) then
