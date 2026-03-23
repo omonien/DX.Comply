@@ -139,6 +139,17 @@ type
     /// <summary>MapFileDir override must redirect the expected MAP file path.</summary>
     [Test]
     procedure Config_MapFileDirOverride_RedirectsMapFilePath;
+
+    /// <summary>IncludeCompositionEvidence must be True by default.</summary>
+    [Test]
+    procedure Config_Default_IncludeCompositionEvidenceIsTrue;
+
+    /// <summary>
+    /// When IncludeCompositionEvidence is False, the generated SBOM must not
+    /// contain any unit-evidence (library) components.
+    /// </summary>
+    [Test]
+    procedure Generate_NoCompositionEvidence_OmitsUnitEvidenceComponents;
   end;
 
 implementation
@@ -601,6 +612,74 @@ begin
       'MapFileDir must be preserved in the generator config');
   finally
     LGenerator.Free;
+  end;
+end;
+
+procedure TEngineTests.Config_Default_IncludeCompositionEvidenceIsTrue;
+var
+  LConfig: TSbomConfig;
+begin
+  LConfig := TSbomConfig.Default;
+  Assert.IsTrue(LConfig.IncludeCompositionEvidence,
+    'TSbomConfig.Default.IncludeCompositionEvidence must be True');
+end;
+
+procedure TEngineTests.Generate_NoCompositionEvidence_OmitsUnitEvidenceComponents;
+const
+  cOriginPropertyName = 'net.developer-experts.dx-comply:origin';
+var
+  LConfig: TSbomConfig;
+  LGen: TDxComplyGenerator;
+  LContent: string;
+  LJson: TJSONObject;
+  LComponents: TJSONArray;
+  LComponent, LProp: TJSONObject;
+  LProperties: TJSONArray;
+  I, J: Integer;
+begin
+  LConfig := TSbomConfig.Default;
+  LConfig.OutputPath := FOutputFile;
+  LConfig.Configuration := 'Debug';
+  LConfig.Platform := 'Win32';
+  LConfig.DeepEvidenceMode := debDisabled;
+  LConfig.IncludeCompositionEvidence := False;
+
+  LGen := TDxComplyGenerator.Create(LConfig);
+  try
+    LGen.OnProgress := OnProgress;
+    Assert.IsTrue(LGen.Generate(FEngineDprojPath, FOutputFile, sfCycloneDxJson),
+      'Generate must succeed when IncludeCompositionEvidence is False');
+
+    LContent := TFile.ReadAllText(FOutputFile, TEncoding.UTF8);
+    LJson := TJSONObject.ParseJSONValue(LContent) as TJSONObject;
+    try
+      Assert.IsNotNull(LJson, 'Output must be valid JSON');
+      LComponents := LJson.GetValue('components') as TJSONArray;
+      if not Assigned(LComponents) then
+        Exit;
+
+      // Unit-evidence components carry the origin property.
+      // Shipped artefacts (exe/dll/bpl) do not.
+      for I := 0 to LComponents.Count - 1 do
+      begin
+        LComponent := LComponents.Items[I] as TJSONObject;
+        LProperties := LComponent.GetValue('properties') as TJSONArray;
+        if not Assigned(LProperties) then
+          Continue;
+        for J := 0 to LProperties.Count - 1 do
+        begin
+          LProp := LProperties.Items[J] as TJSONObject;
+          Assert.AreNotEqual(cOriginPropertyName,
+            LProp.GetValue<string>('name', ''),
+            'SBOM must not contain unit-evidence origin property when ' +
+            'IncludeCompositionEvidence is False');
+        end;
+      end;
+    finally
+      LJson.Free;
+    end;
+  finally
+    LGen.Free;
   end;
 end;
 

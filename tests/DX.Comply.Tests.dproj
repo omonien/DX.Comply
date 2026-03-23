@@ -40,7 +40,7 @@
         <DCC_Description>DX.Comply Unit Tests</DCC_Description>
         <DCC_ExeOutput>..\build\$(Platform)\$(Config)</DCC_ExeOutput>
         <DCC_Namespace>System;Xml;Data;Datasnap;Web;Soap;$(DCC_Namespace)</DCC_Namespace>
-        <DCC_UnitSearchPath>..\src;..\libs\DUnitX\Source;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
+        <DCC_UnitSearchPath>..\src;..\src\CLI;..\libs\DUnitX\Source;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
         <VerInfo_Build>0</VerInfo_Build>
         <VerInfo_IncludeVerInfo>true</VerInfo_IncludeVerInfo>
         <VerInfo_Keys>CompanyName=Olaf Monien;FileDescription=DX.Comply Unit Tests;FileVersion=1.0.0.0;InternalName=DX.Comply.Tests;LegalCopyright=Copyright © 2026 Olaf Monien;LegalTrademarks=;OriginalFilename=DX.Comply.Tests.exe;ProductName=DX.Comply;ProductVersion=1.0.0.0;Comments=MIT License</VerInfo_Keys>
