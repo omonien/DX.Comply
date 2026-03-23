@@ -103,7 +103,7 @@ Each resolved unit is emitted as a CycloneDX `component` with `type: "library"`,
 
 ## Test suite
 
-176 DUnitX tests cover the full pipeline. Run:
+185 DUnitX tests cover the full pipeline. Run:
 
 ```
 build\Win32\Debug\DX.Comply.Tests.exe --no-pause

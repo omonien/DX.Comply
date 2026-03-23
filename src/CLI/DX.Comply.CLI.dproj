@@ -44,23 +44,23 @@
         <VerInfo_Build>0</VerInfo_Build>
         <VerInfo_DLL>False</VerInfo_DLL>
         <VerInfo_IncludeVerInfo>true</VerInfo_IncludeVerInfo>
-        <VerInfo_Keys>CompanyName=Olaf Monien;FileDescription=DX.Comply CI Pipeline CLI;FileVersion=1.1.1.0;InternalName=dxcomply;LegalCopyright=Copyright © 2026 Olaf Monien;LegalTrademarks=;OriginalFilename=dxcomply.exe;ProductName=DX.Comply;ProductVersion=1.1.1.0;Comments=MIT License</VerInfo_Keys>
+        <VerInfo_Keys>CompanyName=Olaf Monien;FileDescription=DX.Comply CI Pipeline CLI;FileVersion=1.2.0.0;InternalName=dxcomply;LegalCopyright=Copyright © 2026 Olaf Monien;LegalTrademarks=;OriginalFilename=dxcomply.exe;ProductName=DX.Comply;ProductVersion=1.2.0.0;Comments=MIT License</VerInfo_Keys>
         <VerInfo_Locale>1031</VerInfo_Locale>
         <VerInfo_MajorVer>1</VerInfo_MajorVer>
-        <VerInfo_MinorVer>1</VerInfo_MinorVer>
-        <VerInfo_Release>1</VerInfo_Release>
+        <VerInfo_MinorVer>2</VerInfo_MinorVer>
+        <VerInfo_Release>0</VerInfo_Release>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Base_Win32)'!=''">
         <DCC_UsePackage>rtl;xmlrtl;$(DCC_UsePackage)</DCC_UsePackage>
         <Icon_MainIcon>$(BDS)\bin\delphi_PROJECTICON.ico</Icon_MainIcon>
         <Manifest_File>$(BDS)\bin\default_app.manifest</Manifest_File>
-        <VerInfo_Keys>CompanyName=Olaf Monien;FileDescription=DX.Comply CI Pipeline CLI;FileVersion=1.1.1.0;InternalName=dxcomply;LegalCopyright=Copyright © 2026 Olaf Monien;LegalTrademarks=;OriginalFilename=dxcomply.exe;ProductName=DX.Comply;ProductVersion=1.1.1.0;Comments=MIT License</VerInfo_Keys>
+        <VerInfo_Keys>CompanyName=Olaf Monien;FileDescription=DX.Comply CI Pipeline CLI;FileVersion=1.2.0.0;InternalName=dxcomply;LegalCopyright=Copyright © 2026 Olaf Monien;LegalTrademarks=;OriginalFilename=dxcomply.exe;ProductName=DX.Comply;ProductVersion=1.2.0.0;Comments=MIT License</VerInfo_Keys>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Base_Win64)'!=''">
         <DCC_UsePackage>rtl;xmlrtl;$(DCC_UsePackage)</DCC_UsePackage>
         <Icon_MainIcon>$(BDS)\bin\delphi_PROJECTICON.ico</Icon_MainIcon>
         <Manifest_File>$(BDS)\bin\default_app.manifest</Manifest_File>
-        <VerInfo_Keys>CompanyName=Olaf Monien;FileDescription=DX.Comply CI Pipeline CLI;FileVersion=1.1.1.0;InternalName=dxcomply;LegalCopyright=Copyright © 2026 Olaf Monien;LegalTrademarks=;OriginalFilename=dxcomply.exe;ProductName=DX.Comply;ProductVersion=1.1.1.0;Comments=MIT License</VerInfo_Keys>
+        <VerInfo_Keys>CompanyName=Olaf Monien;FileDescription=DX.Comply CI Pipeline CLI;FileVersion=1.2.0.0;InternalName=dxcomply;LegalCopyright=Copyright © 2026 Olaf Monien;LegalTrademarks=;OriginalFilename=dxcomply.exe;ProductName=DX.Comply;ProductVersion=1.2.0.0;Comments=MIT License</VerInfo_Keys>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Cfg_1)'!=''">
         <DCC_DebugInformation>1</DCC_DebugInformation>
@@ -105,8 +105,8 @@
                     <VersionInfo Name="IncludeVerInfo">True</VersionInfo>
                     <VersionInfo Name="AutoIncBuild">False</VersionInfo>
                     <VersionInfo Name="MajorVer">1</VersionInfo>
-                    <VersionInfo Name="MinorVer">1</VersionInfo>
-                    <VersionInfo Name="Release">1</VersionInfo>
+                    <VersionInfo Name="MinorVer">2</VersionInfo>
+                    <VersionInfo Name="Release">0</VersionInfo>
                     <VersionInfo Name="Build">0</VersionInfo>
                     <VersionInfo Name="Debug">False</VersionInfo>
                     <VersionInfo Name="PreRelease">False</VersionInfo>
@@ -119,13 +119,13 @@
                 <VersionInfoKeys>
                     <VersionInfoKey Name="CompanyName">Olaf Monien</VersionInfoKey>
                     <VersionInfoKey Name="FileDescription">DX.Comply CI Pipeline CLI</VersionInfoKey>
-                    <VersionInfoKey Name="FileVersion">1.1.1.0</VersionInfoKey>
+                    <VersionInfoKey Name="FileVersion">1.2.0.0</VersionInfoKey>
                     <VersionInfoKey Name="InternalName">dxcomply</VersionInfoKey>
                     <VersionInfoKey Name="LegalCopyright">Copyright © 2026 Olaf Monien</VersionInfoKey>
                     <VersionInfoKey Name="LegalTrademarks"/>
                     <VersionInfoKey Name="OriginalFilename">dxcomply.exe</VersionInfoKey>
                     <VersionInfoKey Name="ProductName">DX.Comply</VersionInfoKey>
-                    <VersionInfoKey Name="ProductVersion">1.1.1.0</VersionInfoKey>
+                    <VersionInfoKey Name="ProductVersion">1.2.0.0</VersionInfoKey>
                     <VersionInfoKey Name="Comments">MIT License</VersionInfoKey>
                 </VersionInfoKeys>
             </Delphi.Personality>
