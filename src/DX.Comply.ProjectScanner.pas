@@ -183,8 +183,10 @@ type
     /// </summary>
     function GetFileVersionText(const AFilePath: string): string;
     /// <summary>
-    /// Attempts to detect the TargetedPlatforms bitmask and returns
-    /// a list of platform names (Win32, Win64, etc.).
+    /// Detects targeted platforms from two sources and merges them:
+    /// (1) the TargetedPlatforms numeric bitmask, and
+    /// (2) named &lt;Platform value="X"&gt;True&lt;/Platform&gt; entries in
+    /// &lt;BorlandProject&gt;&lt;Platforms&gt; — used by LLVM/mobile targets.
     /// </summary>
     function DetectTargetedPlatforms: TArray<string>;
     /// <summary>
@@ -643,10 +645,15 @@ var
   LValue: string;
   LBitmask: Integer;
   LPlatforms: TList<string>;
+  LMatch: TMatch;
+  LMatches: TMatchCollection;
+  LPlatformName: string;
 begin
-  LValue := GetElementValue(FXmlText, 'TargetedPlatforms');
   LPlatforms := TList<string>.Create;
   try
+    // Primary source: TargetedPlatforms numeric bitmask
+    // Delphi IDE writes this element for Win/Mac/desktop targets.
+    LValue := GetElementValue(FXmlText, 'TargetedPlatforms');
     if LValue <> '' then
     begin
       LBitmask := StrToIntDef(LValue, 1);
@@ -661,6 +668,25 @@ begin
       if (LBitmask and 256) <> 0 then LPlatforms.Add('Android64');
       if (LBitmask and 512) <> 0 then LPlatforms.Add('OSX64');
       if (LBitmask and 1024) <> 0 then LPlatforms.Add('OSXARM64');
+    end;
+
+    // Supplemental source: named <Platform value="X">True</Platform> entries
+    // in the <BorlandProject><Platforms> section.  Mobile / LLVM-backend targets
+    // (iOSDevice64, Android64, LinuxArm64, …) are often absent from the
+    // TargetedPlatforms bitmask but listed here instead.  Add any platform
+    // that is enabled (True) and not already present from the bitmask above.
+    LMatches := TRegEx.Matches(FXmlText,
+      '<Platform\s+value="([^"]+)"[^>]*>\s*(True|False)\s*</Platform>',
+      [roIgnoreCase]);
+    for LMatch in LMatches do
+    begin
+      if (LMatch.Groups.Count >= 3) and
+         SameText(LMatch.Groups[2].Value, 'True') then
+      begin
+        LPlatformName := LMatch.Groups[1].Value;
+        if (LPlatformName <> '') and not LPlatforms.Contains(LPlatformName) then
+          LPlatforms.Add(LPlatformName);
+      end;
     end;
 
     if LPlatforms.Count = 0 then

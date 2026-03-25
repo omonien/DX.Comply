@@ -143,6 +143,16 @@ type
     /// <summary>Must extract properties from AnyCPU fallback conditions.</summary>
     [Test]
     procedure Scan_LegacyAnyCPUCondition_ExtractsOutputDir;
+
+    // ---- Named <Platform> entries (regression #16) --------------------------
+
+    /// <summary>
+    /// A dproj that declares iOSDevice64 only via named Platform entries
+    /// (not in the numeric bitmask) must not emit a TargetedPlatforms warning
+    /// when scanned with platform 'iOSDevice64'.
+    /// </summary>
+    [Test]
+    procedure Scan_NamedPlatformEntry_iOSDevice64_NoTargetedPlatformsWarning;
   end;
 
 implementation
@@ -550,6 +560,78 @@ begin
     try
       Assert.IsTrue(Pos('bin', LowerCase(LProjectInfo.OutputDir)) > 0,
         'AnyCPU fallback condition must resolve the output directory when no platform-specific block exists');
+    finally
+      LProjectInfo.Free;
+    end;
+  finally
+    TFile.Delete(LTempDproj);
+    TDirectory.Delete(LTempDir);
+  end;
+end;
+
+// ---- Named <Platform> entries (regression #16) ------------------------------
+
+procedure TProjectScannerTests.Scan_NamedPlatformEntry_iOSDevice64_NoTargetedPlatformsWarning;
+// Regression test for issue #16: projects that target LLVM/mobile platforms
+// (iOSDevice64, Android64, …) declare them via named <Platform value="X">True</Platform>
+// entries inside the BorlandProject ItemGroup — NOT in the legacy numeric
+// TargetedPlatforms bitmask.  Scanning such a project with platform
+// 'iOSDevice64' must not emit a "not listed in TargetedPlatforms" warning.
+var
+  LTempDir: string;
+  LTempDproj: string;
+  LProjectInfo: TProjectInfo;
+  LScanner: IProjectScanner;
+  LWarning: string;
+  LHasTargetedPlatformsWarning: Boolean;
+const
+  // Bitmask 1 = Win32 only — iOSDevice64 (128) is intentionally absent so
+  // the scanner must fall back to the named-entry parsing path.
+  cIosDproj =
+    '<?xml version="1.0" encoding="utf-8"?>' + sLineBreak +
+    '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">' + sLineBreak +
+    '  <PropertyGroup>' + sLineBreak +
+    '    <MainSource>MyApp.dpr</MainSource>' + sLineBreak +
+    '    <ProjectGuid>{00000000-0000-0000-0000-000000000016}</ProjectGuid>' + sLineBreak +
+    '    <TargetedPlatforms>1</TargetedPlatforms>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '  <PropertyGroup Condition="''$(Configuration)|$(Platform)''==''Release|iOSDevice64''">' + sLineBreak +
+    '    <DCC_ExeOutput>.\bin\iOSDevice64\Release</DCC_ExeOutput>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '  <ItemGroup>' + sLineBreak +
+    '    <BuildConfiguration Include="Release">' + sLineBreak +
+    '      <Key>Cfg_2</Key>' + sLineBreak +
+    '    </BuildConfiguration>' + sLineBreak +
+    '  </ItemGroup>' + sLineBreak +
+    '  <ProjectExtensions>' + sLineBreak +
+    '    <BorlandProject>' + sLineBreak +
+    '      <Platforms>' + sLineBreak +
+    '        <Platform value="Win32">True</Platform>' + sLineBreak +
+    '        <Platform value="iOSDevice64">True</Platform>' + sLineBreak +
+    '        <Platform value="Android64">False</Platform>' + sLineBreak +
+    '      </Platforms>' + sLineBreak +
+    '    </BorlandProject>' + sLineBreak +
+    '  </ProjectExtensions>' + sLineBreak +
+    '</Project>';
+begin
+  LTempDir := TPath.Combine(TPath.GetTempPath, 'DXComplyTest_iOS16');
+  ForceDirectories(LTempDir);
+  LTempDproj := TPath.Combine(LTempDir, 'MyApp.dproj');
+  try
+    TFile.WriteAllText(LTempDproj, cIosDproj, TEncoding.UTF8);
+    LScanner := TProjectScanner.Create;
+    LProjectInfo := LScanner.Scan(LTempDproj, 'iOSDevice64', 'Release');
+    try
+      LHasTargetedPlatformsWarning := False;
+      for LWarning in LProjectInfo.Warnings do
+        if Pos('TargetedPlatforms', LWarning) > 0 then
+        begin
+          LHasTargetedPlatformsWarning := True;
+          Break;
+        end;
+      Assert.IsFalse(LHasTargetedPlatformsWarning,
+        'No TargetedPlatforms warning must be emitted for iOSDevice64 ' +
+        'when it is declared via a named <Platform value="iOSDevice64">True</Platform> entry');
     finally
       LProjectInfo.Free;
     end;
