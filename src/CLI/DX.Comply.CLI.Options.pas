@@ -294,7 +294,7 @@ end;
 
 procedure TCliOptions.PrintVersion;
 begin
-  Writeln('DX.Comply v1.2.0');
+  Writeln('DX.Comply v1.3.0');
 end;
 
 // ---------------------------------------------------------------------------

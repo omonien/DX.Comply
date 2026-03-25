@@ -140,6 +140,37 @@ uses
   System.SysUtils,
   Winapi.Windows;
 
+// ---------------------------------------------------------------------------
+// Local helper — always returns an English Windows system error description.
+// SysErrorMessage() uses the system locale which is German on German Windows.
+// FormatMessage with MAKELANGID(LANG_ENGLISH, SUBLANG_DEFAULT) forces English.
+// Falls back to SysErrorMessage when no English message is available.
+// ---------------------------------------------------------------------------
+
+function GetEnglishSystemError(AErrorCode: DWORD): string;
+const
+  // MAKELANGID(LANG_ENGLISH=9, SUBLANG_DEFAULT=1) = 1033 ($0409)
+  cEnglishLangId = 1033;
+var
+  LBuffer: array[0..1023] of Char;
+  LLength: DWORD;
+begin
+  FillChar(LBuffer, SizeOf(LBuffer), 0);
+  LLength := FormatMessage(
+    FORMAT_MESSAGE_FROM_SYSTEM or FORMAT_MESSAGE_IGNORE_INSERTS,
+    nil,
+    AErrorCode,
+    cEnglishLangId,
+    LBuffer,
+    Length(LBuffer),
+    nil);
+  if LLength > 0 then
+    Result := Trim(string(LBuffer))
+  else
+    // English strings not available (e.g. stripped OS) — fall back to locale
+    Result := SysErrorMessage(AErrorCode);
+end;
+
 { TDeepEvidenceBuildOptions }
 
 class function TDeepEvidenceBuildOptions.Default: TDeepEvidenceBuildOptions;
@@ -276,7 +307,7 @@ begin
   if not CreatePipe(LPipeRead, LPipeWrite, @LSecurityAttributes, 0) then
   begin
     Result.Success := False;
-    Result.Message := 'Failed to create output pipe: ' + SysErrorMessage(GetLastError);
+    Result.Message := 'Failed to create output pipe: ' + GetEnglishSystemError(GetLastError);
     Exit;
   end;
 
@@ -298,7 +329,7 @@ begin
       nil, PChar(APlan.WorkingDirectory), LStartupInfo, LProcessInfo) then
     begin
       Result.Success := False;
-      Result.Message := 'Failed to start build process: ' + SysErrorMessage(GetLastError);
+      Result.Message := 'Failed to start build process: ' + GetEnglishSystemError(GetLastError);
       Exit;
     end;
 
