@@ -116,3 +116,6 @@ GTAGS
 
 # GSD planning (local only)
 .planning/
+
+#Claude Worktrees
+.claude/worktrees/
