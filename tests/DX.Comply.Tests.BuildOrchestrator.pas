@@ -67,6 +67,24 @@ type
     /// </summary>
     [Test]
     procedure ExecutePlan_EmptyScriptPath_FailsGracefully;
+
+    /// <summary>
+    /// CreatePlan must not raise an exception when the project directory is a
+    /// drive root (e.g. C:\).  Previously the directory traversal inside
+    /// FindBuildScriptFromDirectory produced an empty path after
+    /// TPath.GetDirectoryName('C:\') returned '', causing a Windows
+    /// "Dateiname ist leer" error (regression #19).
+    /// </summary>
+    [Test]
+    procedure CreatePlan_ProjectAtDriveRoot_DoesNotCrash;
+
+    /// <summary>
+    /// When the project lives at a drive root and no build script is found
+    /// anywhere, the plan must still be returned with an empty ScriptPath
+    /// rather than raising an exception (regression #19).
+    /// </summary>
+    [Test]
+    procedure CreatePlan_ProjectAtDriveRoot_ScriptPathEmpty;
   end;
 
 implementation
@@ -218,6 +236,67 @@ begin
     'An empty ScriptPath must produce a failure result, not an exception');
   Assert.IsTrue(Pos('not found', LResult.Message) > 0,
     'The failure message must indicate the build script was not found');
+end;
+
+procedure TBuildOrchestratorTests.CreatePlan_ProjectAtDriveRoot_DoesNotCrash;
+var
+  LPlan: TDeepEvidenceBuildPlan;
+  LProjectInfo: TProjectInfo;
+begin
+  // Projects located directly at a drive root (e.g. C:\MyApp.dproj) must not
+  // cause any exception during plan creation.  The directory traversal inside
+  // FindBuildScriptFromDirectory used to produce an empty path when
+  // TPath.GetDirectoryName('C:\') returned '' (issue #19).
+  LProjectInfo := TProjectInfo.Create;
+  try
+    LProjectInfo.ProjectPath := 'C:\MyApp.dproj';
+    LProjectInfo.ProjectDir := 'C:\';
+    LProjectInfo.Platform := 'Win32';
+    LProjectInfo.Configuration := 'Release';
+    LProjectInfo.MapFilePath := 'C:\build\Win32\Release\MyApp.map';
+
+    Assert.WillNotRaise(
+      procedure
+      begin
+        LPlan := FBuildOrchestrator.CreatePlan(LProjectInfo, BuildOptions(debAlways));
+      end,
+      Exception,
+      'CreatePlan must not raise when the project is at a drive root');
+  finally
+    LProjectInfo.Free;
+  end;
+end;
+
+procedure TBuildOrchestratorTests.CreatePlan_ProjectAtDriveRoot_ScriptPathEmpty;
+var
+  LPlan: TDeepEvidenceBuildPlan;
+  LProjectInfo: TProjectInfo;
+begin
+  // When the project is at a drive root and no DelphiBuildDPROJ.ps1 is found,
+  // the plan must be returned with an empty ScriptPath rather than a garbage
+  // relative path produced by combining an empty parent directory (issue #19).
+  LProjectInfo := TProjectInfo.Create;
+  try
+    LProjectInfo.ProjectPath := 'C:\MyApp.dproj';
+    LProjectInfo.ProjectDir := 'C:\';
+    LProjectInfo.Platform := 'Win32';
+    LProjectInfo.Configuration := 'Release';
+    LProjectInfo.MapFilePath := 'C:\build\Win32\Release\MyApp.map';
+
+    LPlan := FBuildOrchestrator.CreatePlan(LProjectInfo,
+      BuildOptions(debAlways, '', 0));
+
+    // With no override and no script on disk the path must be empty (or a
+    // properly absolute path if the script happens to be installed).
+    if LPlan.ScriptPath <> '' then
+      Assert.IsTrue(TPath.IsPathRooted(LPlan.ScriptPath),
+        'ScriptPath must be an absolute path, not a relative fragment')
+    else
+      Assert.AreEqual('', LPlan.ScriptPath,
+        'ScriptPath must be empty when no build script is found');
+  finally
+    LProjectInfo.Free;
+  end;
 end;
 
 initialization

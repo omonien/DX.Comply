@@ -121,6 +121,21 @@ type
     /// </summary>
     [Test]
     procedure IsClassicCompilerPlatform_ClassifiesCorrectly;
+
+    /// <summary>
+    /// A unit whose resolved path lies in a sibling directory that is
+    /// explicitly listed in the project search paths must be classified as
+    /// Local project, not Third party (regression #22).
+    /// </summary>
+    [Test]
+    procedure Resolve_SiblingDirectoryInSearchPaths_ClassifiesAsLocalProject;
+
+    /// <summary>
+    /// A unit resolved from a path that is NOT in the project search paths
+    /// and NOT under the project directory must remain Third party.
+    /// </summary>
+    [Test]
+    procedure Resolve_UnitOutsideSearchPaths_ClassifiesAsThirdParty;
   end;
 
 implementation
@@ -778,6 +793,126 @@ begin
     'Linux64 must be classified as LLVM platform');
   Assert.IsFalse(TUnitResolver.IsClassicCompilerPlatform('Win64x'),
     'Win64x (ARM64) must be classified as LLVM platform');
+end;
+
+procedure TUnitResolverTests.Resolve_SiblingDirectoryInSearchPaths_ClassifiesAsLocalProject;
+var
+  LEvidenceItem: TBuildEvidenceItem;
+  LBuildEvidence: TBuildEvidence;
+  LCompositionEvidence: TCompositionEvidence;
+  LProjectInfo: TProjectInfo;
+  LProjectDir: string;
+  LSharedDir: string;
+  LTempRoot: string;
+  LUnitPath: string;
+begin
+  // Layout:  <TempRoot>\ProjectDir\   (project lives here)
+  //          <TempRoot>\SharedUnits\  (sibling directory in project search paths)
+  LTempRoot := TPath.Combine(TPath.GetTempPath,
+    'DXComplyResolverSibling_' + TPath.GetRandomFileName);
+  LProjectDir := TPath.Combine(LTempRoot, 'ProjectDir');
+  LSharedDir := TPath.Combine(LTempRoot, 'SharedUnits');
+  TDirectory.CreateDirectory(LProjectDir);
+  TDirectory.CreateDirectory(LSharedDir);
+  try
+    LUnitPath := TPath.Combine(LSharedDir, 'Shared.Helpers.pas');
+    TFile.WriteAllText(LUnitPath,
+      'unit Shared.Helpers;' + sLineBreak + 'interface' + sLineBreak +
+      'implementation' + sLineBreak + 'end.');
+
+    LProjectInfo := TProjectInfo.Create;
+    LBuildEvidence := TBuildEvidence.Create;
+    try
+      LProjectInfo.ProjectPath := TPath.Combine(LProjectDir, 'MyApp.dproj');
+      LProjectInfo.ProjectDir := LProjectDir;
+      LProjectInfo.Platform := 'Win32';
+      LProjectInfo.Configuration := 'Release';
+      // Register SharedUnits as a project search path (mirrors what the .dproj
+      // parser produces for a ..\SharedUnits\ entry in the DCC_UnitSearchPath).
+      LProjectInfo.ProjectSearchPaths.Add(LSharedDir);
+      LBuildEvidence.SearchPaths.Add(LSharedDir);
+
+      LEvidenceItem := Default(TBuildEvidenceItem);
+      LEvidenceItem.SourceKind := besMapFile;
+      LEvidenceItem.FilePath := TPath.Combine(LProjectDir, 'MyApp.map');
+      LEvidenceItem.UnitName := 'Shared.Helpers';
+      LBuildEvidence.EvidenceItems.Add(LEvidenceItem);
+
+      LCompositionEvidence := FResolver.Resolve(LProjectInfo, LBuildEvidence);
+      try
+        Assert.AreEqual(NativeInt(1), NativeInt(LCompositionEvidence.Units.Count));
+        Assert.AreEqual(uokLocalProject, LCompositionEvidence.Units[0].OriginKind,
+          'A unit in a sibling directory declared in project search paths must be ' +
+          'classified as Local project, not Third party (issue #22)');
+      finally
+        LCompositionEvidence.Free;
+      end;
+    finally
+      LBuildEvidence.Free;
+      LProjectInfo.Free;
+    end;
+  finally
+    if TDirectory.Exists(LTempRoot) then
+      TDirectory.Delete(LTempRoot, True);
+  end;
+end;
+
+procedure TUnitResolverTests.Resolve_UnitOutsideSearchPaths_ClassifiesAsThirdParty;
+var
+  LEvidenceItem: TBuildEvidenceItem;
+  LBuildEvidence: TBuildEvidence;
+  LCompositionEvidence: TCompositionEvidence;
+  LProjectInfo: TProjectInfo;
+  LProjectDir: string;
+  LThirdPartyDir: string;
+  LTempRoot: string;
+  LUnitPath: string;
+begin
+  LTempRoot := TPath.Combine(TPath.GetTempPath,
+    'DXComplyResolverThirdParty_' + TPath.GetRandomFileName);
+  LProjectDir := TPath.Combine(LTempRoot, 'ProjectDir');
+  LThirdPartyDir := TPath.Combine(LTempRoot, 'SomeThirdPartyLib');
+  TDirectory.CreateDirectory(LProjectDir);
+  TDirectory.CreateDirectory(LThirdPartyDir);
+  try
+    LUnitPath := TPath.Combine(LThirdPartyDir, 'ThirdParty.Core.pas');
+    TFile.WriteAllText(LUnitPath,
+      'unit ThirdParty.Core;' + sLineBreak + 'interface' + sLineBreak +
+      'implementation' + sLineBreak + 'end.');
+
+    LProjectInfo := TProjectInfo.Create;
+    LBuildEvidence := TBuildEvidence.Create;
+    try
+      LProjectInfo.ProjectPath := TPath.Combine(LProjectDir, 'MyApp.dproj');
+      LProjectInfo.ProjectDir := LProjectDir;
+      LProjectInfo.Platform := 'Win32';
+      LProjectInfo.Configuration := 'Release';
+      // ThirdPartyDir is in the build evidence search paths but NOT in the
+      // project-declared search paths — so the unit should remain Third party.
+      LBuildEvidence.SearchPaths.Add(LThirdPartyDir);
+
+      LEvidenceItem := Default(TBuildEvidenceItem);
+      LEvidenceItem.SourceKind := besMapFile;
+      LEvidenceItem.FilePath := TPath.Combine(LProjectDir, 'MyApp.map');
+      LEvidenceItem.UnitName := 'ThirdParty.Core';
+      LBuildEvidence.EvidenceItems.Add(LEvidenceItem);
+
+      LCompositionEvidence := FResolver.Resolve(LProjectInfo, LBuildEvidence);
+      try
+        Assert.AreEqual(NativeInt(1), NativeInt(LCompositionEvidence.Units.Count));
+        Assert.AreEqual(uokThirdParty, LCompositionEvidence.Units[0].OriginKind,
+          'A unit outside the project directory and project search paths must remain Third party');
+      finally
+        LCompositionEvidence.Free;
+      end;
+    finally
+      LBuildEvidence.Free;
+      LProjectInfo.Free;
+    end;
+  finally
+    if TDirectory.Exists(LTempRoot) then
+      TDirectory.Delete(LTempRoot, True);
+  end;
 end;
 
 initialization

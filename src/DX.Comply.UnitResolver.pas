@@ -218,12 +218,23 @@ end;
 
 function TUnitResolver.DetermineOriginKind(const AProjectInfo: TProjectInfo;
   const AUnitName, AResolvedPath: string): TUnitOriginKind;
+var
+  LSearchPath: string;
 begin
   if Trim(AResolvedPath) = '' then
     Exit(uokUnknown);
 
   if IsPathUnderDirectory(AResolvedPath, AProjectInfo.ProjectDir) then
     Exit(uokLocalProject);
+
+  // Units resolved from a path that is explicitly listed in the project's own
+  // search paths belong to the project even when they live outside the project
+  // directory (e.g. sibling directories such as ..\SharedUnits\).  Issue #22.
+  if Assigned(AProjectInfo.ProjectSearchPaths) then
+    for LSearchPath in AProjectInfo.ProjectSearchPaths do
+      if (Trim(LSearchPath) <> '') and
+         IsPathUnderDirectory(AResolvedPath, LSearchPath) then
+        Exit(uokLocalProject);
 
   if IsPathUnderDirectory(AResolvedPath, AProjectInfo.Toolchain.RootDir) then
   begin

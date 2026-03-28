@@ -157,6 +157,7 @@ type
       const AArtefacts: TArtefactList);
     procedure AddExternalDllReferencesToArtefacts(
       const AProjectInfo: TProjectInfo;
+      const ACompositionEvidence: TCompositionEvidence;
       const AArtefacts: TArtefactList);
   public
     /// <summary>
@@ -443,6 +444,7 @@ end;
 
 procedure TDxComplyGenerator.AddExternalDllReferencesToArtefacts(
   const AProjectInfo: TProjectInfo;
+  const ACompositionEvidence: TCompositionEvidence;
   const AArtefacts: TArtefactList);
 var
   LArtefact: TArtefactInfo;
@@ -453,6 +455,7 @@ var
   LLines: TStringList;
   LRegExExternal, LRegExLoadLib: TRegEx;
   LRegExMatch: TMatch;
+  LResolvedUnit: TResolvedUnitInfo;
   I: Integer;
 begin
   LDllNames := TList<string>.Create;
@@ -473,6 +476,19 @@ begin
     if (AProjectInfo.MainSourcePath <> '') and TFile.Exists(AProjectInfo.MainSourcePath)
       and not LPasFiles.Contains(AProjectInfo.MainSourcePath) then
       LPasFiles.Add(AProjectInfo.MainSourcePath);
+
+    // Include all .pas files from composition evidence.  Units that are only
+    // reachable through uses-clause traversal (and therefore not in the project
+    // manager's DCCReference list) may also carry external/LoadLibrary
+    // declarations.  Issue #23.
+    if Assigned(ACompositionEvidence.Units) then
+      for LResolvedUnit in ACompositionEvidence.Units do
+      begin
+        LFilePath := LResolvedUnit.ResolvedPath;
+        if (LFilePath <> '') and SameText(TPath.GetExtension(LFilePath), '.pas')
+          and TFile.Exists(LFilePath) and not LPasFiles.Contains(LFilePath) then
+          LPasFiles.Add(LFilePath);
+      end;
 
     // Patterns:
     //   external 'filename.dll'  (with optional delayed)
@@ -1003,7 +1019,7 @@ begin
 
       DoProgress('Collecting dependencies...', 60);
       AddRuntimePackagesToArtefacts(LProjectInfo, LArtefacts);
-      AddExternalDllReferencesToArtefacts(LProjectInfo, LArtefacts);
+      AddExternalDllReferencesToArtefacts(LProjectInfo, LCompositionEvidence, LArtefacts);
 
       DoProgress('Generating SBOM...', 70);
 

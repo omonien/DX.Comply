@@ -63,7 +63,15 @@ type
     FProjectMenuItem: TMenuItem;
     FProjectMenuSeparator: TMenuItem;
     /// <summary>
+    /// Attempts one injection of the DX.Comply menu items into the Project menu.
+    /// Returns True when the items were inserted, False when the menu was not
+    /// yet available (e.g. during early IDE start-up with GetIt packages).
+    /// </summary>
+    function TryInjectProjectMenuItems: Boolean;
+    /// <summary>
     /// Injects the DX.Comply menu items into the main Project menu.
+    /// If the Project menu is not yet available (GetIt timing), schedules a
+    /// single deferred retry on the main thread via TThread.ForceQueue.
     /// Called once from the constructor.
     /// </summary>
     procedure AddProjectMenuItems;
@@ -221,7 +229,7 @@ begin
   inherited;
 end;
 
-procedure TDxComplyWizard.AddProjectMenuItems;
+function TDxComplyWizard.TryInjectProjectMenuItems: Boolean;
 var
   LNTASvc: INTAServices;
   LMainMenu: TMainMenu;
@@ -229,6 +237,7 @@ var
   LSubMenuItem: TMenuItem;
   I: Integer;
 begin
+  Result := False;
   try
     if not Supports(BorlandIDEServices, INTAServices, LNTASvc) then
       Exit;
@@ -250,7 +259,7 @@ begin
     end;
 
     if not Assigned(LProjectMenu) then
-      Exit;
+      Exit; // IDE not yet fully initialized — caller may schedule a retry
 
     // Separator before our entry for visual grouping.
     FProjectMenuSeparator := TMenuItem.Create(nil);
@@ -277,9 +286,24 @@ begin
     FProjectMenuItem.Add(LSubMenuItem);
 
     LProjectMenu.Add(FProjectMenuItem);
+    Result := True;
   except
     // Never crash the IDE during menu manipulation.
   end;
+end;
+
+procedure TDxComplyWizard.AddProjectMenuItems;
+begin
+  // When a package is installed via GetIt the IDE may not have finished
+  // constructing its main menu by the time the package initialization runs.
+  // If the first attempt finds no Project menu we schedule a single deferred
+  // retry on the main thread so the entry still appears after IDE start-up.
+  if not TryInjectProjectMenuItems then
+    TThread.ForceQueue(nil,
+      procedure
+      begin
+        TryInjectProjectMenuItems;
+      end);
 end;
 
 procedure TDxComplyWizard.AssignProjectMenuBitmap;
@@ -883,7 +907,14 @@ end;
 initialization
   RegisterSplashScreen;
   RegisterAboutBox;
-  GWizardIndex := (BorlandIDEServices as IOTAWizardServices).AddWizard(TDxComplyWizard.Create);
+  // Guard against edge cases where IDE services are not yet fully available
+  // when the package loads (e.g. in some GetIt installation scenarios).
+  try
+    GWizardIndex := (BorlandIDEServices as IOTAWizardServices).AddWizard(TDxComplyWizard.Create);
+  except
+    // Fail silently — GWizardIndex stays -1 and no wizard is registered.
+    // The user can work around this by restarting the IDE once.
+  end;
 
 finalization
   if GWizardIndex >= 0 then

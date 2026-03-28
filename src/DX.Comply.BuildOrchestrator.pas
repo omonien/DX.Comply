@@ -261,7 +261,11 @@ begin
       Exit(LCandidate);
 
     LParentDirectory := TPath.GetDirectoryName(LCurrentDirectory);
-    if SameText(LParentDirectory, LCurrentDirectory) then
+    // TPath.GetDirectoryName returns an empty string for drive roots (e.g. 'C:\').
+    // Without this guard the loop would continue with an empty LCurrentDirectory,
+    // causing TPath.Combine to produce relative paths and potentially triggering
+    // a Windows "filename is empty" error (issue #19).
+    if (LParentDirectory = '') or SameText(LParentDirectory, LCurrentDirectory) then
       Break;
 
     LCurrentDirectory := LParentDirectory;
