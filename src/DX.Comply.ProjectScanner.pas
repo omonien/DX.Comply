@@ -34,6 +34,7 @@ interface
 
 uses
   System.SysUtils,
+  System.StrUtils,
   System.Classes,
   System.IOUtils,
   System.RegularExpressions,
@@ -1058,6 +1059,41 @@ end;
 function TProjectScanner.NormalizePath(const APath, AProjectName: string): string;
 var
   LPath: string;
+
+  // Expands any remaining $(VarName) placeholders by consulting Windows
+  // environment variables. Delphi's "User System Overrides" propagate to the
+  // build via environment variables, so this resolves project-specific tokens
+  // such as $(DVER) — issue #27.
+  function ExpandEnvironmentTokens(const AInput: string): string;
+  var
+    LIdx, LStart, LEnd: Integer;
+    LName, LValue: string;
+  begin
+    Result := AInput;
+    LIdx := 1;
+    while LIdx < Length(Result) do
+    begin
+      LStart := PosEx('$(', Result, LIdx);
+      if LStart = 0 then
+        Break;
+      LEnd := PosEx(')', Result, LStart + 2);
+      if LEnd = 0 then
+        Break;
+      LName := Copy(Result, LStart + 2, LEnd - LStart - 2);
+      LValue := GetEnvironmentVariable(LName);
+      if LValue <> '' then
+      begin
+        Result := Copy(Result, 1, LStart - 1) + LValue +
+          Copy(Result, LEnd + 1, MaxInt);
+        // Continue searching after the substituted value
+        LIdx := LStart + Length(LValue);
+      end
+      else
+        // Unknown token — leave it intact and advance past it
+        LIdx := LEnd + 1;
+    end;
+  end;
+
 begin
   LPath := APath;
   // Standard MSBuild variables
@@ -1066,6 +1102,9 @@ begin
   LPath := StringReplace(LPath, '$(Configuration)', FCurrentConfig, [rfIgnoreCase, rfReplaceAll]);
   LPath := StringReplace(LPath, '$(MSBuildProjectName)', AProjectName, [rfIgnoreCase, rfReplaceAll]);
   LPath := StringReplace(LPath, '$(ProjectName)', AProjectName, [rfIgnoreCase, rfReplaceAll]);
+  // Resolve user-defined $(VarName) placeholders against environment variables.
+  if Pos('$(', LPath) > 0 then
+    LPath := ExpandEnvironmentTokens(LPath);
   // Normalize path separators
   LPath := StringReplace(LPath, '/', '\', [rfReplaceAll]);
   // Remove trailing backslash
