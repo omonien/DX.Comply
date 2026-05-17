@@ -166,6 +166,27 @@ type
     /// </summary>
     [Test]
     procedure Generate_ValidProject_ContainsExternalDllComponents;
+
+    // ---- ScanPasFilesForDllReferences (issue #24 regressions) ---------------
+
+    /// <summary>const NAME = 'foo.dll' + LoadLibrary(NAME) must resolve to foo.dll.</summary>
+    [Test]
+    procedure ScanPasFiles_ConstAndLoadLibrary_ResolvesDllName;
+
+    /// <summary>GetModuleHandle('foo.dll') must be detected.</summary>
+    [Test]
+    procedure ScanPasFiles_GetModuleHandle_DetectsDllName;
+
+    /// <summary>
+    /// Same const name in two different units must each resolve independently
+    /// (no cross-unit collision).
+    /// </summary>
+    [Test]
+    procedure ScanPasFiles_SameConstInTwoUnits_BothResolveCorrectly;
+
+    /// <summary>A comparison like `if X = 'foo.dll'` must NOT be parsed as a const.</summary>
+    [Test]
+    procedure ScanPasFiles_ComparisonExpression_NotTreatedAsConst;
   end;
 
 implementation
@@ -825,6 +846,125 @@ begin
   finally
     LGen.Free;
   end;
+end;
+
+// ---- ScanPasFilesForDllReferences (issue #24) ------------------------------
+
+procedure TEngineTests.ScanPasFiles_ConstAndLoadLibrary_ResolvesDllName;
+var
+  LPasFile: string;
+  LDllNames: TArray<string>;
+const
+  cSource =
+    'unit TestUnitA;'#13#10 +
+    'interface'#13#10 +
+    'const'#13#10 +
+    '  LIBEAY_DLL_NAME = ''libeay32.dll'';'#13#10 +
+    'implementation'#13#10 +
+    'procedure DoIt;'#13#10 +
+    'begin'#13#10 +
+    '  LoadLibrary(LIBEAY_DLL_NAME);'#13#10 +
+    'end;'#13#10 +
+    'end.';
+begin
+  LPasFile := TPath.Combine(FTempDir, 'TestUnitA.pas');
+  TFile.WriteAllText(LPasFile, cSource, TEncoding.UTF8);
+  LDllNames := TDxComplyGenerator.ScanPasFilesForDllReferences(
+    TArray<string>.Create(LPasFile));
+  Assert.IsTrue(TArray.IndexOf<string>(LDllNames, 'libeay32.dll') >= 0,
+    'libeay32.dll must be detected through const + LoadLibrary identifier resolution');
+end;
+
+procedure TEngineTests.ScanPasFiles_GetModuleHandle_DetectsDllName;
+var
+  LPasFile: string;
+  LDllNames: TArray<string>;
+const
+  cSource =
+    'unit TestUnitGmh;'#13#10 +
+    'interface'#13#10 +
+    'implementation'#13#10 +
+    'procedure DoIt;'#13#10 +
+    'begin'#13#10 +
+    '  GetModuleHandle(''user32.dll'');'#13#10 +
+    'end;'#13#10 +
+    'end.';
+begin
+  LPasFile := TPath.Combine(FTempDir, 'TestUnitGmh.pas');
+  TFile.WriteAllText(LPasFile, cSource, TEncoding.UTF8);
+  LDllNames := TDxComplyGenerator.ScanPasFilesForDllReferences(
+    TArray<string>.Create(LPasFile));
+  Assert.IsTrue(TArray.IndexOf<string>(LDllNames, 'user32.dll') >= 0,
+    'GetModuleHandle with a literal argument must be detected');
+end;
+
+procedure TEngineTests.ScanPasFiles_SameConstInTwoUnits_BothResolveCorrectly;
+var
+  LPasFile1, LPasFile2: string;
+  LDllNames: TArray<string>;
+const
+  cSourceA =
+    'unit UnitAlpha;'#13#10 +
+    'interface'#13#10 +
+    'const'#13#10 +
+    '  DLL_NAME = ''alpha.dll'';'#13#10 +
+    'implementation'#13#10 +
+    'procedure DoIt;'#13#10 +
+    'begin'#13#10 +
+    '  LoadLibrary(DLL_NAME);'#13#10 +
+    'end;'#13#10 +
+    'end.';
+  cSourceB =
+    'unit UnitBeta;'#13#10 +
+    'interface'#13#10 +
+    'const'#13#10 +
+    '  DLL_NAME = ''beta.dll'';'#13#10 +
+    'implementation'#13#10 +
+    'procedure DoIt;'#13#10 +
+    'begin'#13#10 +
+    '  LoadLibrary(DLL_NAME);'#13#10 +
+    'end;'#13#10 +
+    'end.';
+begin
+  LPasFile1 := TPath.Combine(FTempDir, 'UnitAlpha.pas');
+  LPasFile2 := TPath.Combine(FTempDir, 'UnitBeta.pas');
+  TFile.WriteAllText(LPasFile1, cSourceA, TEncoding.UTF8);
+  TFile.WriteAllText(LPasFile2, cSourceB, TEncoding.UTF8);
+
+  LDllNames := TDxComplyGenerator.ScanPasFilesForDllReferences(
+    TArray<string>.Create(LPasFile1, LPasFile2));
+
+  Assert.IsTrue(TArray.IndexOf<string>(LDllNames, 'alpha.dll') >= 0,
+    'alpha.dll (UnitAlpha.DLL_NAME) must resolve independently');
+  Assert.IsTrue(TArray.IndexOf<string>(LDllNames, 'beta.dll') >= 0,
+    'beta.dll (UnitBeta.DLL_NAME) must resolve independently');
+end;
+
+procedure TEngineTests.ScanPasFiles_ComparisonExpression_NotTreatedAsConst;
+var
+  LPasFile: string;
+  LDllNames: TArray<string>;
+const
+  cSource =
+    'unit TestCmp;'#13#10 +
+    'interface'#13#10 +
+    'implementation'#13#10 +
+    'procedure DoIt;'#13#10 +
+    'var X: string;'#13#10 +
+    'begin'#13#10 +
+    '  X := SomeFunc;'#13#10 +
+    '  if X = ''foo.dll'' then'#13#10 +
+    '    LoadLibrary(X);'#13#10 +
+    'end;'#13#10 +
+    'end.';
+begin
+  LPasFile := TPath.Combine(FTempDir, 'TestCmp.pas');
+  TFile.WriteAllText(LPasFile, cSource, TEncoding.UTF8);
+  LDllNames := TDxComplyGenerator.ScanPasFilesForDllReferences(
+    TArray<string>.Create(LPasFile));
+  Assert.IsTrue(TArray.IndexOf<string>(LDllNames, 'foo.dll') < 0,
+    '`if X = ''foo.dll''` must NOT be parsed as a const declaration; ' +
+    'foo.dll should not appear in detected DLLs');
 end;
 
 initialization

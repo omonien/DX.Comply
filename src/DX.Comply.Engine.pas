@@ -161,6 +161,15 @@ type
       const AArtefacts: TArtefactList);
   public
     /// <summary>
+    /// Scans the supplied .pas files for external DLL references — string
+    /// literals in 'external' or LoadLibrary/GetModuleHandle calls, plus
+    /// identifier-form calls that are resolved against a per-unit const map.
+    /// Returns lower-cased, de-duplicated DLL/BPL file names. Public for
+    /// testability — issue #24.
+    /// </summary>
+    class function ScanPasFilesForDllReferences(
+      const APasFilePaths: TArray<string>): TArray<string>; static;
+    /// <summary>
     /// Creates a new TDxComplyGenerator instance.
     /// </summary>
     constructor Create; overload;
@@ -448,33 +457,13 @@ procedure TDxComplyGenerator.AddExternalDllReferencesToArtefacts(
   const AArtefacts: TArtefactList);
 var
   LArtefact: TArtefactInfo;
-  LDllNames: TList<string>;
-  LDllName: string;
   LPasFiles: TList<string>;
-  LFilePath, LLine, LMatch, LIdent: string;
-  LLines: TStringList;
-  LRegExExternal, LRegExLoadLib, LRegExLoadLibIdent, LRegExConstDll: TRegEx;
-  LRegExMatch: TMatch;
+  LDllNames: TArray<string>;
+  LDllName, LFilePath: string;
   LResolvedUnit: TResolvedUnitInfo;
-  LConstMap: TDictionary<string, string>;
-  LResolved: string;
   I: Integer;
-
-  procedure AddDllName(const AName: string);
-  begin
-    if AName = '' then
-      Exit;
-    if not LDllNames.Contains(LowerCase(AName)) then
-      LDllNames.Add(LowerCase(AName));
-  end;
-
 begin
-  LDllNames := TList<string>.Create;
   LPasFiles := TList<string>.Create;
-  LLines := TStringList.Create;
-  // Maps identifier (lower-case) -> resolved file name for simple const
-  // declarations such as: const LIBEAY_DLL_NAME = 'libeay32.dll'; — issue #24.
-  LConstMap := TDictionary<string, string>.Create;
   try
     // Collect all .pas files from explicit unit references
     if Assigned(AProjectInfo.ExplicitUnitReferences) then
@@ -504,87 +493,7 @@ begin
           LPasFiles.Add(LFilePath);
       end;
 
-    // Patterns:
-    //   external 'filename.dll'  (with optional delayed)
-    //   LoadLibrary('filename.dll')  /  LoadLibraryEx  /  SafeLoadLibrary  /
-    //   GetModuleHandle('filename.dll')
-    //   const NAME = 'filename.dll'; — captured separately so identifier-form
-    //     calls (e.g. LoadLibrary(LIBEAY_DLL_NAME)) can be resolved — issue #24.
-    LRegExExternal := TRegEx.Create(
-      'external\s+''([^'']+\.(dll|bpl))''', [roIgnoreCase]);
-    LRegExLoadLib := TRegEx.Create(
-      '(?:LoadLibrary|LoadLibraryEx|LoadLibraryA|LoadLibraryW|SafeLoadLibrary|GetModuleHandle|GetModuleHandleA|GetModuleHandleW|LoadPackage)\s*\(\s*''([^'']+\.(dll|bpl))''',
-      [roIgnoreCase]);
-    // Same calls but with an identifier argument that we resolve via the
-    // const map.  Skips quoted forms (already covered by LRegExLoadLib).
-    LRegExLoadLibIdent := TRegEx.Create(
-      '(?:LoadLibrary|LoadLibraryEx|LoadLibraryA|LoadLibraryW|SafeLoadLibrary|GetModuleHandle|GetModuleHandleA|GetModuleHandleW|LoadPackage)\s*\(\s*([A-Za-z_][A-Za-z0-9_\.]*)\s*[,)]',
-      [roIgnoreCase]);
-    LRegExConstDll := TRegEx.Create(
-      '\b([A-Za-z_][A-Za-z0-9_]*)\s*(?::[^=]*)?=\s*''([^'']+\.(?:dll|bpl))''',
-      [roIgnoreCase]);
-
-    // First pass: collect literal references AND build the const-name map.
-    for LFilePath in LPasFiles do
-    begin
-      try
-        LLines.LoadFromFile(LFilePath, TEncoding.UTF8);
-      except
-        try
-          LLines.LoadFromFile(LFilePath);
-        except
-          Continue;
-        end;
-      end;
-
-      for I := 0 to LLines.Count - 1 do
-      begin
-        LLine := LLines[I];
-
-        LRegExMatch := LRegExExternal.Match(LLine);
-        if LRegExMatch.Success then
-          AddDllName(LRegExMatch.Groups[1].Value);
-
-        LRegExMatch := LRegExLoadLib.Match(LLine);
-        if LRegExMatch.Success then
-          AddDllName(LRegExMatch.Groups[1].Value);
-
-        // Record  CONST_NAME = 'file.dll'  so later lookups can resolve it.
-        LRegExMatch := LRegExConstDll.Match(LLine);
-        if LRegExMatch.Success then
-          LConstMap.AddOrSetValue(
-            LowerCase(LRegExMatch.Groups[1].Value),
-            LRegExMatch.Groups[2].Value);
-      end;
-    end;
-
-    // Second pass: resolve identifier-form LoadLibrary/GetModuleHandle calls
-    // against the const map.  Done after the const map is fully populated so
-    // forward references inside the same unit also resolve.
-    for LFilePath in LPasFiles do
-    begin
-      try
-        LLines.LoadFromFile(LFilePath, TEncoding.UTF8);
-      except
-        try
-          LLines.LoadFromFile(LFilePath);
-        except
-          Continue;
-        end;
-      end;
-
-      for I := 0 to LLines.Count - 1 do
-      begin
-        LLine := LLines[I];
-        LRegExMatch := LRegExLoadLibIdent.Match(LLine);
-        if LRegExMatch.Success then
-        begin
-          LIdent := LRegExMatch.Groups[1].Value;
-          if LConstMap.TryGetValue(LowerCase(LIdent), LResolved) then
-            AddDllName(LResolved);
-        end;
-      end;
-    end;
+    LDllNames := ScanPasFilesForDllReferences(LPasFiles.ToArray);
 
     // Add discovered DLLs as artefacts
     for LDllName in LDllNames do
@@ -602,9 +511,135 @@ begin
       AArtefacts.Add(LArtefact);
     end;
   finally
+    LPasFiles.Free;
+  end;
+end;
+
+class function TDxComplyGenerator.ScanPasFilesForDllReferences(
+  const APasFilePaths: TArray<string>): TArray<string>;
+var
+  LDllNames: TList<string>;
+  LLines: TStringList;
+  LConstMap: TDictionary<string, string>;
+  LRegExExternal, LRegExLoadLib, LRegExLoadLibIdent, LRegExConstDll: TRegEx;
+  LRegExMatch: TMatch;
+  LFilePath, LLine, LIdent, LUnitName, LLookupKey, LResolved: string;
+  I: Integer;
+
+  procedure AddDllName(const AName: string);
+  begin
+    if AName = '' then
+      Exit;
+    if not LDllNames.Contains(LowerCase(AName)) then
+      LDllNames.Add(LowerCase(AName));
+  end;
+
+  function UnitNameOf(const AFilePath: string): string;
+  begin
+    Result := LowerCase(TPath.GetFileNameWithoutExtension(AFilePath));
+  end;
+
+  function LoadFileLines(const APath: string): Boolean;
+  begin
+    try
+      LLines.LoadFromFile(APath, TEncoding.UTF8);
+      Exit(True);
+    except
+      try
+        LLines.LoadFromFile(APath);
+        Exit(True);
+      except
+        Exit(False);
+      end;
+    end;
+  end;
+
+begin
+  LDllNames := TList<string>.Create;
+  LLines := TStringList.Create;
+  // Maps "unitname.const_name" (lower-case) -> resolved file name. Scoped
+  // per-unit so the same const identifier in two different units does not
+  // collide — issue #24.
+  LConstMap := TDictionary<string, string>.Create;
+  try
+    // Patterns:
+    //   external 'filename.dll'  (with optional delayed)
+    //   LoadLibrary('filename.dll') / LoadLibraryEx / SafeLoadLibrary /
+    //     GetModuleHandle('filename.dll') / LoadPackage
+    //   const NAME = 'filename.dll'; — captured separately so identifier-form
+    //     calls (e.g. LoadLibrary(LIBEAY_DLL_NAME)) can be resolved.
+    LRegExExternal := TRegEx.Create(
+      'external\s+''([^'']+\.(dll|bpl))''', [roIgnoreCase]);
+    LRegExLoadLib := TRegEx.Create(
+      '(?:LoadLibrary|LoadLibraryEx|LoadLibraryA|LoadLibraryW|SafeLoadLibrary|GetModuleHandle|GetModuleHandleA|GetModuleHandleW|LoadPackage)\s*\(\s*''([^'']+\.(dll|bpl))''',
+      [roIgnoreCase]);
+    LRegExLoadLibIdent := TRegEx.Create(
+      '(?:LoadLibrary|LoadLibraryEx|LoadLibraryA|LoadLibraryW|SafeLoadLibrary|GetModuleHandle|GetModuleHandleA|GetModuleHandleW|LoadPackage)\s*\(\s*([A-Za-z_][A-Za-z0-9_\.]*)\s*[,)]',
+      [roIgnoreCase]);
+    // Only match real const declarations: identifier starts the line
+    // (after whitespace), optional ': type', '=', single-quoted file name,
+    // then ';'.  Comparisons like `if X = 'foo.dll' then` do not end in
+    // ';' on the comparison, so they will not match.
+    LRegExConstDll := TRegEx.Create(
+      '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?::\s*[A-Za-z_][A-Za-z0-9_]*\s*)?=\s*''([^'']+\.(?:dll|bpl))''\s*;',
+      [roIgnoreCase]);
+
+    // First pass: collect literal references AND build the const-name map.
+    for LFilePath in APasFilePaths do
+    begin
+      if not LoadFileLines(LFilePath) then
+        Continue;
+      LUnitName := UnitNameOf(LFilePath);
+      for I := 0 to LLines.Count - 1 do
+      begin
+        LLine := LLines[I];
+
+        LRegExMatch := LRegExExternal.Match(LLine);
+        if LRegExMatch.Success then
+          AddDllName(LRegExMatch.Groups[1].Value);
+
+        LRegExMatch := LRegExLoadLib.Match(LLine);
+        if LRegExMatch.Success then
+          AddDllName(LRegExMatch.Groups[1].Value);
+
+        LRegExMatch := LRegExConstDll.Match(LLine);
+        if LRegExMatch.Success then
+          LConstMap.AddOrSetValue(
+            LUnitName + '.' + LowerCase(LRegExMatch.Groups[1].Value),
+            LRegExMatch.Groups[2].Value);
+      end;
+    end;
+
+    // Second pass: resolve identifier-form calls against the const map.
+    for LFilePath in APasFilePaths do
+    begin
+      if not LoadFileLines(LFilePath) then
+        Continue;
+      LUnitName := UnitNameOf(LFilePath);
+      for I := 0 to LLines.Count - 1 do
+      begin
+        LLine := LLines[I];
+        LRegExMatch := LRegExLoadLibIdent.Match(LLine);
+        if LRegExMatch.Success then
+        begin
+          LIdent := LowerCase(LRegExMatch.Groups[1].Value);
+          // Already qualified (Other.IDENT) — use as-is.  Otherwise look up
+          // within the current unit only — cross-unit lookups would need
+          // uses-clause information that this scanner does not have.
+          if Pos('.', LIdent) > 0 then
+            LLookupKey := LIdent
+          else
+            LLookupKey := LUnitName + '.' + LIdent;
+          if LConstMap.TryGetValue(LLookupKey, LResolved) then
+            AddDllName(LResolved);
+        end;
+      end;
+    end;
+
+    Result := LDllNames.ToArray;
+  finally
     LConstMap.Free;
     LLines.Free;
-    LPasFiles.Free;
     LDllNames.Free;
   end;
 end;
