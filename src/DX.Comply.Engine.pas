@@ -960,15 +960,34 @@ begin
     end;
     if not LDeepEvidenceBuildResult.Success then
     begin
-      DoProgress('Error: ' + LDeepEvidenceBuildResult.Message, -1);
-      if LDeepEvidenceBuildResult.CommandLine <> '' then
-        DoProgress('Command: ' + LDeepEvidenceBuildResult.CommandLine, -1);
-      if LDeepEvidenceBuildResult.Output <> '' then
-        DoProgress('Build output: ' + LDeepEvidenceBuildResult.Output, -1);
+      // When ContinueOnDeepEvidenceBuildFailure is set (the default), the
+      // Deep-Evidence build is best-effort: the SBOM is still produced from
+      // whatever MAP file is already present. Reporting the failure as
+      // [ERROR] confused users who saw "Error: …" followed by a successful
+      // "SBOM generated" line (issues #29 and #31). Demote the message to a
+      // warning in that case and clarify that SBOM generation continues.
       if FConfig.ContinueOnDeepEvidenceBuildFailure then
-        DoProgress('Warning: Continuing SBOM generation without rebuilt MAP evidence.', 18)
+      begin
+        DoProgress('Warning: Skipping optional Deep-Evidence rebuild — ' +
+          LDeepEvidenceBuildResult.Message, 18);
+        if LDeepEvidenceBuildResult.CommandLine <> '' then
+          DoProgress('Hint: Deep-Evidence command was: ' +
+            LDeepEvidenceBuildResult.CommandLine, 18);
+        if LDeepEvidenceBuildResult.Output <> '' then
+          DoProgress('Hint: Deep-Evidence build output: ' +
+            LDeepEvidenceBuildResult.Output, 18);
+        DoProgress('Continuing SBOM generation with the existing MAP file (if any). ' +
+          'See the IDE Messages window or the CLI output above for details.', 18);
+      end
       else
+      begin
+        DoProgress('Error: ' + LDeepEvidenceBuildResult.Message, -1);
+        if LDeepEvidenceBuildResult.CommandLine <> '' then
+          DoProgress('Command: ' + LDeepEvidenceBuildResult.CommandLine, -1);
+        if LDeepEvidenceBuildResult.Output <> '' then
+          DoProgress('Build output: ' + LDeepEvidenceBuildResult.Output, -1);
         Exit;
+      end;
     end
     else if LDeepEvidenceBuildResult.Executed then
       DoProgress('MAP build completed.', 18)

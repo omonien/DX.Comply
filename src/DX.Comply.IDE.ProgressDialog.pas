@@ -505,7 +505,10 @@ begin
     FPanelHeader.Color := cColorError;
     FLabelSubtitle.Caption := 'Generation failed';
     FLabelSubtitle.Font.Color := cColorTitle;
-    FLabelStep.Caption := 'Generation failed - see log for details.';
+    // Issue #29: clarify where the diagnostic output actually lives — there
+    // is no separate log file; DX.Comply writes its progress and errors to
+    // the Delphi IDE Messages window.
+    FLabelStep.Caption := 'Generation failed - see the IDE Messages window for details.';
     FLabelStep.Font.Color := cColorError;
     FLabelStatus.Caption := 'Failed';
     FLabelStatus.Font.Color := cColorError;
