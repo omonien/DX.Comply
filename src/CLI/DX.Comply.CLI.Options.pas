@@ -50,6 +50,8 @@ type
     FNoPause: Boolean;
     FMapDir: string;
     FNoCompositionEvidence: Boolean;
+    FIncludePlatformInOutput: Boolean;
+    FOutputExplicit: Boolean;
     FParseError: string;
     /// <summary>
     /// Converts a format string token to the corresponding TSbomFormat enum
@@ -94,6 +96,12 @@ type
     property NoPause: Boolean read FNoPause;
     property MapDir: string read FMapDir;
     property NoCompositionEvidence: Boolean read FNoCompositionEvidence;
+    /// <summary>
+    /// When True (and --output is not supplied), the default bom.json
+    /// filename is decorated with the selected platform and configuration
+    /// (e.g. bom.Win64.Release.json) — issue #25.
+    /// </summary>
+    property IncludePlatformInOutput: Boolean read FIncludePlatformInOutput;
     property ParseError: string read FParseError;
   end;
 
@@ -186,6 +194,12 @@ begin
       Continue;
     end;
 
+    if LArg = '--include-platform-in-output' then
+    begin
+      FIncludePlatformInOutput := True;
+      Continue;
+    end;
+
     if LArg.StartsWith('--') then
     begin
       // Split into key and value at the first '='
@@ -205,7 +219,10 @@ begin
       else if LKey = 'format' then
         FFormat := ParseFormat(LValue)
       else if LKey = 'output' then
-        FOutput := LValue
+      begin
+        FOutput := LValue;
+        FOutputExplicit := True;
+      end
       else if LKey = 'platform' then
         FPlatform := LValue
       else if LKey = 'config-name' then
@@ -281,6 +298,9 @@ begin
   Writeln('  --exclude=<pattern>           File exclude pattern (repeatable)');
   Writeln('  --map-dir=<path>              Directory containing the pre-built MAP file');
   Writeln('  --no-composition-evidence     Omit source/DCU units from SBOM (binary-only)');
+  Writeln('  --include-platform-in-output  Append <Platform>.<Config> to the default');
+  Writeln('                                output filename (e.g. bom.Win64.Release.json)');
+  Writeln('                                — ignored when --output is supplied');
   Writeln('  --ci                          CI mode: use .dxcomply.json config file');
   Writeln('  --config=<path>               Path to .dxcomply.json (default: .dxcomply.json)');
   Writeln('  --help, -h                    Show this help');
@@ -302,9 +322,22 @@ end;
 // ---------------------------------------------------------------------------
 
 function TCliOptions.ToSbomConfig: TSbomConfig;
+var
+  LDir, LName, LExt: string;
 begin
   Result := TSbomConfig.Default;
   Result.OutputPath      := FOutput;
+
+  // When --include-platform-in-output is set and --output was not supplied,
+  // decorate the default filename with the selected platform/config so that
+  // multi-platform builds do not overwrite one another. Issue #25.
+  if FIncludePlatformInOutput and not FOutputExplicit and (FOutput <> '') then
+  begin
+    LDir  := ExtractFilePath(FOutput);
+    LExt  := ExtractFileExt(FOutput);
+    LName := ChangeFileExt(ExtractFileName(FOutput), '');
+    Result.OutputPath := LDir + LName + '.' + FPlatform + '.' + FConfiguration + LExt;
+  end;
   Result.Format          := FFormat;
   Result.Platform        := FPlatform;
   Result.Configuration   := FConfiguration;
