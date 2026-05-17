@@ -61,6 +61,12 @@ type
     /// <summary>Appends AValue to the given dynamic string array.</summary>
     procedure AppendPattern(var APatterns: TArray<string>; const AValue: string);
   public
+    /// <summary>
+    /// Strips characters that could enable path traversal or directory
+    /// injection when a value is interpolated into a filename. Keeps only
+    /// ASCII letters, digits, hyphen and underscore. Exposed for testing.
+    /// </summary>
+    class function SanitizeForFilename(const AValue: string): string; static;
     constructor Create;
     /// <summary>
     /// Parses the process ParamStr array and populates all properties.
@@ -321,9 +327,19 @@ end;
 // ToSbomConfig
 // ---------------------------------------------------------------------------
 
+class function TCliOptions.SanitizeForFilename(const AValue: string): string;
+var
+  LChar: Char;
+begin
+  Result := '';
+  for LChar in AValue do
+    if CharInSet(LChar, ['A'..'Z', 'a'..'z', '0'..'9', '-', '_']) then
+      Result := Result + LChar;
+end;
+
 function TCliOptions.ToSbomConfig: TSbomConfig;
 var
-  LDir, LName, LExt: string;
+  LDir, LName, LExt, LSafePlatform, LSafeConfig: string;
 begin
   Result := TSbomConfig.Default;
   Result.OutputPath      := FOutput;
@@ -331,12 +347,18 @@ begin
   // When --include-platform-in-output is set and --output was not supplied,
   // decorate the default filename with the selected platform/config so that
   // multi-platform builds do not overwrite one another. Issue #25.
+  //
+  // FPlatform and FConfiguration are sanitized before interpolation: a
+  // user-supplied value such as "..\\..\\evil" or "Win32/etc" would otherwise
+  // escape the intended output directory or break path semantics.
   if FIncludePlatformInOutput and not FOutputExplicit and (FOutput <> '') then
   begin
-    LDir  := ExtractFilePath(FOutput);
-    LExt  := ExtractFileExt(FOutput);
-    LName := ChangeFileExt(ExtractFileName(FOutput), '');
-    Result.OutputPath := LDir + LName + '.' + FPlatform + '.' + FConfiguration + LExt;
+    LDir          := ExtractFilePath(FOutput);
+    LExt          := ExtractFileExt(FOutput);
+    LName         := ChangeFileExt(ExtractFileName(FOutput), '');
+    LSafePlatform := TCliOptions.SanitizeForFilename(FPlatform);
+    LSafeConfig   := TCliOptions.SanitizeForFilename(FConfiguration);
+    Result.OutputPath := LDir + LName + '.' + LSafePlatform + '.' + LSafeConfig + LExt;
   end;
   Result.Format          := FFormat;
   Result.Platform        := FPlatform;

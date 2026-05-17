@@ -62,6 +62,24 @@ type
     /// <summary>ToSbomConfig must propagate the default configuration.</summary>
     [Test]
     procedure ToSbomConfig_Default_ConfigurationIsRelease;
+
+    // ---- Filename sanitisation (issue #25 security follow-up) ---------------
+
+    /// <summary>Backslashes must be stripped from filename segments.</summary>
+    [Test]
+    procedure SanitizeForFilename_StripsBackslash;
+
+    /// <summary>Forward slashes must be stripped from filename segments.</summary>
+    [Test]
+    procedure SanitizeForFilename_StripsForwardSlash;
+
+    /// <summary>Parent-directory '..' sequences must be reduced to safe chars.</summary>
+    [Test]
+    procedure SanitizeForFilename_StripsDoubleDot;
+
+    /// <summary>Alphanumeric, hyphen and underscore must be preserved.</summary>
+    [Test]
+    procedure SanitizeForFilename_PreservesAllowedChars;
   end;
 
 implementation
@@ -154,6 +172,32 @@ begin
   finally
     LOptions.Free;
   end;
+end;
+
+// ---- Filename sanitisation --------------------------------------------------
+
+procedure TCliOptionsTests.SanitizeForFilename_StripsBackslash;
+begin
+  Assert.AreEqual('Win32', TCliOptions.SanitizeForFilename('Win32\..\evil'),
+    'Backslashes and dots must be stripped — only safe chars survive');
+end;
+
+procedure TCliOptionsTests.SanitizeForFilename_StripsForwardSlash;
+begin
+  Assert.AreEqual('Win32etc', TCliOptions.SanitizeForFilename('Win32/etc'),
+    'Forward slashes must be stripped');
+end;
+
+procedure TCliOptionsTests.SanitizeForFilename_StripsDoubleDot;
+begin
+  Assert.AreEqual('abc', TCliOptions.SanitizeForFilename('..abc..'),
+    'Period characters must be stripped');
+end;
+
+procedure TCliOptionsTests.SanitizeForFilename_PreservesAllowedChars;
+begin
+  Assert.AreEqual('Release-1_0', TCliOptions.SanitizeForFilename('Release-1_0'),
+    'Alphanumeric, hyphen and underscore must be preserved');
 end;
 
 initialization
