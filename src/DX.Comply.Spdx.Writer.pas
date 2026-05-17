@@ -237,7 +237,11 @@ begin
     LRoot.AddPair('spdxVersion', cSpdxVersion);
     LRoot.AddPair('dataLicense', cDataLicense);
     LRoot.AddPair('SPDXID', LDocumentSpdxId);
-    LRoot.AddPair('name', EscapeJsonString(AProjectInfo.ProjectName));
+    // Prefer metadata override (CLI --product) over project name — issue #26.
+    if AMetadata.ProductName <> '' then
+      LRoot.AddPair('name', EscapeJsonString(AMetadata.ProductName))
+    else
+      LRoot.AddPair('name', EscapeJsonString(AProjectInfo.ProjectName));
     LRoot.AddPair('documentNamespace', LDocNamespace);
 
     // Creation info

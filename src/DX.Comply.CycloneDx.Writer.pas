@@ -119,11 +119,18 @@ begin
   else
     LMetadata.AddPair('timestamp', DateToISO8601(Now, False));
 
-  // Component (the project being documented)
+  // Component (the project being documented).
+  // Prefer metadata overrides (CLI --product / --version) over values parsed
+  // from the .dproj — issue #26.
   LComponent := TJSONObject.Create;
   LComponent.AddPair('type', 'application');
-  LComponent.AddPair('name', EscapeJsonString(AProjectInfo.ProjectName));
-  if AProjectInfo.Version <> '' then
+  if AMetadata.ProductName <> '' then
+    LComponent.AddPair('name', EscapeJsonString(AMetadata.ProductName))
+  else
+    LComponent.AddPair('name', EscapeJsonString(AProjectInfo.ProjectName));
+  if AMetadata.ProductVersion <> '' then
+    LComponent.AddPair('version', EscapeJsonString(AMetadata.ProductVersion))
+  else if AProjectInfo.Version <> '' then
     LComponent.AddPair('version', EscapeJsonString(AProjectInfo.Version));
   LComponent.AddPair('bom-ref', EscapeJsonString(AProjectInfo.ProjectName));
 

@@ -173,11 +173,17 @@ begin
   CloseTag('tool');
   CloseTag('tools');
 
-  // Component (the project being documented)
+  // Component (the project being documented). Prefer metadata overrides
+  // (CLI --product / --version) over values from the .dproj — issue #26.
   OpenTag('component', 'type="application" bom-ref="' +
     EscapeXml(AProjectInfo.ProjectName) + '"');
-  AddElement('name', AProjectInfo.ProjectName);
-  if AProjectInfo.Version <> '' then
+  if AMetadata.ProductName <> '' then
+    AddElement('name', AMetadata.ProductName)
+  else
+    AddElement('name', AProjectInfo.ProjectName);
+  if AMetadata.ProductVersion <> '' then
+    AddElement('version', AMetadata.ProductVersion)
+  else if AProjectInfo.Version <> '' then
     AddElement('version', AProjectInfo.Version);
   if AMetadata.Supplier <> '' then
   begin
