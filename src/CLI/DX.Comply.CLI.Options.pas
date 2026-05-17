@@ -23,7 +23,8 @@ uses
   System.SysUtils,
   System.Classes,
   DX.Comply.Engine,
-  DX.Comply.Engine.Intf;
+  DX.Comply.Engine.Intf,
+  DX.Comply.Report.Intf;
 
 type
   /// <summary>
@@ -52,7 +53,14 @@ type
     FNoCompositionEvidence: Boolean;
     FIncludePlatformInOutput: Boolean;
     FOutputExplicit: Boolean;
+    FReportEnabled: Boolean;
+    FReportFormat: THumanReadableReportFormat;
     FParseError: string;
+    /// <summary>
+    /// Parses the --report value (markdown | html | both | none) and updates
+    /// the report enable flag / format. Returns True on success.
+    /// </summary>
+    function TryParseReport(const AValue: string): Boolean;
     /// <summary>
     /// Converts a format string token to the corresponding TSbomFormat enum
     /// value. Returns sfCycloneDxJson for unrecognised tokens.
@@ -108,6 +116,10 @@ type
     /// (e.g. bom.Win64.Release.json) — issue #25.
     /// </summary>
     property IncludePlatformInOutput: Boolean read FIncludePlatformInOutput;
+    /// <summary>True when the user passed --report=… to enable companion reports — issue #30.</summary>
+    property ReportEnabled: Boolean read FReportEnabled;
+    /// <summary>Effective report format when ReportEnabled is True.</summary>
+    property ReportFormat: THumanReadableReportFormat read FReportFormat;
     property ParseError: string read FParseError;
   end;
 
@@ -142,6 +154,33 @@ begin
   else
     // 'cyclonedx-json' and anything unrecognised fall back to the default
     Result := sfCycloneDxJson;
+end;
+
+function TCliOptions.TryParseReport(const AValue: string): Boolean;
+var
+  LLower: string;
+begin
+  Result := True;
+  LLower := LowerCase(Trim(AValue));
+  if LLower = 'none' then
+    FReportEnabled := False
+  else if LLower = 'markdown' then
+  begin
+    FReportEnabled := True;
+    FReportFormat  := hrfMarkdown;
+  end
+  else if LLower = 'html' then
+  begin
+    FReportEnabled := True;
+    FReportFormat  := hrfHtml;
+  end
+  else if (LLower = 'both') or (LLower = '') then
+  begin
+    FReportEnabled := True;
+    FReportFormat  := hrfBoth;
+  end
+  else
+    Result := False;
 end;
 
 procedure TCliOptions.AppendPattern(var APatterns: TArray<string>; const AValue: string);
@@ -206,6 +245,13 @@ begin
       Continue;
     end;
 
+    // Bare --report (no value) enables both markdown and html.
+    if LArg = '--report' then
+    begin
+      TryParseReport('both');
+      Continue;
+    end;
+
     if LArg.StartsWith('--') then
     begin
       // Split into key and value at the first '='
@@ -247,6 +293,15 @@ begin
         FConfigFile := LValue
       else if LKey = 'map-dir' then
         FMapDir := LValue
+      else if LKey = 'report' then
+      begin
+        if not TryParseReport(LValue) then
+        begin
+          FParseError := 'Invalid value for --report: ' + LValue +
+            ' (expected markdown, html, both, or none)';
+          Exit(False);
+        end;
+      end
       else
       begin
         FParseError := 'Unknown option: --' + LKey;
@@ -307,6 +362,8 @@ begin
   Writeln('  --include-platform-in-output  Append <Platform>.<Config> to the default');
   Writeln('                                output filename (e.g. bom.Win64.Release.json)');
   Writeln('                                — ignored when --output is supplied');
+  Writeln('  --report[=<format>]           Generate companion human-readable report');
+  Writeln('                                  markdown | html | both (default) | none');
   Writeln('  --ci                          CI mode: use .dxcomply.json config file');
   Writeln('  --config=<path>               Path to .dxcomply.json (default: .dxcomply.json)');
   Writeln('  --help, -h                    Show this help');
@@ -370,6 +427,16 @@ begin
   Result.ExcludePatterns             := FExcludePatterns;
   Result.MapFileDir                  := FMapDir;
   Result.IncludeCompositionEvidence  := not FNoCompositionEvidence;
+
+  // Enable companion human-readable reports on demand — issue #30.
+  // README documented HTML/Markdown as output formats but they live in the
+  // optional HumanReadableReport block, not in TSbomFormat. The CLI exposes
+  // them via --report so users can turn them on without a config file.
+  if FReportEnabled then
+  begin
+    Result.HumanReadableReport.Enabled := True;
+    Result.HumanReadableReport.Format  := FReportFormat;
+  end;
 end;
 
 end.
