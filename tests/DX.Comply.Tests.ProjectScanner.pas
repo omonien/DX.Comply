@@ -23,6 +23,7 @@ interface
 uses
   System.SysUtils,
   System.IOUtils,
+  Winapi.Windows,
   DUnitX.TestFramework,
   DX.Comply.ProjectScanner,
   DX.Comply.Engine.Intf;
@@ -153,6 +154,13 @@ type
     /// </summary>
     [Test]
     procedure Scan_NamedPlatformEntry_iOSDevice64_NoTargetedPlatformsWarning;
+
+    /// <summary>
+    /// $(VarName) tokens in DPROJ paths must be expanded from the
+    /// process environment (issue #27).
+    /// </summary>
+    [Test]
+    procedure Scan_DprojWithEnvVarInOutputDir_ExpandsEnvVar;
   end;
 
 implementation
@@ -638,6 +646,60 @@ begin
   finally
     TFile.Delete(LTempDproj);
     TDirectory.Delete(LTempDir);
+  end;
+end;
+
+// ---- Environment variable expansion (regression #27) -----------------------
+
+procedure TProjectScannerTests.Scan_DprojWithEnvVarInOutputDir_ExpandsEnvVar;
+const
+  cEnvVarName  = 'DXCOMPLY_TEST_OUTPUT';
+  cEnvVarValue = 'env_expanded_segment';
+var
+  LTempDir, LTempDproj: string;
+  LProjectInfo: TProjectInfo;
+  LScanner: IProjectScanner;
+  LDproj: string;
+begin
+  // Set a process-level env var so NormalizePath has something to resolve.
+  Winapi.Windows.SetEnvironmentVariable(PChar(cEnvVarName), PChar(cEnvVarValue));
+  try
+    LDproj :=
+      '<?xml version="1.0" encoding="utf-8"?>' + sLineBreak +
+      '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">' + sLineBreak +
+      '  <PropertyGroup>' + sLineBreak +
+      '    <MainSource>EnvVarApp.dpr</MainSource>' + sLineBreak +
+      '    <ProjectGuid>{00000000-0000-0000-0000-000000000099}</ProjectGuid>' + sLineBreak +
+      '  </PropertyGroup>' + sLineBreak +
+      '  <PropertyGroup Condition="''$(Config)''==''Release''">' + sLineBreak +
+      '    <DCC_ExeOutput>.\bin\$(' + cEnvVarName + ')</DCC_ExeOutput>' + sLineBreak +
+      '  </PropertyGroup>' + sLineBreak +
+      '</Project>';
+
+    LTempDir := TPath.Combine(TPath.GetTempPath, 'DXComplyTest_EnvVar');
+    ForceDirectories(LTempDir);
+    LTempDproj := TPath.Combine(LTempDir, 'EnvVarApp.dproj');
+    try
+      TFile.WriteAllText(LTempDproj, LDproj, TEncoding.UTF8);
+      LScanner := TProjectScanner.Create;
+      LProjectInfo := LScanner.Scan(LTempDproj, 'Win32', 'Release');
+      try
+        Assert.IsTrue(Pos(cEnvVarValue, LProjectInfo.OutputDir) > 0,
+          'OutputDir must contain the expanded env var value but was: ' +
+          LProjectInfo.OutputDir);
+        Assert.IsTrue(Pos('$(' + cEnvVarName + ')', LProjectInfo.OutputDir) = 0,
+          'OutputDir must not contain the unresolved $(VarName) token');
+      finally
+        LProjectInfo.Free;
+      end;
+    finally
+      if TFile.Exists(LTempDproj) then
+        TFile.Delete(LTempDproj);
+      if TDirectory.Exists(LTempDir) then
+        TDirectory.Delete(LTempDir);
+    end;
+  finally
+    Winapi.Windows.SetEnvironmentVariable(PChar(cEnvVarName), nil);
   end;
 end;
 

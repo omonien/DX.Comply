@@ -1081,6 +1081,12 @@ var
         Break;
       LName := Copy(Result, LStart + 2, LEnd - LStart - 2);
       LValue := GetEnvironmentVariable(LName);
+      // Limitation: GetEnvironmentVariable returns '' both for an undefined
+      // variable AND for one that is defined but empty. We cannot
+      // distinguish the two cases without the lower-level Win32 API.
+      // Treating both as "leave the token intact" is the safer choice —
+      // substituting an empty string would silently collapse path
+      // segments and produce invalid paths. See issue #27.
       if LValue <> '' then
       begin
         Result := Copy(Result, 1, LStart - 1) + LValue +
@@ -1089,7 +1095,7 @@ var
         LIdx := LStart + Length(LValue);
       end
       else
-        // Unknown token — leave it intact and advance past it
+        // Unknown or empty token — leave it intact and advance past it
         LIdx := LEnd + 1;
     end;
   end;
