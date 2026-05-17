@@ -124,6 +124,14 @@ type
     /// <summary>Write must complete without raising when supplier contains a backslash.</summary>
     [Test]
     procedure Write_FileWithSpecialChars_NoException;
+
+    /// <summary>CLI --product override (Metadata.ProductName) must appear in metadata.component.name.</summary>
+    [Test]
+    procedure Write_ProductOverride_AppearsInComponentName;
+
+    /// <summary>CLI --version override (Metadata.ProductVersion) must appear in metadata.component.version.</summary>
+    [Test]
+    procedure Write_VersionOverride_AppearsInComponentVersion;
   end;
 
 implementation
@@ -527,6 +535,56 @@ begin
     Exception,
     'Write must not raise an exception when supplier contains special characters');
   Assert.IsTrue(LResult, 'Write must return True even with special characters in supplier name');
+end;
+
+// ---- CLI overrides ----------------------------------------------------------
+
+procedure TCycloneDxWriterTests.Write_ProductOverride_AppearsInComponentName;
+var
+  LJson, LMetadata, LComponent: TJSONObject;
+begin
+  // Simulate CLI --product overriding the project name from .dproj
+  FMetadata.ProductName    := 'CLIProductOverride';
+  FProjectInfo.ProjectName := 'DprojProjectName';
+
+  FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo);
+
+  LJson := LoadOutputJson;
+  Assert.IsNotNull(LJson);
+  try
+    LMetadata := LJson.GetValue('metadata') as TJSONObject;
+    Assert.IsNotNull(LMetadata, 'metadata object must be present');
+    LComponent := LMetadata.GetValue('component') as TJSONObject;
+    Assert.IsNotNull(LComponent, 'metadata.component must be present');
+    Assert.AreEqual('CLIProductOverride', LComponent.GetValue<string>('name'),
+      'metadata.component.name must reflect the CLI --product override');
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TCycloneDxWriterTests.Write_VersionOverride_AppearsInComponentVersion;
+var
+  LJson, LMetadata, LComponent: TJSONObject;
+begin
+  // Simulate CLI --version overriding the version from .dproj
+  FMetadata.ProductVersion := '9.9.9-cli';
+  FProjectInfo.Version     := '1.0.0';
+
+  FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo);
+
+  LJson := LoadOutputJson;
+  Assert.IsNotNull(LJson);
+  try
+    LMetadata := LJson.GetValue('metadata') as TJSONObject;
+    Assert.IsNotNull(LMetadata, 'metadata object must be present');
+    LComponent := LMetadata.GetValue('component') as TJSONObject;
+    Assert.IsNotNull(LComponent, 'metadata.component must be present');
+    Assert.AreEqual('9.9.9-cli', LComponent.GetValue<string>('version'),
+      'metadata.component.version must reflect the CLI --version override');
+  finally
+    LJson.Free;
+  end;
 end;
 
 initialization

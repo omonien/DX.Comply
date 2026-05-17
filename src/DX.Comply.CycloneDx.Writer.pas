@@ -50,7 +50,6 @@ type
     function BuildProperties(const AProperties: TArray<TSbomProperty>): TJSONArray;
     function BuildComponent(const AArtefact: TArtefactInfo; const AIndex: Integer): TJSONObject;
     function BuildDependencies(const AArtefacts: TArtefactList; const AProjectBomRef: string): TJSONArray;
-    function EscapeJsonString(const AValue: string): string;
   public
     // ISbomWriter
     function Write(const AOutputPath: string;
@@ -75,17 +74,6 @@ begin
   Result := Result.Substring(1, Result.Length - 2);
 end;
 
-function TCycloneDxJsonWriter.EscapeJsonString(const AValue: string): string;
-begin
-  Result := AValue;
-  Result := StringReplace(Result, '\', '\\', [rfReplaceAll]);
-  Result := StringReplace(Result, '"', '\"', [rfReplaceAll]);
-  Result := StringReplace(Result, #13#10, '\n', [rfReplaceAll]);
-  Result := StringReplace(Result, #10, '\n', [rfReplaceAll]);
-  Result := StringReplace(Result, #13, '\n', [rfReplaceAll]);
-  Result := StringReplace(Result, #9, '\t', [rfReplaceAll]);
-end;
-
 function TCycloneDxJsonWriter.BuildProperties(
   const AProperties: TArray<TSbomProperty>): TJSONArray;
 var
@@ -99,8 +87,8 @@ begin
       Continue;
 
     LPropertyObject := TJSONObject.Create;
-    LPropertyObject.AddPair('name', EscapeJsonString(LProperty.Name));
-    LPropertyObject.AddPair('value', EscapeJsonString(LProperty.Value));
+    LPropertyObject.AddPair('name', LProperty.Name);
+    LPropertyObject.AddPair('value', LProperty.Value);
     Result.Add(LPropertyObject);
   end;
 end;
@@ -125,19 +113,19 @@ begin
   LComponent := TJSONObject.Create;
   LComponent.AddPair('type', 'application');
   if AMetadata.ProductName <> '' then
-    LComponent.AddPair('name', EscapeJsonString(AMetadata.ProductName))
+    LComponent.AddPair('name', AMetadata.ProductName)
   else
-    LComponent.AddPair('name', EscapeJsonString(AProjectInfo.ProjectName));
+    LComponent.AddPair('name', AProjectInfo.ProjectName);
   if AMetadata.ProductVersion <> '' then
-    LComponent.AddPair('version', EscapeJsonString(AMetadata.ProductVersion))
+    LComponent.AddPair('version', AMetadata.ProductVersion)
   else if AProjectInfo.Version <> '' then
-    LComponent.AddPair('version', EscapeJsonString(AProjectInfo.Version));
-  LComponent.AddPair('bom-ref', EscapeJsonString(AProjectInfo.ProjectName));
+    LComponent.AddPair('version', AProjectInfo.Version);
+  LComponent.AddPair('bom-ref', AProjectInfo.ProjectName);
 
   if AMetadata.Supplier <> '' then
   begin
     LSupplier := TJSONObject.Create;
-    LSupplier.AddPair('name', EscapeJsonString(AMetadata.Supplier));
+    LSupplier.AddPair('name', AMetadata.Supplier);
     LComponent.AddPair('supplier', LSupplier);
   end;
 
@@ -188,7 +176,7 @@ begin
     LComponent.AddPair('type', 'file');
 
   // Name (filename without path)
-  LComponent.AddPair('name', EscapeJsonString(TPath.GetFileName(AArtefact.RelativePath)));
+  LComponent.AddPair('name', TPath.GetFileName(AArtefact.RelativePath));
 
   // Version (use hash prefix as pseudo-version for files)
   if AArtefact.Hash <> '' then
@@ -198,7 +186,7 @@ begin
   LComponent.AddPair('bom-ref', 'comp-' + IntToStr(AIndex));
 
   // File path
-  LComponent.AddPair('purl', 'file:' + EscapeJsonString(AArtefact.RelativePath));
+  LComponent.AddPair('purl', 'file:' + AArtefact.RelativePath);
 
   // Hashes
   if AArtefact.Hash <> '' then
@@ -227,21 +215,21 @@ begin
   begin
     LProp := TJSONObject.Create;
     LProp.AddPair('name', 'net.developer-experts.dx-comply:origin');
-    LProp.AddPair('value', EscapeJsonString(AArtefact.Origin));
+    LProp.AddPair('value', AArtefact.Origin);
     LProperties.Add(LProp);
   end;
   if Trim(AArtefact.Evidence) <> '' then
   begin
     LProp := TJSONObject.Create;
     LProp.AddPair('name', 'net.developer-experts.dx-comply:evidence');
-    LProp.AddPair('value', EscapeJsonString(AArtefact.Evidence));
+    LProp.AddPair('value', AArtefact.Evidence);
     LProperties.Add(LProp);
   end;
   if Trim(AArtefact.Confidence) <> '' then
   begin
     LProp := TJSONObject.Create;
     LProp.AddPair('name', 'net.developer-experts.dx-comply:confidence');
-    LProp.AddPair('value', EscapeJsonString(AArtefact.Confidence));
+    LProp.AddPair('value', AArtefact.Confidence);
     LProperties.Add(LProp);
   end;
 
@@ -264,7 +252,7 @@ begin
 
   // Root dependency (project depends on all components)
   LDep := TJSONObject.Create;
-  LDep.AddPair('ref', EscapeJsonString(AProjectBomRef));
+  LDep.AddPair('ref', AProjectBomRef);
 
   LDependsOn := TJSONArray.Create;
   for I := 0 to AArtefacts.Count - 1 do

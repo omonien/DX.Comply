@@ -49,7 +49,6 @@ type
   private
     function GenerateUuid: string;
     function SanitizeSpdxId(const AValue: string): string;
-    function EscapeJsonString(const AValue: string): string;
     function BuildCreationInfo(const AMetadata: TSbomMetadata): TJSONObject;
     function BuildPackage(const AArtefact: TArtefactInfo; const AIndex: Integer;
       const AProjectInfo: TProjectInfo): TJSONObject;
@@ -94,17 +93,6 @@ begin
   end;
 end;
 
-function TSpdxJsonWriter.EscapeJsonString(const AValue: string): string;
-begin
-  Result := AValue;
-  Result := StringReplace(Result, '\', '\\', [rfReplaceAll]);
-  Result := StringReplace(Result, '"', '\"', [rfReplaceAll]);
-  Result := StringReplace(Result, #13#10, '\n', [rfReplaceAll]);
-  Result := StringReplace(Result, #10, '\n', [rfReplaceAll]);
-  Result := StringReplace(Result, #13, '\n', [rfReplaceAll]);
-  Result := StringReplace(Result, #9, '\t', [rfReplaceAll]);
-end;
-
 function TSpdxJsonWriter.BuildCreationInfo(const AMetadata: TSbomMetadata): TJSONObject;
 var
   LCreationInfo: TJSONObject;
@@ -124,7 +112,7 @@ begin
   LCreators := TJSONArray.Create;
   LCreators.Add('Tool: ' + cToolName + '-' + cToolVersion);
   if AMetadata.Supplier <> '' then
-    LCreators.Add('Organization: ' + EscapeJsonString(AMetadata.Supplier));
+    LCreators.Add('Organization: ' + AMetadata.Supplier);
   LCreationInfo.AddPair('creators', LCreators);
 
   Result := LCreationInfo;
@@ -145,7 +133,7 @@ begin
   LSpdxId := cSpdxIdPrefix + 'Package-' + SanitizeSpdxId(LFileName);
 
   LPackage.AddPair('SPDXID', LSpdxId);
-  LPackage.AddPair('name', EscapeJsonString(LFileName));
+  LPackage.AddPair('name', LFileName);
 
   if AArtefact.Hash <> '' then
     LPackage.AddPair('versionInfo', Copy(AArtefact.Hash, 1, 12));
@@ -175,7 +163,7 @@ begin
     var LExtRef := TJSONObject.Create;
     LExtRef.AddPair('referenceCategory', 'PACKAGE-MANAGER');
     LExtRef.AddPair('referenceType', 'purl');
-    LExtRef.AddPair('referenceLocator', 'file:' + EscapeJsonString(AArtefact.RelativePath));
+    LExtRef.AddPair('referenceLocator', 'file:' + AArtefact.RelativePath);
     LExtRefs.Add(LExtRef);
     LPackage.AddPair('externalRefs', LExtRefs);
   end;
@@ -239,9 +227,9 @@ begin
     LRoot.AddPair('SPDXID', LDocumentSpdxId);
     // Prefer metadata override (CLI --product) over project name — issue #26.
     if AMetadata.ProductName <> '' then
-      LRoot.AddPair('name', EscapeJsonString(AMetadata.ProductName))
+      LRoot.AddPair('name', AMetadata.ProductName)
     else
-      LRoot.AddPair('name', EscapeJsonString(AProjectInfo.ProjectName));
+      LRoot.AddPair('name', AProjectInfo.ProjectName);
     LRoot.AddPair('documentNamespace', LDocNamespace);
 
     // Creation info
