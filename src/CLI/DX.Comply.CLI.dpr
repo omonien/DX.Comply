@@ -43,6 +43,8 @@ begin
     Writeln('[ERROR] ', AMessage)
   else if AProgress = 100 then
     Writeln('[DONE ] ', AMessage)
+  else if AMessage.StartsWith('Warning:', True) then
+    Writeln('[WARN ] ', AMessage)
   else
     Writeln(Format('[%3d%%] %s', [AProgress, AMessage]));
 end;
@@ -102,8 +104,14 @@ begin
       LGenerator.OnProgress :=
         procedure(const AMessage: string; const AProgress: Integer)
         begin
-          // Without --verbose only errors and the final done message are printed.
-          if LVerbose or (AProgress < 0) or (AProgress = 100) then
+          // Without --verbose only errors, warnings and the final done
+          // message are printed. Warnings (e.g. the Deep-Evidence rebuild
+          // was skipped) must always reach the user — issue #29/#31.
+          if LVerbose
+            or (AProgress < 0)
+            or (AProgress = 100)
+            or AMessage.StartsWith('Warning:', True)
+            or AMessage.StartsWith('[WARN', True) then
             OnProgress(AMessage, AProgress);
         end;
 

@@ -977,7 +977,7 @@ begin
           DoProgress('Hint: Deep-Evidence build output: ' +
             LDeepEvidenceBuildResult.Output, 18);
         DoProgress('Continuing SBOM generation with the existing MAP file (if any). ' +
-          'See the IDE Messages window or the CLI output above for details.', 18);
+          'See the log output above for details.', 18);
       end
       else
       begin
