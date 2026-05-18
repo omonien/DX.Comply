@@ -664,6 +664,10 @@ begin
   // Set a process-level env var so NormalizePath has something to resolve.
   Winapi.Windows.SetEnvironmentVariable(PChar(cEnvVarName), PChar(cEnvVarValue));
   try
+    // Use the Delphi 2007 legacy condition format the scanner recognizes:
+    // '$(Configuration)|$(Platform)'=='Release|Win32'. Modern .dproj files
+    // use $(Cfg_N) keys instead, but the legacy form is sufficient to
+    // exercise the env-var expansion path.
     LDproj :=
       '<?xml version="1.0" encoding="utf-8"?>' + sLineBreak +
       '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">' + sLineBreak +
@@ -671,7 +675,7 @@ begin
       '    <MainSource>EnvVarApp.dpr</MainSource>' + sLineBreak +
       '    <ProjectGuid>{00000000-0000-0000-0000-000000000099}</ProjectGuid>' + sLineBreak +
       '  </PropertyGroup>' + sLineBreak +
-      '  <PropertyGroup Condition="''$(Config)''==''Release''">' + sLineBreak +
+      '  <PropertyGroup Condition="''$(Configuration)|$(Platform)''==''Release|Win32''">' + sLineBreak +
       '    <DCC_ExeOutput>.\bin\$(' + cEnvVarName + ')</DCC_ExeOutput>' + sLineBreak +
       '  </PropertyGroup>' + sLineBreak +
       '</Project>';
