@@ -187,6 +187,14 @@ type
     /// <summary>A comparison like `if X = 'foo.dll'` must NOT be parsed as a const.</summary>
     [Test]
     procedure ScanPasFiles_ComparisonExpression_NotTreatedAsConst;
+
+    /// <summary>
+    /// const declared in unit A, LoadLibrary called in unit B referencing the
+    /// same identifier (typical 3rd-party OpenSSL/Indy pattern) must still
+    /// resolve. Issue #24, user-reported gap after #36 preview build.
+    /// </summary>
+    [Test]
+    procedure ScanPasFiles_ConstInOtherUnit_ResolvesViaGlobalFallback;
   end;
 
 implementation
@@ -965,6 +973,45 @@ begin
   Assert.IsTrue(TArray.IndexOf<string>(LDllNames, 'foo.dll') < 0,
     '`if X = ''foo.dll''` must NOT be parsed as a const declaration; ' +
     'foo.dll should not appear in detected DLLs');
+end;
+
+procedure TEngineTests.ScanPasFiles_ConstInOtherUnit_ResolvesViaGlobalFallback;
+var
+  LConstsUnit, LCallerUnit: string;
+  LDllNames: TArray<string>;
+const
+  // Mirrors AlexSTHfg's reported pattern: 3rd-party libraries declare DLL
+  // names in a separate consts unit and load them in another wrapper unit.
+  cConstsSource =
+    'unit OpenSSL_Consts;'#13#10 +
+    'interface'#13#10 +
+    'const'#13#10 +
+    '  LIBEAY_DLL_NAME = ''libeay32.dll'';'#13#10 +
+    'implementation'#13#10 +
+    'end.';
+  cCallerSource =
+    'unit OpenSSL_Wrapper;'#13#10 +
+    'interface'#13#10 +
+    'implementation'#13#10 +
+    'uses Windows, OpenSSL_Consts;'#13#10 +
+    'procedure DoIt;'#13#10 +
+    'var H: NativeUInt;'#13#10 +
+    'begin'#13#10 +
+    '  H := GetModuleHandle(LIBEAY_DLL_NAME);'#13#10 +
+    'end;'#13#10 +
+    'end.';
+begin
+  LConstsUnit := TPath.Combine(FTempDir, 'OpenSSL_Consts.pas');
+  LCallerUnit := TPath.Combine(FTempDir, 'OpenSSL_Wrapper.pas');
+  TFile.WriteAllText(LConstsUnit, cConstsSource, TEncoding.UTF8);
+  TFile.WriteAllText(LCallerUnit, cCallerSource, TEncoding.UTF8);
+
+  LDllNames := TDxComplyGenerator.ScanPasFilesForDllReferences(
+    TArray<string>.Create(LConstsUnit, LCallerUnit));
+
+  Assert.IsTrue(TArray.IndexOf<string>(LDllNames, 'libeay32.dll') >= 0,
+    'libeay32.dll must be detected when LIBEAY_DLL_NAME is declared in one ' +
+    'unit and GetModuleHandle is called in another');
 end;
 
 initialization

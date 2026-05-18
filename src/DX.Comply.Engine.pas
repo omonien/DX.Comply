@@ -554,6 +554,8 @@ var
     end;
   end;
 
+var
+  LGlobalConstMap: TDictionary<string, string>;
 begin
   LDllNames := TList<string>.Create;
   LLines := TStringList.Create;
@@ -561,6 +563,15 @@ begin
   // per-unit so the same const identifier in two different units does not
   // collide — issue #24.
   LConstMap := TDictionary<string, string>.Create;
+  // Maps "const_name" (lower-case, unqualified) -> resolved file name. Used
+  // as a project-wide fallback when an identifier-form loader call cannot be
+  // resolved within the calling unit — typical for 3rd-party libraries that
+  // split DLL-name constants into a separate "OpenSSL_Consts.pas" unit and
+  // call GetModuleHandle/LoadLibrary from a sibling "OpenSSL_Wrapper.pas".
+  // If two units declare the same const name with different values, the last
+  // one scanned wins (acceptable trade-off vs. parsing the uses clause).
+  // Issue #24 follow-up.
+  LGlobalConstMap := TDictionary<string, string>.Create;
   try
     // Patterns:
     //   external 'filename.dll'  (with optional delayed)
@@ -604,9 +615,14 @@ begin
 
         LRegExMatch := LRegExConstDll.Match(LLine);
         if LRegExMatch.Success then
+        begin
           LConstMap.AddOrSetValue(
             LUnitName + '.' + LowerCase(LRegExMatch.Groups[1].Value),
             LRegExMatch.Groups[2].Value);
+          LGlobalConstMap.AddOrSetValue(
+            LowerCase(LRegExMatch.Groups[1].Value),
+            LRegExMatch.Groups[2].Value);
+        end;
       end;
     end;
 
@@ -631,6 +647,12 @@ begin
           else
             LLookupKey := LUnitName + '.' + LIdent;
           if LConstMap.TryGetValue(LLookupKey, LResolved) then
+            AddDllName(LResolved)
+          else if (Pos('.', LIdent) = 0) and
+                  LGlobalConstMap.TryGetValue(LIdent, LResolved) then
+            // Fall back to a project-wide lookup so consts declared in a
+            // separate "OpenSSL_Consts.pas"-style unit and referenced from a
+            // sibling wrapper unit still resolve. Issue #24 follow-up.
             AddDllName(LResolved);
         end;
       end;
@@ -638,6 +660,7 @@ begin
 
     Result := LDllNames.ToArray;
   finally
+    LGlobalConstMap.Free;
     LConstMap.Free;
     LLines.Free;
     LDllNames.Free;
