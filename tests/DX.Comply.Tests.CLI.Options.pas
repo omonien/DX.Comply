@@ -178,7 +178,10 @@ end;
 
 procedure TCliOptionsTests.SanitizeForFilename_StripsBackslash;
 begin
-  Assert.AreEqual('Win32', TCliOptions.SanitizeForFilename('Win32\..\evil'),
+  // SanitizeForFilename is a strip-only whitelist: every non-safe char
+  // is removed but the remaining safe chars from later segments are
+  // preserved (same semantics as SanitizeForFilename_StripsForwardSlash).
+  Assert.AreEqual('Win32evil', TCliOptions.SanitizeForFilename('Win32\..\evil'),
     'Backslashes and dots must be stripped — only safe chars survive');
 end;
 
