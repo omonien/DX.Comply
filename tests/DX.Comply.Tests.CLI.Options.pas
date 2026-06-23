@@ -42,6 +42,10 @@ type
     [Test]
     procedure Create_Default_NoCompositionEvidenceIsFalse;
 
+    /// <summary>The CLI version helper must read the executable VersionInfo resource.</summary>
+    [Test]
+    procedure ReadExecutableFileVersion_ReturnsVersionInfoValue;
+
     // ---- ToSbomConfig mapping ------------------------------------------------
 
     /// <summary>
@@ -84,6 +88,9 @@ type
 
 implementation
 
+uses
+  System.SysUtils;
+
 { TCliOptionsTests }
 
 procedure TCliOptionsTests.Create_Default_VerboseIsFalse;
@@ -110,6 +117,17 @@ begin
   finally
     LOptions.Free;
   end;
+end;
+
+procedure TCliOptionsTests.ReadExecutableFileVersion_ReturnsVersionInfoValue;
+var
+  LVersion: string;
+begin
+  LVersion := TCliOptions.ReadExecutableFileVersion;
+  Assert.IsTrue(Trim(LVersion) <> '',
+    'ReadExecutableFileVersion must return the executable fixed file version');
+  Assert.IsTrue(Pos('.', LVersion) > 0,
+    'File version must contain numeric version separators');
 end;
 
 procedure TCliOptionsTests.ToSbomConfig_Default_IncludeCompositionEvidenceIsTrue;
