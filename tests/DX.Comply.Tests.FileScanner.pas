@@ -58,14 +58,23 @@ type
     procedure Scan_EmptyDirectory_ReturnsEmpty;
 
     /// <summary>
-    /// A directory path containing characters that are illegal in Windows paths
-    /// (e.g. a residual, unresolved MSBuild token such as $(Platform)) must not
-    /// crash the scanner. TPath.GetFullPath raises EInOutArgumentException on such
-    /// input; the scanner must treat it like a missing directory and return empty.
-    /// Regression test for issue #47.
+    /// A directory path containing a character that is illegal in Windows paths
+    /// (e.g. the pipe '|') makes TPath.GetFullPath raise EInOutArgumentException.
+    /// The scanner must catch this and treat the path like a missing directory,
+    /// returning an empty list instead of crashing. Exercises the try/except
+    /// branch in TFileScanner.Scan. Regression test for issue #47.
     /// </summary>
     [Test]
     procedure Scan_InvalidPathCharacters_ReturnsEmpty;
+
+    /// <summary>
+    /// A path containing an unresolved MSBuild token such as $(Platform) must be
+    /// tolerated: '$', '(' and ')' are valid Windows path characters, so
+    /// TPath.GetFullPath does NOT raise. The scanner simply finds no such
+    /// directory and returns an empty list. Documents token tolerance (issue #47).
+    /// </summary>
+    [Test]
+    procedure Scan_UnresolvedMSBuildToken_ReturnsEmpty;
 
     /// <summary>An empty directory path must return an empty list without raising.</summary>
     [Test]
@@ -259,14 +268,31 @@ var
   LResult: TArtefactList;
 begin
   LScanner := TFileScanner.Create;
-  // A residual MSBuild token leaves '$', '(' and ')' in the path. On Windows
-  // these are illegal path characters and TPath.GetFullPath raises
+  // The pipe '|' is illegal in Windows paths, so TPath.GetFullPath raises
   // EInOutArgumentException ("Ungültige Zeichen im Pfad"). The scanner must
-  // swallow this and behave like a non-existent directory.
-  LResult := LScanner.Scan('E:\agents\_work\2\s\$(Platform)\$(Config)', [], []);
+  // swallow this via its try/except guard and behave like a missing directory.
+  LResult := LScanner.Scan('E:\agents\_work\2\s\bad|dir', [], []);
   try
     Assert.AreEqual(NativeInt(0), NativeInt(LResult.Count),
       'Scanning a path with illegal characters must return an empty list, not crash');
+  finally
+    LResult.Free;
+  end;
+end;
+
+procedure TFileScannerTests.Scan_UnresolvedMSBuildToken_ReturnsEmpty;
+var
+  LScanner: IFileScanner;
+  LResult: TArtefactList;
+begin
+  LScanner := TFileScanner.Create;
+  // '$', '(' and ')' are valid Windows path characters, so an unresolved
+  // MSBuild token does NOT make TPath.GetFullPath raise. The directory just
+  // does not exist, so the scan returns an empty list.
+  LResult := LScanner.Scan('E:\agents\_work\2\s\$(Platform)\$(Config)', [], []);
+  try
+    Assert.AreEqual(NativeInt(0), NativeInt(LResult.Count),
+      'Scanning a path with an unresolved MSBuild token must return an empty list');
   finally
     LResult.Free;
   end;

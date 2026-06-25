@@ -1231,7 +1231,15 @@ begin
     // CI agent with a different working directory) would otherwise yield an
     // empty ProjectDir, which cascades into an empty OutputDir and crashes the
     // file scanner with EInOutArgumentException (issue #47).
-    Result.ProjectDir := TPath.GetDirectoryName(TPath.GetFullPath(AProjectPath));
+    // TPath.GetFullPath itself raises on an empty or syntactically invalid path,
+    // so guard it: fall back to the raw directory part rather than propagating
+    // an exception out of Scan.
+    try
+      Result.ProjectDir := TPath.GetDirectoryName(TPath.GetFullPath(AProjectPath));
+    except
+      on EInOutArgumentException do
+        Result.ProjectDir := TPath.GetDirectoryName(AProjectPath);
+    end;
     Result.ProjectName := TPath.GetFileNameWithoutExtension(AProjectPath);
 
     if APlatform <> '' then
