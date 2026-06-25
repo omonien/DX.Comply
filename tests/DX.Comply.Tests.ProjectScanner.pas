@@ -111,6 +111,15 @@ type
     [Test]
     procedure Scan_EngineDproj_ProjectDirIsValid;
 
+    /// <summary>
+    /// A project path without a directory part (only a filename, relative to the
+    /// current working directory) must still yield a non-empty, absolute
+    /// ProjectDir. An empty ProjectDir cascades into an empty OutputDir which
+    /// crashes the file scanner. Regression test for issue #47.
+    /// </summary>
+    [Test]
+    procedure Scan_RelativeProjectPath_ProjectDirIsAbsolute;
+
     /// <summary>MainSourcePath must resolve to the package source file.</summary>
     [Test]
     procedure Scan_EngineDproj_ExtractsMainSourcePath;
@@ -369,6 +378,33 @@ begin
       'ProjectDir must be the src folder');
   finally
     LProjectInfo.Free;
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_RelativeProjectPath_ProjectDirIsAbsolute;
+var
+  LProjectInfo: TProjectInfo;
+  LSavedCwd: string;
+begin
+  // Reproduce a CI scenario: the project is passed as a bare filename, relative
+  // to the current working directory (src\). TPath.GetDirectoryName on such a
+  // path returns '' — the scanner must resolve it to an absolute directory.
+  LSavedCwd := TDirectory.GetCurrentDirectory;
+  try
+    TDirectory.SetCurrentDirectory(TPath.GetDirectoryName(FEngineDprojPath));
+    LProjectInfo := FScanner.Scan('DX.Comply.Engine.dproj', 'Win32', 'Debug');
+    try
+      Assert.IsTrue(LProjectInfo.ProjectDir <> '',
+        'ProjectDir must not be empty for a relative project path');
+      Assert.IsFalse(TPath.IsRelativePath(LProjectInfo.ProjectDir),
+        'ProjectDir must be absolute even for a relative project path');
+      Assert.IsTrue(LProjectInfo.OutputDir <> '',
+        'OutputDir must not be empty for a relative project path');
+    finally
+      LProjectInfo.Free;
+    end;
+  finally
+    TDirectory.SetCurrentDirectory(LSavedCwd);
   end;
 end;
 

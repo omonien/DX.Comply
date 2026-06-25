@@ -57,6 +57,20 @@ type
     [Test]
     procedure Scan_EmptyDirectory_ReturnsEmpty;
 
+    /// <summary>
+    /// A directory path containing characters that are illegal in Windows paths
+    /// (e.g. a residual, unresolved MSBuild token such as $(Platform)) must not
+    /// crash the scanner. TPath.GetFullPath raises EInOutArgumentException on such
+    /// input; the scanner must treat it like a missing directory and return empty.
+    /// Regression test for issue #47.
+    /// </summary>
+    [Test]
+    procedure Scan_InvalidPathCharacters_ReturnsEmpty;
+
+    /// <summary>An empty directory path must return an empty list without raising.</summary>
+    [Test]
+    procedure Scan_EmptyPath_ReturnsEmpty;
+
     // ---- Default-extension filtering -----------------------------------------
 
     /// <summary>Default scan includes .exe and .dll but excludes .dcu.</summary>
@@ -234,6 +248,40 @@ begin
   LResult := LScanner.Scan(LEmptyDir, [], []);
   try
     Assert.AreEqual(NativeInt(0), NativeInt(LResult.Count), 'Scanning an empty directory must return an empty list');
+  finally
+    LResult.Free;
+  end;
+end;
+
+procedure TFileScannerTests.Scan_InvalidPathCharacters_ReturnsEmpty;
+var
+  LScanner: IFileScanner;
+  LResult: TArtefactList;
+begin
+  LScanner := TFileScanner.Create;
+  // A residual MSBuild token leaves '$', '(' and ')' in the path. On Windows
+  // these are illegal path characters and TPath.GetFullPath raises
+  // EInOutArgumentException ("Ungültige Zeichen im Pfad"). The scanner must
+  // swallow this and behave like a non-existent directory.
+  LResult := LScanner.Scan('E:\agents\_work\2\s\$(Platform)\$(Config)', [], []);
+  try
+    Assert.AreEqual(NativeInt(0), NativeInt(LResult.Count),
+      'Scanning a path with illegal characters must return an empty list, not crash');
+  finally
+    LResult.Free;
+  end;
+end;
+
+procedure TFileScannerTests.Scan_EmptyPath_ReturnsEmpty;
+var
+  LScanner: IFileScanner;
+  LResult: TArtefactList;
+begin
+  LScanner := TFileScanner.Create;
+  LResult := LScanner.Scan('', [], []);
+  try
+    Assert.AreEqual(NativeInt(0), NativeInt(LResult.Count),
+      'Scanning an empty path must return an empty list, not crash');
   finally
     LResult.Free;
   end;

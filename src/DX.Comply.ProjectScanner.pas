@@ -1226,7 +1226,12 @@ begin
   Result := TProjectInfo.Create;
   try
     Result.ProjectPath := AProjectPath;
-    Result.ProjectDir := TPath.GetDirectoryName(AProjectPath);
+    // Resolve the project directory from an absolute path so it is never empty.
+    // A project path without a directory part (e.g. "MyProj.dproj" passed on a
+    // CI agent with a different working directory) would otherwise yield an
+    // empty ProjectDir, which cascades into an empty OutputDir and crashes the
+    // file scanner with EInOutArgumentException (issue #47).
+    Result.ProjectDir := TPath.GetDirectoryName(TPath.GetFullPath(AProjectPath));
     Result.ProjectName := TPath.GetFileNameWithoutExtension(AProjectPath);
 
     if APlatform <> '' then

@@ -198,7 +198,23 @@ begin
 
   FIncludePatterns := AIncludePatterns;
   FExcludePatterns := AExcludePatterns;
-  LBaseDir := TPath.GetFullPath(ADirectory);
+
+  // An empty or syntactically invalid directory path must never crash the
+  // scan. TPath.GetFullPath raises EInOutArgumentException ("Invalid characters
+  // in path") on an empty string or on illegal path characters — e.g. when a
+  // project's output directory could not be resolved from the .dproj and an
+  // empty/unresolved path is passed in (issue #47). Treat any such path like a
+  // missing directory: return the empty artefact list and let SBOM generation
+  // continue.
+  if Trim(ADirectory) = '' then
+    Exit;
+
+  try
+    LBaseDir := TPath.GetFullPath(ADirectory);
+  except
+    on E: EInOutArgumentException do
+      Exit;
+  end;
 
   if not TDirectory.Exists(LBaseDir) then
     Exit;
