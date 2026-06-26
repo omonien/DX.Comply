@@ -47,6 +47,7 @@ type
     FCiMode: Boolean;
     FConfigFile: string;
     FHelp: Boolean;
+    FShowVersion: Boolean;
     FVerbose: Boolean;
     FNoPause: Boolean;
     FMapDir: string;
@@ -75,6 +76,12 @@ type
     /// ASCII letters, digits, hyphen and underscore. Exposed for testing.
     /// </summary>
     class function SanitizeForFilename(const AValue: string): string; static;
+    /// <summary>
+    /// Reads the current executable's fixed file version from its VersionInfo
+    /// resource. Exposed for tests so CLI output can share the same source of
+    /// truth as release metadata.
+    /// </summary>
+    class function ReadExecutableFileVersion: string; static;
     constructor Create;
     /// <summary>
     /// Parses the process ParamStr array and populates all properties.
@@ -106,6 +113,7 @@ type
     property CiMode: Boolean read FCiMode;
     property ConfigFile: string read FConfigFile;
     property Help: Boolean read FHelp;
+    property ShowVersion: Boolean read FShowVersion;
     property Verbose: Boolean read FVerbose;
     property NoPause: Boolean read FNoPause;
     property MapDir: string read FMapDir;
@@ -124,6 +132,9 @@ type
   end;
 
 implementation
+
+uses
+  Winapi.Windows;
 
 { TCliOptions }
 
@@ -212,6 +223,12 @@ begin
     if (LArg = '--help') or (LArg = '-h') then
     begin
       FHelp := True;
+      Continue;
+    end;
+
+    if LArg = '--version' then
+    begin
+      FShowVersion := True;
       Continue;
     end;
 
@@ -325,6 +342,9 @@ begin
   if FHelp then
     Exit(True);
 
+  if FShowVersion then
+    Exit(True);
+
   // In CI mode with an explicit --config the project path is still required,
   // but we allow the caller to handle that after Parse returns.
   if FProject = '' then
@@ -367,6 +387,7 @@ begin
   Writeln('  --ci                          CI mode: use .dxcomply.json config file');
   Writeln('  --config=<path>               Path to .dxcomply.json (default: .dxcomply.json)');
   Writeln('  --help, -h                    Show this help');
+  Writeln('  --version                     Show tool version');
   Writeln('  --verbose                     Print all progress messages (default: errors only)');
   Writeln('  --no-pause                    Suppress "Press Enter to quit" prompt');
   Writeln;
@@ -375,9 +396,48 @@ begin
   Writeln('  dxcomply --project=src\MyApp.dproj --ci --config=.dxcomply.json --no-pause');
 end;
 
-procedure TCliOptions.PrintVersion;
+class function TCliOptions.ReadExecutableFileVersion: string;
+var
+  LDummyHandle: DWORD;
+  LExePath: string;
+  LVersionBuffer: TBytes;
+  LVersionDataSize: DWORD;
+  LVersionInfo: PVSFixedFileInfo;
+  LVersionLength: UINT;
 begin
-  Writeln('DX.Comply v1.3.0');
+  Result := '';
+  LExePath := ParamStr(0);
+  if LExePath = '' then
+    Exit;
+
+  LVersionDataSize := GetFileVersionInfoSize(PChar(LExePath), LDummyHandle);
+  if LVersionDataSize = 0 then
+    Exit;
+
+  SetLength(LVersionBuffer, LVersionDataSize);
+  if not GetFileVersionInfo(PChar(LExePath), 0, LVersionDataSize, @LVersionBuffer[0]) then
+    Exit;
+
+  if not VerQueryValue(@LVersionBuffer[0], '\', Pointer(LVersionInfo), LVersionLength) or
+    (LVersionLength < SizeOf(VS_FIXEDFILEINFO)) then
+    Exit;
+
+  Result := Format('%d.%d.%d.%d', [
+    HiWord(LVersionInfo^.dwFileVersionMS),
+    LoWord(LVersionInfo^.dwFileVersionMS),
+    HiWord(LVersionInfo^.dwFileVersionLS),
+    LoWord(LVersionInfo^.dwFileVersionLS)]);
+end;
+
+procedure TCliOptions.PrintVersion;
+var
+  LVersion: string;
+begin
+  LVersion := ReadExecutableFileVersion;
+  if LVersion = '' then
+    LVersion := 'unknown';
+
+  Writeln('DX.Comply v' + LVersion);
 end;
 
 // ---------------------------------------------------------------------------
