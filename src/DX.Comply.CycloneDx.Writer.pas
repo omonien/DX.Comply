@@ -61,6 +61,7 @@ type
 implementation
 
 uses
+  DX.Comply.ComponentManifest,
   DX.Comply.VersionInfo;
 
 { TCycloneDxJsonWriter }
@@ -98,7 +99,7 @@ function TCycloneDxJsonWriter.BuildMetadata(const AMetadata: TSbomMetadata;
   const AProjectInfo: TProjectInfo): TJSONObject;
 var
   LMetadata, LComponent, LTool, LTools, LSupplier: TJSONObject;
-  LToolArray: TJSONArray;
+  LToolArray, LSupplierUrls: TJSONArray;
 begin
   LMetadata := TJSONObject.Create;
 
@@ -127,6 +128,12 @@ begin
   begin
     LSupplier := TJSONObject.Create;
     LSupplier.AddPair('name', AMetadata.Supplier);
+    if AMetadata.SupplierUrl <> '' then
+    begin
+      LSupplierUrls := TJSONArray.Create;
+      LSupplier.AddPair('url', LSupplierUrls);
+      LSupplierUrls.Add(AMetadata.SupplierUrl);
+    end;
     LComponent.AddPair('supplier', LSupplier);
   end;
 
@@ -304,8 +311,12 @@ begin
       LComponents.Add(BuildComponent(AArtefacts[I], I));
     LRoot.AddPair('components', LComponents);
 
-    // Dependencies
+    // Dependencies. A component manifest groups matched units under one
+    // library and links those units from that library.
     LDependencies := BuildDependencies(AArtefacts, AProjectInfo.ProjectName);
+    if AMetadata.ComponentManifestJson <> '' then
+      ApplyManifestCycloneDxJson(AMetadata.ComponentManifestJson, AArtefacts,
+        LComponents, LDependencies, AProjectInfo.ProjectName);
     LRoot.AddPair('dependencies', LDependencies);
 
     // Write to file

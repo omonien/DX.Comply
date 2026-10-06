@@ -55,6 +55,7 @@ contains
   DX.Comply.Report.HtmlWriter in 'DX.Comply.Report.HtmlWriter.pas',
   DX.Comply.Spdx.Writer in 'DX.Comply.Spdx.Writer.pas',
   DX.Comply.Schema.Validator in 'DX.Comply.Schema.Validator.pas',
+  DX.Comply.ComponentManifest in 'DX.Comply.ComponentManifest.pas',
   DX.Comply.Engine in 'DX.Comply.Engine.pas',
   DX.Comply.IDE.Logger in 'DX.Comply.IDE.Logger.pas',
   DX.Comply.IDE.AboutDialog in 'DX.Comply.IDE.AboutDialog.pas',

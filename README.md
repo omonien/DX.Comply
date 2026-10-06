@@ -218,6 +218,7 @@ Add a `.dxcomply.json` to your project folder:
   "format": "cyclonedx-json",
   "exclude": ["**/*.dcu"],
   "scanDirs": ["redist"],
+  "manifest": "components.json",
   "product": {
     "name": "My Application",
     "version": "2.1.0",
@@ -236,6 +237,28 @@ With `--scan-tree`, or a `scanDirs` entry that contains `**`, the same include/e
 "include": ["build/**"],
 "exclude": ["build/**/Debug/**", "**/*.dcu"]
 ```
+
+## Component manifest
+
+An optional components file groups matched units under one library and fills in supplier, licence, version, type, and package URL. The format is the DelphiSBOM schema 1.0, so a file written for that tool works here unchanged. A sample is in [docs/samples/components.sample.json](docs/samples/components.sample.json).
+
+```bash
+dxcomply --project=MyApp.dproj --manifest=components.json --no-pause
+```
+
+The same path can live in `.dxcomply.json` as `"manifest"`. A relative path is resolved from the project directory. Without `--ci`, the CLI does not read `.dxcomply.json`, which is the same rule as the other settings, so pass `--manifest` on the command line. With `--ci`, the file supplies `manifest` unless you also pass `--manifest`: the flag wins. The IDE expert reads the same key from the project folder and has no extra options field.
+
+Each row matches units by `units_exact` and/or `units_prefix` (case-insensitive). The unit name is tried as written and again with one known scope prefix removed (`System.`, `Vcl.`, `Winapi.`, and the other Delphi scopes). An exact hit beats `own_code_units`, those beat a prefix, and a library prefix beats `own_code_prefixes`. The first matching row wins inside one rule kind.
+
+`own_code_units` and `own_code_prefixes` mark the project's own units. Those units stay in the evidence. They are not dropped, and they are not attributed to a third-party library. Unmatched units stay as they do today: one component each, linked from the application.
+
+A matched unit stays as its own evidence component (hash, origin, `file:` package URL). The SBOM adds one library component for the row (`name`, `version`, `type`, supplier and author from `vendor`, optional `vendor_url`). The application depends on that library, and the library depends on the matched units. This is written for CycloneDX JSON, CycloneDX XML, and SPDX 2.3 JSON.
+
+`licence` (British spelling) is an SPDX identifier such as `MIT` (emitted as `license.id`), an SPDX expression such as `MPL-1.1 OR LGPL-2.1-or-later` (emitted as `expression`), or any other text such as `Commercial` (emitted as `license.name`). `licence_url` is optional and is omitted for expressions. `license` and `license_url` are accepted as aliases. `type` is `library`, `framework`, or `application`.
+
+There is no required `purl` field. When it is absent, DX.Comply writes `pkg:delphi/<name>@<version>` with the name and version percent-encoded. `pkg:delphi` is not a registered package-url type. Scanned files keep the existing `file:` locator. Set `purl` on a row when you want a different locator.
+
+A file that cannot be read (missing, not JSON, or not an object or array) stops generation. The message names the file and the reason. Missing fields, a short prefix, or an unrecognised licence name are warnings, and the SBOM is still written. A row with match rules that hits no unit is reported as a warning. The root `supplier` is the application publisher. It is used only when `--supplier` or `product.supplier` was not already set.
 
 ---
 
@@ -294,6 +317,7 @@ No internet connection required — all processing is local.
 | [CI Integration](docs/CI-Integration.md) | Command-line usage, GitHub Actions examples, CI configuration |
 | [Legacy Support](docs/LegacySupport.md) | Using DX.Comply with Delphi 7 and other legacy versions |
 | [Example SBOM (JSON)](docs/examples/AlienInvasion.bom.json) | Full CycloneDX 1.5 SBOM generated from the AlienInvasion sample |
+| [Component manifest sample](docs/samples/components.sample.json) | Optional components.json (supplier, licence, version, type, PURL) |
 | [Example HTML Report](docs/examples/AlienInvasion.bom.report.html) | Human-readable compliance report for the same project |
 
 ---

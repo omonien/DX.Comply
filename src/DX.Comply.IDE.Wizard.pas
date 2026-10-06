@@ -188,6 +188,7 @@ procedure Register;
 implementation
 
 uses
+  DX.Comply.ComponentManifest,
   DX.Comply.IDE.AboutDialog,
   DX.Comply.IDE.BuildConfirmationDialog,
   DX.Comply.IDE.Options,
@@ -372,6 +373,9 @@ var
   LProjectPath: string;
   LSettings: TDXComplyIDESettings;
   LSuccess: Boolean;
+  LConfigPath: string;
+  LManifestFromConfig: string;
+  LManifestError: string;
 begin
   TIDELogger.Clear;
   TIDELogger.Info('DX.Comply: Starting CRA compliance documentation generation...');
@@ -399,6 +403,18 @@ begin
 
     LSettings := TDXComplyIDESettingsStore.Load;
     LConfig := BuildConfig(LProject, LSettings, AForceDeepEvidence);
+
+    // Same key the CLI reads from .dxcomply.json. No options-page field:
+    // the project file is the source.
+    LConfigPath := TPath.Combine(TPath.GetDirectoryName(LProjectPath), '.dxcomply.json');
+    if not TryReadConfigManifest(LConfigPath, LManifestFromConfig, LManifestError) then
+      TIDELogger.Warning('DX.Comply: Could not read the manifest key from .dxcomply.json: ' +
+        LManifestError + '. No component manifest will be applied.')
+    else if LManifestFromConfig <> '' then
+    begin
+      LConfig.ManifestFile := LManifestFromConfig;
+      TIDELogger.Info('DX.Comply: Component manifest: ' + LManifestFromConfig);
+    end;
     if not TryPrepareDeepEvidenceBuild(LProjectPath, LSettings, LConfig, AForceDeepEvidence) then
       Exit;
 

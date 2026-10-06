@@ -57,7 +57,7 @@ type
     procedure AddPropertyElements(const AProperties: TArray<TSbomProperty>);
     procedure BuildMetadata(const AMetadata: TSbomMetadata; const AProjectInfo: TProjectInfo);
     procedure BuildComponent(const AArtefact: TArtefactInfo; const AIndex: Integer);
-    procedure BuildComponents(const AArtefacts: TArtefactList);
+    procedure BuildComponents(const AArtefacts: TArtefactList; const AMetadata: TSbomMetadata);
     procedure BuildDependencies(const AArtefacts: TArtefactList; const AProjectBomRef: string);
   public
     function Write(const AOutputPath: string;
@@ -72,6 +72,7 @@ implementation
 
 uses
   System.RegularExpressions,
+  DX.Comply.ComponentManifest,
   DX.Comply.Schema.Validator,
   DX.Comply.VersionInfo;
 
@@ -182,6 +183,8 @@ begin
   begin
     OpenTag('supplier');
     AddElement('name', AMetadata.Supplier);
+    if AMetadata.SupplierUrl <> '' then
+      AddElement('url', AMetadata.SupplierUrl);
     CloseTag('supplier');
   end;
   if AMetadata.ProductName <> '' then
@@ -276,13 +279,19 @@ begin
   CloseTag('component');
 end;
 
-procedure TCycloneDxXmlWriter.BuildComponents(const AArtefacts: TArtefactList);
+procedure TCycloneDxXmlWriter.BuildComponents(const AArtefacts: TArtefactList;
+  const AMetadata: TSbomMetadata);
 var
   I: Integer;
 begin
   OpenTag('components');
   for I := 0 to AArtefacts.Count - 1 do
     BuildComponent(AArtefacts[I], I);
+  // Library rows from a component manifest. Element order is owned by
+  // DX.Comply.ComponentManifest so this writer stays a thin hook.
+  if AMetadata.ComponentManifestJson <> '' then
+    AppendManifestLibrariesXml(FLines, AMetadata.ComponentManifestJson,
+      AArtefacts, FIndentLevel);
   CloseTag('components');
 end;
 
@@ -326,8 +335,12 @@ begin
       GenerateUuid + '"');
 
     BuildMetadata(AMetadata, AProjectInfo);
-    BuildComponents(AArtefacts);
-    BuildDependencies(AArtefacts, AProjectInfo.ProjectName);
+    BuildComponents(AArtefacts, AMetadata);
+    if AMetadata.ComponentManifestJson <> '' then
+      AppendManifestDependenciesXml(FLines, AMetadata.ComponentManifestJson,
+        AArtefacts, AProjectInfo.ProjectName, FIndentLevel)
+    else
+      BuildDependencies(AArtefacts, AProjectInfo.ProjectName);
 
     CloseTag('bom');
 

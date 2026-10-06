@@ -117,6 +117,7 @@ store the configuration in `.dxcomply.json` at the repository root.
   "format": "cyclonedx-json",
   "exclude": ["**/*.dcu"],
   "scanDirs": ["redist"],
+  "manifest": "components.json",
   "product": {
     "name": "My Application",
     "version": "2.1.0",
@@ -151,6 +152,11 @@ dxcomply --project=src/MyApp.dproj --ci --config=.dxcomply.json --no-pause
 When `--ci` is given and the config file exists, `GenerateFromConfig` is called
 instead of `Generate`, so command-line format, output, and scan flags are ignored
 in favour of the file contents.
+
+`manifest` is the path to an optional components file (see the README section
+"Component manifest"). A relative path is resolved from the project directory.
+`--manifest=<file>` still wins when `--ci` is set. A missing or invalid file
+fails the run and names the path and the reason.
 
 ### Multi-platform builds
 

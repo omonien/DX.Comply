@@ -57,6 +57,8 @@ type
     FReportFormat: THumanReadableReportFormat;
     FScanDirs: TArray<string>;
     FScanTree: Boolean;
+    FManifestFile: string;
+    FManifestExplicit: Boolean;
     FParseError: string;
     /// <summary>
     /// Parses the --report value (markdown | html | both | none) and updates
@@ -135,6 +137,10 @@ type
     property ScanDirs: TArray<string> read FScanDirs;
     /// <summary>True when --scan-tree was requested. Deprecated.</summary>
     property ScanTree: Boolean read FScanTree;
+    /// <summary>Path from --manifest. Empty when the flag was not passed.</summary>
+    property ManifestFile: string read FManifestFile;
+    /// <summary>True when --manifest was passed. That path wins over the config file.</summary>
+    property ManifestExplicit: Boolean read FManifestExplicit;
     property ParseError: string read FParseError;
   end;
 
@@ -364,6 +370,16 @@ begin
           Exit(False);
         end;
       end
+      else if LKey = 'manifest' then
+      begin
+        if Trim(LValue) = '' then
+        begin
+          FParseError := 'Invalid value for --manifest: path is empty.';
+          Exit(False);
+        end;
+        FManifestFile := LValue;
+        FManifestExplicit := True;
+      end
       else
       begin
         FParseError := 'Unknown option: --' + LKey;
@@ -425,6 +441,11 @@ begin
   Writeln('  --scan-tree                   Deprecated: recursively scan the output');
   Writeln('                                directory, as older versions did.');
   Writeln('                                Kept for one release. Prefer --scan-dir.');
+  Writeln('  --manifest=<file>             Component manifest (components.json)');
+  Writeln('                                Groups third-party units into libraries');
+  Writeln('                                with supplier, licence, version, type');
+  Writeln('                                and PURL. Relative to the project directory.');
+  Writeln('                                Overrides the manifest key in .dxcomply.json');
   Writeln('  --map-dir=<path>              Directory containing the pre-built MAP file');
   Writeln('  --no-composition-evidence     Omit source/DCU units from SBOM (binary-only)');
   Writeln('  --include-platform-in-output  Append <Platform>.<Config> to the default');
@@ -440,6 +461,7 @@ begin
   Writeln;
   Writeln('Examples:');
   Writeln('  dxcomply --project=src\MyApp.dproj --format=cyclonedx-json --output=bom.json');
+  Writeln('  dxcomply --project=src\MyApp.dproj --manifest=components.json --no-pause');
   Writeln('  dxcomply --project=src\MyApp.dproj --ci --config=.dxcomply.json --no-pause');
 end;
 
@@ -497,6 +519,8 @@ begin
   Result.ScanTree                    := FScanTree;
   Result.MapFileDir                  := FMapDir;
   Result.IncludeCompositionEvidence  := not FNoCompositionEvidence;
+  Result.ManifestFile                := FManifestFile;
+  Result.ManifestFileExplicit        := FManifestExplicit;
 
   // Enable companion human-readable reports on demand — issue #30.
   // README documented HTML/Markdown as output formats but they live in the

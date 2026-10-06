@@ -49,6 +49,7 @@ Every SBOM generation follows the same pipeline, regardless of whether it was tr
 |------|---------------|
 | `DX.Comply.Engine.pas` | `TDxComplyGenerator` facade — orchestrates the full pipeline |
 | `DX.Comply.Engine.Intf.pas` | Shared types: `TProjectInfo`, `TArtefactInfo`, `TSbomMetadata` |
+| `DX.Comply.ComponentManifest.pas` | Optional components.json: match units to libraries, licences, and PURLs |
 | `DX.Comply.ProjectScanner.pas` | Regex-based `.dproj` parser — extracts paths, toolchain, version, DllSuffix |
 | `DX.Comply.BuildOrchestrator.pas` | Plan construction and script-based build execution (used by CLI fallback) |
 | `DX.Comply.BuildEvidence.Reader.pas` | Reads MAP files, compiler CFG/RSP files; collects evidence items |
@@ -100,6 +101,8 @@ Each resolved unit is emitted as a CycloneDX `component` with `type: "library"`,
 - `net.developer-experts.dx-comply:origin` property (e.g. "Embarcadero RTL")
 - `net.developer-experts.dx-comply:evidence` property (e.g. "DCU", "PAS", "MAP")
 - `net.developer-experts.dx-comply:confidence` property (e.g. "Strong", "Heuristic")
+
+When `--manifest` or the `manifest` key points at a components file, units that match a row are also linked from one library component (name, version, supplier, licence, PURL, type). The unit evidence itself stays in the document. Own-code rules keep those units on the application. Matching, licence classification, and the writer output live in `DX.Comply.ComponentManifest.pas`. The CycloneDX and SPDX writers only call that unit.
 
 ## Test suite
 

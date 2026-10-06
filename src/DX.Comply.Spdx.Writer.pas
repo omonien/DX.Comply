@@ -65,6 +65,7 @@ type
 implementation
 
 uses
+  DX.Comply.ComponentManifest,
   DX.Comply.VersionInfo;
 
 { TSpdxJsonWriter }
@@ -243,8 +244,11 @@ begin
       LPackages.Add(BuildPackage(AArtefacts[I], I, AProjectInfo));
     LRoot.AddPair('packages', LPackages);
 
-    // Relationships
+    // Relationships. Manifest libraries are added beside the existing packages.
     LRoot.AddPair('relationships', BuildRelationships(AArtefacts, LDocumentSpdxId));
+    if AMetadata.ComponentManifestJson <> '' then
+      ApplyManifestSpdx(AMetadata.ComponentManifestJson, AArtefacts, LPackages,
+        LRoot.GetValue('relationships') as TJSONArray, LDocumentSpdxId, LRoot);
 
     // Write to file
     LOutput := TStringList.Create;
