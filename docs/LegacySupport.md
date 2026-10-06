@@ -2,7 +2,7 @@
 
 ## Overview
 
-DX.Comply can generate SBOMs for projects built with **any Delphi version**, including Delphi 7, 2007, 2010, XE, and later. The IDE plugin requires Delphi 11+, but the CLI tool works with any Delphi version as long as a **detailed MAP file** is available.
+The release installer is built for Delphi 13 and registers the IDE plugin there. The command line tool is separate. It does not compile the project. It reads a `.dproj`, `.dpk`, or `.groupproj` and a detailed MAP file, so the Delphi version that wrote the MAP file does not have to be Delphi 13.
 
 The MAP file lists the units linked into the executable. DX.Comply turns that list into a CycloneDX or SPDX SBOM, with a hash where it could open the file.
 
@@ -10,13 +10,13 @@ The MAP file lists the units linked into the executable. DX.Comply turns that li
 
 ## How It Works
 
-### IDE Plugin (Delphi 11+)
+### IDE plugin
 
-The IDE plugin compiles the project automatically via the OTA (Open Tools API) with `DCC_MapFile=3` to produce a detailed MAP file. No manual steps are needed.
+The release installer registers the IDE plugin for Delphi 13. In that IDE, the plugin compiles the project via the OTA (Open Tools API) with `DCC_MapFile=3` to produce a detailed MAP file.
 
-### CLI Tool (Any Delphi Version)
+### CLI tool
 
-The CLI tool expects the MAP file to already exist. You compile the project yourself (either interactively or in a CI pipeline), then run `dxcomply` to generate the SBOM from the build output.
+The CLI tool expects the MAP file to already exist, and `--project` must be a `.dproj`, `.dpk`, or `.groupproj`. You compile the project yourself (either interactively or in a CI pipeline), then run `dxcomply` to generate the SBOM from the build output.
 
 ---
 
@@ -43,7 +43,7 @@ Build the project as usual. The compiler produces a `.map` file alongside the ex
 dxcomply --project=MyApp.dproj --output=bom.json --no-pause
 ```
 
-For very old projects that use `.dof` instead of `.dproj`, you can point `--project` at the `.dproj` if one exists, or at the `.dpr` file. DX.Comply will locate the MAP file based on the output directory conventions.
+`--project` does not accept a `.dpr` or a `.dof`. Delphi 7, 2005, and 2006 projects are often only those files. If a `.dproj` exists for the same project, pass that path. When the MAP file is not in the output directory taken from the `.dproj`, pass `--map-dir`.
 
 ---
 
@@ -129,6 +129,7 @@ Some legacy Delphi 2007 projects use `AnyCPU` instead of `Win32` as the platform
 | Delphi 13 / 12 / 11 | Yes | Yes |
 | Delphi XE to 10.4 | No | Yes |
 | Delphi 2009 / 2010 | No | Yes |
-| Delphi 7 / 2005 / 2006 / 2007 | No | Yes |
+| Delphi 2007 (has a `.dproj`) | No | Yes |
+| Delphi 7 / 2005 / 2006 | No | Only with a `.dproj`, `.dpk`, or `.groupproj` |
 | CI/CD pipeline (no IDE) | No | Yes |
 | Cross-version build server | No | Yes |

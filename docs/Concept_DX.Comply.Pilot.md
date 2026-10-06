@@ -121,7 +121,7 @@ Die SBOM wird aktiv genutzt:
 
 ### 5. Kennzeichnung & Konformitaet
 
-- **EU-Konformitaetserklaerung:** Vorgefertigtes Template, automatisch befuellt mit Produktdaten und Klassifizierung
+- **EU-Konformitaetserklaerung:** Geplantes Formular, vorbefuellt mit Produktdaten und Klassifizierung. Ein Entwurf, keine Zertifizierung.
 - **CE-Kennzeichen-Leitfaden:** Anleitung zur korrekten Anbringung
 - **Nutzer-Sicherheitsleitfaden:** Template fuer die Endkunden-Dokumentation (sichere Installation, Konfiguration, Support-Zeitraum)
 
@@ -129,21 +129,21 @@ Die SBOM wird aktiv genutzt:
 
 ### 6. Report Generator
 
-Per Knopfdruck werden alle erfassten Daten in formelle Dokumente exportiert:
+Geplant ist ein Export der erfassten Daten in diese Dokumente. Das ist nicht Teil des aktuellen Werkzeugs:
 
 | Dokument | Format | Inhalt |
 |---|---|---|
 | **Compliance-Report** | PDF / HTML | Gesamtuebersicht: Klassifizierung, SBOM-Zusammenfassung, Evidence-Status, Schwachstellen |
-| **EU-Konformitaetserklaerung** | PDF | Formelles Dokument zur CRA-Einhaltung |
+| **EU-Konformitaetserklaerung** | PDF | Entwurf eines Formulars, kein Nachweis einer Zertifizierung |
 | **Technisches Dossier** | Strukturiertes Archiv (ZIP) | Alle Nachweise, SBOM, Test-Reports, Design-Docs |
 | **Nutzer-Sicherheitsleitfaden** | PDF / Markdown | Endkunden-Information |
 | **Audit-Trail** | JSON / CSV | Chronologische Aenderungshistorie |
 
 ---
 
-## CRA-Compliance-Checkliste (integriert)
+## Geplante Checkliste
 
-DX.Comply Pilot fuehrt den User durch diese Schritte und trackt den Fortschritt:
+DX.Comply Pilot soll durch diese Schritte fuehren. Die Liste ist Konzept. Das aktuelle Werkzeug erzeugt sie nicht und bescheinigt keine CRA-Konformitaet:
 
 ### Produkt-Klassifizierung
 - [ ] Klassifizierung pruefen: Standard / Wichtig (Klasse I/II) / Kritisch

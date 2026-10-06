@@ -79,7 +79,7 @@ The IDE plugin compiles the project directly via the OTA (`IOTAProject.ProjectBu
 
 ### CLI tool
 
-The CLI tool does **not** compile the project. It expects the MAP file to already exist, either from a prior build with `DCC_MapFile=3` in the IDE or via MSBuild in a CI pipeline. This design keeps the CLI lightweight and enables support for legacy Delphi versions (including Delphi 7) where no IDE plugin is available.
+The CLI tool does **not** compile the project. It expects the MAP file to already exist, either from a prior build with `DCC_MapFile=3` in the IDE or via MSBuild in a CI pipeline. `--project` must be a `.dproj`, `.dpk`, or `.groupproj`. A `.dpr` or `.dof` is not accepted. This keeps the CLI independent of the IDE, including for an older Delphi build that still has one of those project files and a detailed MAP file.
 
 ## Unit origin classification
 

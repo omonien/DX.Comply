@@ -81,7 +81,9 @@ DX.Comply writes **CycloneDX 1.5** JSON by default. Each linked unit is a `libra
 
 ### Installer (Delphi 13)
 
-Run the Inno Setup installer from the [Releases](https://github.com/omonien/DX.Comply/releases) page. It registers the IDE plugin and CLI tool automatically.
+The installer in the current release is built for Delphi 13 (RAD Studio 37.0). Run it from the [Releases](https://github.com/omonien/DX.Comply/releases) page. It registers the IDE plugin for Delphi 13 and copies the command line tool onto the machine.
+
+The command line tool does not use the IDE and does not compile the project. It reads a `.dproj`, `.dpk`, or `.groupproj` together with a detailed MAP file from a build. That MAP file can come from an older Delphi, as long as `--project` is one of those three file types.
 
 ### Manual
 
@@ -133,18 +135,19 @@ dxcomply --project=MyApp.dproj --platform=Win64 --config-name=Release \
 
 Run `dxcomply --help` for the full list of switches. See [docs/CI-Integration.md](docs/CI-Integration.md) for GitHub Actions / GitLab CI examples.
 
-### Option C: Legacy Delphi (Delphi 7 and older)
+### Option C: Older Delphi, with a detailed MAP file
 
-DX.Comply can generate SBOMs for projects built with any Delphi version, including Delphi 7, as long as a **detailed MAP file** is available. No IDE plugin is required.
+The command line tool can write an SBOM for a project that was built with an older Delphi when two things are true: the build produced a **detailed MAP file**, and `--project` points at a `.dproj`, `.dpk`, or `.groupproj`.
 
-1. Open your project in the legacy Delphi IDE.
-2. Go to **Project > Options > Linker** and set **Map file** to **Detailed**.
-3. Build your project. This produces a `.map` file in the output directory.
-4. Run the CLI tool against the `.dproj` (or `.dof` for very old versions):
+1. In the IDE that builds the project, set **Map file** to **Detailed**.
+2. Build the project. This produces a `.map` file.
+3. Run the CLI against the `.dproj`:
 
 ```bash
 dxcomply --project=MyApp.dproj --output=bom.json --no-pause
 ```
+
+If the MAP file is not in the output directory taken from the `.dproj`, pass `--map-dir`. A `.dpr` or `.dof` is not a valid `--project` file. Delphi 7 projects are often only those two files, so they are not accepted unless a `.dproj` (or `.dpk` or `.groupproj`) exists for the same project.
 
 > **Tip:** You can automate this with a **Post-Build Event** in a dedicated build configuration. Create a configuration named e.g. `SBOM` that enables detailed MAP output and runs `dxcomply` as a post-build step. This way, a single build generates both your application and its SBOM.
 
@@ -261,8 +264,8 @@ The CRA requires (Annex I, Part II):
 
 | Mode | Requirement |
 |---|---|
-| **IDE plugin** | RAD Studio / Delphi 11 Alexandria or newer |
-| **CLI tool** | Any Delphi version (requires a pre-built detailed MAP file) |
+| **IDE plugin** | Release installer: Delphi 13. The design-time package is the IDE integration. |
+| **CLI tool** | Windows executable. Needs a `.dproj`, `.dpk`, or `.groupproj` and a detailed MAP file. It does not compile the project. |
 | **Platform** | Windows build host |
 
 No internet connection is required. All processing is local.
@@ -275,7 +278,7 @@ No internet connection is required. All processing is local.
 |---|---|
 | [Architecture](docs/Architecture.md) | Engine pipeline, component overview, unit origin classification |
 | [CI Integration](docs/CI-Integration.md) | Command-line usage, GitHub Actions examples, CI configuration |
-| [Legacy Support](docs/LegacySupport.md) | Using DX.Comply with Delphi 7 and other legacy versions |
+| [Legacy Support](docs/LegacySupport.md) | MAP files from older Delphi versions, and which project files the CLI accepts |
 | [Example SBOM (JSON)](docs/examples/AlienInvasion.bom.json) | Full CycloneDX 1.5 SBOM generated from the AlienInvasion sample |
 | [Example HTML Report](docs/examples/AlienInvasion.bom.report.html) | Human-readable SBOM report for the same project |
 
