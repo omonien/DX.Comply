@@ -12,8 +12,9 @@
 ///
 /// SPDX 2.3 specification: https://spdx.github.io/spdx-spec/v2.3/
 ///
-/// Package SPDX IDs are derived from the relative path plus a short stable
-/// hash so the same filename in two folders does not collide (issue #39).
+/// Package SPDX IDs are derived from the relative path plus the first 8
+/// lowercase hex digits of SHA-1 over the UTF-8 normalized path, so the same
+/// filename in two folders does not collide (issue #39).
 /// creationInfo.created is UTC YYYY-MM-DDThh:mm:ssZ. Package external
 /// references use a percent-encoded pkg:generic PURL so the locator has no
 /// whitespace (issue #40). licenseConcluded and licenseDeclared are
@@ -120,6 +121,8 @@ var
   LPath: string;
   LSanitized: string;
   LHash: string;
+  LBytes: TBytes;
+  LSha: THashSHA1;
 begin
   // Basename alone collides when the same file sits in two folders (issue #39).
   // The readable part is the sanitized relative path. A short SHA-1 of that
@@ -133,7 +136,15 @@ begin
   if LSanitized = '' then
     LSanitized := 'unknown';
 
-  LHash := Copy(LowerCase(THashSHA1.GetHashString(TEncoding.UTF8.GetBytes(LPath))), 1, 8);
+  // System.Hash on Delphi 11-13 exposes GetHashString for string and TStream
+  // only, not TBytes. Hash the UTF-8 bytes of the normalized path and keep
+  // the first 8 lowercase hex characters. The same path always yields the
+  // same suffix.
+  LBytes := TEncoding.UTF8.GetBytes(LPath);
+  LSha := THashSHA1.Create;
+  if Length(LBytes) > 0 then
+    LSha.Update(LBytes, Length(LBytes));
+  LHash := Copy(LowerCase(LSha.HashAsString), 1, 8);
   Result := cSpdxIdPrefix + 'Package-' + LSanitized + '-' + LHash;
 end;
 
