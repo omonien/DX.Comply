@@ -5,8 +5,10 @@
 The `dxcomply` CLI can be dropped into any Windows build pipeline that produces
 Delphi build artefacts. It reads a `.dproj` file (or a `.dxcomply.json`
 configuration file in CI mode), combines project metadata with build evidence,
-scans the build output directory, hashes every artefact, and writes a
-standards-compliant SBOM.
+lists the binary the project builds and other binaries in that output
+directory, hashes the files that exist, and writes a
+standards-compliant SBOM. Subfolders such as `setup\` or `tools\` are not
+walked, so the SBOM no longer picks up unrelated executables.
 
 The CLI tool expects an existing detailed MAP file — it does **not** compile your
 project. Your pipeline must build the project with `DCC_MapFile=3` before
@@ -113,11 +115,8 @@ store the configuration in `.dxcomply.json` at the repository root.
 {
   "output": "bom.json",
   "format": "cyclonedx-json",
-  "include": ["build/**"],
-  "exclude": [
-    "build/**/Debug/**",
-    "**/*.dcu"
-  ],
+  "exclude": ["**/*.dcu"],
+  "scanDirs": ["redist"],
   "product": {
     "name": "My Application",
     "version": "2.1.0",
@@ -126,6 +125,23 @@ store the configuration in `.dxcomply.json` at the repository root.
 }
 ```
 
+`scanDirs` entries are extra directories of binaries you stage on purpose.
+Each one is scanned non-recursively unless the value contains `**`.
+`"scanTree": true` restores the old recursive walk of the output directory.
+That switch is deprecated and will be removed in a future release.
+
+`include` and `exclude` still filter the files that were scanned. With
+`scanTree`, or a `scanDirs` value that contains `**`, patterns are relative
+to the scanned directory:
+
+```json
+"include": ["build/**"],
+"exclude": ["build/**/Debug/**", "**/*.dcu"]
+```
+
+On the command line the same controls are `--scan-dir=<path>` (repeatable)
+and `--scan-tree`.
+
 Then invoke in CI mode — the config file drives all settings:
 
 ```
@@ -133,8 +149,8 @@ dxcomply --project=src/MyApp.dproj --ci --config=.dxcomply.json --no-pause
 ```
 
 When `--ci` is given and the config file exists, `GenerateFromConfig` is called
-instead of `Generate`, so command-line format/output flags are ignored in favour
-of the file contents.
+instead of `Generate`, so command-line format, output, and scan flags are ignored
+in favour of the file contents.
 
 ### Multi-platform builds
 

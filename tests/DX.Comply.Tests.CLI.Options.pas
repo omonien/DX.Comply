@@ -1,4 +1,4 @@
-/// <summary>
+﻿/// <summary>
 /// DX.Comply.Tests.CLI.Options
 /// DUnitX tests for TCliOptions CLI argument parsing.
 /// </summary>
@@ -23,7 +23,8 @@ uses
   DUnitX.TestFramework,
   DX.Comply.Engine,
   DX.Comply.Engine.Intf,
-  DX.Comply.CLI.Options;
+  DX.Comply.CLI.Options,
+  System.SysUtils;
 
 type
   /// <summary>
@@ -80,6 +81,26 @@ type
     /// <summary>Alphanumeric, hyphen and underscore must be preserved.</summary>
     [Test]
     procedure SanitizeForFilename_PreservesAllowedChars;
+
+    /// <summary>--scan-dir can be passed more than once.</summary>
+    [Test]
+    procedure Parse_ScanDir_IsRepeatable;
+
+    /// <summary>--scan-tree sets the deprecated recursive walk.</summary>
+    [Test]
+    procedure Parse_ScanTree_SetsFlag;
+
+    /// <summary>--scan-tree=false clears the flag.</summary>
+    [Test]
+    procedure Parse_ScanTreeFalse_ClearsFlag;
+
+    /// <summary>An unrecognised --scan-tree value is a parse error.</summary>
+    [Test]
+    procedure Parse_ScanTreeInvalid_ReturnsFalse;
+
+    /// <summary>ToSbomConfig copies scan directories and the scanTree flag.</summary>
+    [Test]
+    procedure ToSbomConfig_CopiesScanOptions;
   end;
 
 implementation
@@ -201,6 +222,94 @@ procedure TCliOptionsTests.SanitizeForFilename_PreservesAllowedChars;
 begin
   Assert.AreEqual('Release-1_0', TCliOptions.SanitizeForFilename('Release-1_0'),
     'Alphanumeric, hyphen and underscore must be preserved');
+end;
+
+procedure TCliOptionsTests.Parse_ScanDir_IsRepeatable;
+var
+  LOptions: TCliOptions;
+begin
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsTrue(LOptions.Parse(TArray<string>.Create(
+      '--project=App.dproj',
+      '--scan-dir=redist',
+      '--scan-dir=plugins\**')),
+      'Repeatable --scan-dir values must parse');
+    Assert.AreEqual(NativeInt(2), NativeInt(Length(LOptions.ScanDirs)),
+      'Both --scan-dir values must be kept');
+    Assert.AreEqual('redist', LOptions.ScanDirs[0]);
+    Assert.AreEqual('plugins\**', LOptions.ScanDirs[1]);
+    Assert.IsFalse(LOptions.ScanTree,
+      '--scan-dir must not turn on the deprecated tree walk');
+  finally
+    LOptions.Free;
+  end;
+end;
+
+procedure TCliOptionsTests.Parse_ScanTree_SetsFlag;
+var
+  LOptions: TCliOptions;
+begin
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsTrue(LOptions.Parse(TArray<string>.Create(
+      '--project=App.dproj', '--scan-tree')),
+      '--scan-tree must parse');
+    Assert.IsTrue(LOptions.ScanTree, '--scan-tree must enable the recursive walk');
+  finally
+    LOptions.Free;
+  end;
+end;
+
+procedure TCliOptionsTests.Parse_ScanTreeFalse_ClearsFlag;
+var
+  LOptions: TCliOptions;
+begin
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsTrue(LOptions.Parse(TArray<string>.Create(
+      '--project=App.dproj', '--scan-tree=false')),
+      '--scan-tree=false must parse');
+    Assert.IsFalse(LOptions.ScanTree, '--scan-tree=false must leave the walk off');
+  finally
+    LOptions.Free;
+  end;
+end;
+
+procedure TCliOptionsTests.Parse_ScanTreeInvalid_ReturnsFalse;
+var
+  LOptions: TCliOptions;
+begin
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsFalse(LOptions.Parse(TArray<string>.Create(
+      '--project=App.dproj', '--scan-tree=maybe')),
+      'An invalid --scan-tree value must fail parsing');
+    Assert.IsTrue(Pos('scan-tree', LOptions.ParseError) > 0,
+      'The parse error must name --scan-tree');
+  finally
+    LOptions.Free;
+  end;
+end;
+
+procedure TCliOptionsTests.ToSbomConfig_CopiesScanOptions;
+var
+  LConfig: TSbomConfig;
+  LOptions: TCliOptions;
+begin
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsTrue(LOptions.Parse(TArray<string>.Create(
+      '--project=App.dproj', '--scan-dir=redist', '--scan-tree')),
+      'Scan options must parse before they can be copied');
+    LConfig := LOptions.ToSbomConfig;
+    Assert.IsTrue(LConfig.ScanTree, 'ToSbomConfig must copy scanTree');
+    Assert.AreEqual(NativeInt(1), NativeInt(Length(LConfig.ScanDirs)),
+      'ToSbomConfig must copy scan directories');
+    Assert.AreEqual('redist', LConfig.ScanDirs[0]);
+  finally
+    LOptions.Free;
+  end;
 end;
 
 initialization

@@ -55,12 +55,18 @@ type
     FOutputExplicit: Boolean;
     FReportEnabled: Boolean;
     FReportFormat: THumanReadableReportFormat;
+    FScanDirs: TArray<string>;
+    FScanTree: Boolean;
     FParseError: string;
     /// <summary>
     /// Parses the --report value (markdown | html | both | none) and updates
     /// the report enable flag / format. Returns True on success.
     /// </summary>
     function TryParseReport(const AValue: string): Boolean;
+    /// <summary>
+    /// Accepts true/false, yes/no, and 1/0. Returns False for anything else.
+    /// </summary>
+    function TryParseBool(const AValue: string; out AFlag: Boolean): Boolean;
     /// <summary>
     /// Converts a format string token to the corresponding TSbomFormat enum
     /// value. Returns sfCycloneDxJson for unrecognised tokens.
@@ -82,7 +88,12 @@ type
     /// Returns False when a required argument is missing or an unknown flag
     /// is encountered; ParseError will contain the reason.
     /// </summary>
-    function Parse: Boolean;
+    function Parse: Boolean; overload;
+    /// <summary>
+    /// Parses AArgs as if they were the process arguments, without the
+    /// executable name. Exposed so tests can cover flag handling.
+    /// </summary>
+    function Parse(const AArgs: TArray<string>): Boolean; overload;
     /// <summary>Writes the usage text to stdout.</summary>
     procedure PrintHelp;
     /// <summary>Writes the tool version line to stdout.</summary>
@@ -120,6 +131,10 @@ type
     property ReportEnabled: Boolean read FReportEnabled;
     /// <summary>Effective report format when ReportEnabled is True.</summary>
     property ReportFormat: THumanReadableReportFormat read FReportFormat;
+    /// <summary>Extra binary directories from repeatable --scan-dir.</summary>
+    property ScanDirs: TArray<string> read FScanDirs;
+    /// <summary>True when --scan-tree was requested. Deprecated.</summary>
+    property ScanTree: Boolean read FScanTree;
     property ParseError: string read FParseError;
   end;
 
@@ -154,6 +169,24 @@ begin
   else
     // 'cyclonedx-json' and anything unrecognised fall back to the default
     Result := sfCycloneDxJson;
+end;
+
+function TCliOptions.TryParseBool(const AValue: string; out AFlag: Boolean): Boolean;
+var
+  LValue: string;
+begin
+  LValue := LowerCase(Trim(AValue));
+  if (LValue = 'true') or (LValue = 'yes') or (LValue = '1') then
+  begin
+    AFlag := True;
+    Exit(True);
+  end;
+  if (LValue = 'false') or (LValue = 'no') or (LValue = '0') then
+  begin
+    AFlag := False;
+    Exit(True);
+  end;
+  Result := False;
 end;
 
 function TCliOptions.TryParseReport(const AValue: string): Boolean;
@@ -198,6 +231,17 @@ end;
 
 function TCliOptions.Parse: Boolean;
 var
+  LArgs: TArray<string>;
+  I: Integer;
+begin
+  SetLength(LArgs, ParamCount);
+  for I := 1 to ParamCount do
+    LArgs[I - 1] := ParamStr(I);
+  Result := Parse(LArgs);
+end;
+
+function TCliOptions.Parse(const AArgs: TArray<string>): Boolean;
+var
   I: Integer;
   LArg, LKey, LValue: string;
   LEqualsPos: Integer;
@@ -205,9 +249,9 @@ begin
   Result := True;
   FParseError := '';
 
-  for I := 1 to ParamCount do
+  for I := 0 to High(AArgs) do
   begin
-    LArg := ParamStr(I);
+    LArg := AArgs[I];
 
     if (LArg = '--help') or (LArg = '-h') then
     begin
@@ -242,6 +286,13 @@ begin
     if LArg = '--include-platform-in-output' then
     begin
       FIncludePlatformInOutput := True;
+      Continue;
+    end;
+
+    // Deprecated recursive walk of the output directory. Kept for one release.
+    if LArg = '--scan-tree' then
+    begin
+      FScanTree := True;
       Continue;
     end;
 
@@ -302,6 +353,17 @@ begin
           Exit(False);
         end;
       end
+      else if LKey = 'scan-dir' then
+        AppendPattern(FScanDirs, LValue)
+      else if LKey = 'scan-tree' then
+      begin
+        if not TryParseBool(LValue, FScanTree) then
+        begin
+          FParseError := 'Invalid value for --scan-tree: ' + LValue +
+            ' (expected true or false)';
+          Exit(False);
+        end;
+      end
       else
       begin
         FParseError := 'Unknown option: --' + LKey;
@@ -357,6 +419,12 @@ begin
   Writeln('  --supplier=<name>             Supplier/company name');
   Writeln('  --include=<pattern>           File include pattern (repeatable)');
   Writeln('  --exclude=<pattern>           File exclude pattern (repeatable)');
+  Writeln('  --scan-dir=<path>             Also scan this directory for binaries');
+  Writeln('                                (repeatable). A plain path is not recursive.');
+  Writeln('                                A path that contains ** walks subdirectories.');
+  Writeln('  --scan-tree                   Deprecated: recursively scan the output');
+  Writeln('                                directory, as older versions did.');
+  Writeln('                                Kept for one release. Prefer --scan-dir.');
   Writeln('  --map-dir=<path>              Directory containing the pre-built MAP file');
   Writeln('  --no-composition-evidence     Omit source/DCU units from SBOM (binary-only)');
   Writeln('  --include-platform-in-output  Append <Platform>.<Config> to the default');
@@ -425,6 +493,8 @@ begin
   Result.Supplier        := FSupplier;
   Result.IncludePatterns             := FIncludePatterns;
   Result.ExcludePatterns             := FExcludePatterns;
+  Result.ScanDirs                    := FScanDirs;
+  Result.ScanTree                    := FScanTree;
   Result.MapFileDir                  := FMapDir;
   Result.IncludeCompositionEvidence  := not FNoCompositionEvidence;
 

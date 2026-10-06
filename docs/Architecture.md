@@ -34,7 +34,7 @@ Every SBOM generation follows the same pipeline, regardless of whether it was tr
                                     │
                                     ▼
                             FileScanner ──► TArtefactList
-                          (output directory scan, SHA-256)
+                          (named output, its directory, SHA-256)
                                     │
                                     ▼
                          ┌──────────┴──────────┐
@@ -55,7 +55,7 @@ Every SBOM generation follows the same pipeline, regardless of whether it was tr
 | `DX.Comply.MapFile.Reader.pas` | Extracts unit names from MAP segment entries (`M=Unit`) and line-number sections |
 | `DX.Comply.UnitResolver.pas` | Resolves units to files, classifies origin (RTL/VCL/FMX/Local/ThirdParty), computes SHA-256/SHA-512 hashes |
 | `DX.Comply.HashService.pas` | SHA-256 and SHA-512 via `System.Hash` |
-| `DX.Comply.FileScanner.pas` | Scans build output directory for deliverable artefacts |
+| `DX.Comply.FileScanner.pas` | Lists the named project output and binaries in that directory |
 | `DX.Comply.CycloneDx.Writer.pas` | CycloneDX 1.5 JSON output |
 | `DX.Comply.CycloneDx.XmlWriter.pas` | CycloneDX 1.5 XML output |
 | `DX.Comply.Spdx.Writer.pas` | SPDX 2.3 JSON output |

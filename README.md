@@ -162,7 +162,7 @@ DX.Comply always performs a **Deep-Evidence analysis** based on the compiler-gen
 | **MAP file analysis** | Extracts all linked units from segment entries and line-number sections |
 | **Unit resolution** | Resolves each unit to its source/DCU/BPL file with SHA-256 hash |
 | **Origin classification** | Classifies each unit as Embarcadero RTL, VCL, FMX, Local project, or Third party |
-| **Build artefacts** | Scans output directory for `.exe`, `.dll`, `.bpl`, `.dcp` with SHA-256 fingerprints |
+| **Build artefacts** | The exe, dll, or bpl named by the project (SHA-256 when the file exists), plus other `.exe`, `.dll`, `.bpl`, and `.dcp` files in that output directory |
 | **Compiler evidence** | Parses `.cfg` and `.rsp` files for effective search paths and unit scopes |
 
 ---
@@ -192,6 +192,22 @@ All generated SBOMs are validated against the official schema before being writt
 
 ---
 
+## Which binaries are listed
+
+The SBOM lists the binary the `.dproj` builds (exe, dll, or bpl, including `DllSuffix` and the active configuration/platform output path). If that file is on disk it is hashed. Other `.exe`, `.dll`, `.bpl`, and `.dcp` files in the same output directory are listed too, for example a plugin DLL next to the exe.
+
+Subfolders are not walked. `setup\`, `tools\`, and old build directories stay out of the SBOM, so the document is smaller than in previous versions: unrelated binaries are no longer listed. Runtime packages from the project, and DLLs referenced in source, are still listed even when those files were not found by the scan.
+
+Pass `--scan-dir=<path>` (repeatable) or set `scanDirs` when you stage extra binaries on purpose. Each entry is scanned non-recursively. If the value contains `**`, subdirectories are included. A relative path is resolved from the project directory.
+
+```bash
+dxcomply --project=MyApp.dproj --scan-dir=redist --scan-dir=plugins\** --no-pause
+```
+
+`--scan-tree` (or `"scanTree": true`) restores the previous recursive walk of the output directory. It is deprecated and will be removed in a future release. Prefer `--scan-dir`.
+
+`include` and `exclude` still filter what was scanned. Patterns match the path relative to the directory being scanned. `*.dll` matches a DLL next to the exe. Patterns such as `build/**` matter when the scanned directory itself contains a `build` folder, which is the case for `--scan-tree` when the project has no output directory, and for a `--scan-dir` value that contains `**`.
+
 ## Configuration
 
 Add a `.dxcomply.json` to your project folder:
@@ -200,8 +216,8 @@ Add a `.dxcomply.json` to your project folder:
 {
   "output": "bom.json",
   "format": "cyclonedx-json",
-  "include": ["build/**"],
-  "exclude": ["build/**/Debug/**", "**/*.dcu"],
+  "exclude": ["**/*.dcu"],
+  "scanDirs": ["redist"],
   "product": {
     "name": "My Application",
     "version": "2.1.0",
@@ -212,6 +228,13 @@ Add a `.dxcomply.json` to your project folder:
     "format": "both"
   }
 }
+```
+
+With `--scan-tree`, or a `scanDirs` entry that contains `**`, the same include/exclude globs as before still apply relative to the scanned directory:
+
+```json
+"include": ["build/**"],
+"exclude": ["build/**/Debug/**", "**/*.dcu"]
 ```
 
 ---

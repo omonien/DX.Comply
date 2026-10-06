@@ -5,7 +5,7 @@
 ///
 /// <remarks>
 /// Verifies directory scanning, include/exclude pattern filtering,
-/// file-size reporting, hash delegation, subdirectory recursion,
+/// file-size reporting, hash delegation, optional subdirectory recursion,
 /// and artefact-type classification.
 /// </remarks>
 ///
@@ -86,7 +86,7 @@ type
     [Test]
     procedure Scan_DefaultExtensions_IncludesExeAndDll;
 
-    /// <summary>Default scan includes .bpl files.</summary>
+    /// <summary>Default scan includes a .bpl that sits in the scanned directory.</summary>
     [Test]
     procedure Scan_DefaultExtensions_IncludesBpl;
 
@@ -124,9 +124,49 @@ type
 
     // ---- Recursion -----------------------------------------------------------
 
-    /// <summary>Files in subdirectories must be discovered.</summary>
+    /// <summary>
+    /// Files in subdirectories are not part of the default scan (issue #38).
+    /// </summary>
+    [Test]
+    procedure Scan_SubdirectoriesAreSkippedByDefault;
+
+    /// <summary>
+    /// The recursive walk is opt-in. test.bpl under subdir is found only then.
+    /// </summary>
     [Test]
     procedure Scan_SubdirectoriesAreScanned;
+
+    /// <summary>
+    /// A plain --scan-dir path stays in that directory. ** walks further.
+    /// </summary>
+    [Test]
+    procedure ScanLocation_PlainPath_SkipsNestedFiles;
+
+    /// <summary>A scan location that contains ** includes nested binaries.</summary>
+    [Test]
+    procedure ScanLocation_DoubleStar_IncludesNestedFiles;
+
+    /// <summary>
+    /// A non-recursive glob on a scan location limits the files, and
+    /// include/exclude still apply on top of that.
+    /// </summary>
+    [Test]
+    procedure ScanLocation_GlobAndExclude_FilterFiles;
+
+    /// <summary>
+    /// The named output is listed even when the file is missing, and hashed
+    /// when it exists.
+    /// </summary>
+    [Test]
+    procedure CollectFile_ExistingFile_IsHashed;
+
+    /// <summary>A missing file is still collected, without a hash.</summary>
+    [Test]
+    procedure CollectFile_MissingFile_HasNoHash;
+
+    /// <summary>Include and exclude globs apply to the named file as well.</summary>
+    [Test]
+    procedure CollectFile_ExcludePattern_RejectsFile;
 
     // ---- GetArtefactType -----------------------------------------------------
 
@@ -199,7 +239,11 @@ begin
   TFile.WriteAllBytes(TPath.Combine(FTempDir, 'test.tvsconfig'),
     TBytes.Create($30, $31, $32));
 
-  // 10-byte .bpl in a subdirectory — tests recursion
+  // .bpl in the scanned directory itself. The default scan must see this.
+  TFile.WriteAllBytes(TPath.Combine(FTempDir, 'shipped.bpl'),
+    TBytes.Create($4D, $5A, $00, $00, $00, $00, $00, $00, $00, $00));
+
+  // .bpl in a subdirectory. Only the opt-in recursive scan should see this.
   LSubDir := TPath.Combine(FTempDir, 'subdir');
   TDirectory.CreateDirectory(LSubDir);
   TFile.WriteAllBytes(TPath.Combine(LSubDir, 'test.bpl'),
@@ -352,7 +396,9 @@ begin
   LScanner := TFileScanner.Create;
   LResult := LScanner.Scan(FTempDir, [], []);
   try
-    Assert.IsTrue(ContainsFile(LResult, 'test.bpl'), '.bpl file must be included in default scan');
+    Assert.IsTrue(ContainsFile(LResult, 'shipped.bpl'), '.bpl file must be included in default scan');
+    Assert.IsFalse(ContainsFile(LResult, 'test.bpl'),
+      'A .bpl in a subdirectory must not be included in the default scan');
   finally
     LResult.Free;
   end;
@@ -406,7 +452,7 @@ begin
   try
     Assert.IsTrue(ContainsFile(LResult, 'test.exe'), '*.exe include must include the exe file');
     Assert.IsFalse(ContainsFile(LResult, 'test.dll'), '*.exe include must exclude the dll file');
-    Assert.IsFalse(ContainsFile(LResult, 'test.bpl'), '*.exe include must exclude the bpl file');
+    Assert.IsFalse(ContainsFile(LResult, 'shipped.bpl'), '*.exe include must exclude the bpl file');
   finally
     LResult.Free;
   end;
@@ -483,7 +529,7 @@ end;
 
 // ---- Recursion --------------------------------------------------------------
 
-procedure TFileScannerTests.Scan_SubdirectoriesAreScanned;
+procedure TFileScannerTests.Scan_SubdirectoriesAreSkippedByDefault;
 var
   LScanner: IFileScanner;
   LResult: TArtefactList;
@@ -491,10 +537,161 @@ begin
   LScanner := TFileScanner.Create;
   LResult := LScanner.Scan(FTempDir, [], []);
   try
-    Assert.IsTrue(ContainsFile(LResult, 'test.bpl'),
-      'test.bpl in subdir must be found by recursive scan');
+    Assert.IsFalse(ContainsFile(LResult, 'test.bpl'),
+      'test.bpl in subdir must not be found unless recursion is requested');
+    Assert.IsTrue(ContainsFile(LResult, 'shipped.bpl'),
+      'A .bpl in the scanned directory itself must still be found');
   finally
     LResult.Free;
+  end;
+end;
+
+procedure TFileScannerTests.Scan_SubdirectoriesAreScanned;
+var
+  LScanner: IFileScanner;
+  LResult: TArtefactList;
+begin
+  LScanner := TFileScanner.Create;
+  LResult := LScanner.Scan(FTempDir, [], [], True);
+  try
+    Assert.IsTrue(ContainsFile(LResult, 'test.bpl'),
+      'test.bpl in subdir must be found when the recursive scan is requested');
+  finally
+    LResult.Free;
+  end;
+end;
+
+procedure TFileScannerTests.ScanLocation_PlainPath_SkipsNestedFiles;
+var
+  LNested: string;
+  LResult: TArtefactList;
+  LScanner: TFileScanner;
+begin
+  LNested := TPath.Combine(FTempDir, 'subdir', 'nested');
+  TDirectory.CreateDirectory(LNested);
+  TFile.WriteAllBytes(TPath.Combine(LNested, 'deep.dll'), TBytes.Create($4D, $5A));
+
+  LScanner := TFileScanner.Create;
+  try
+    LResult := LScanner.ScanLocation('subdir', FTempDir, [], []);
+    try
+      Assert.IsTrue(ContainsFile(LResult, 'test.bpl'),
+        'A plain scan-dir must include binaries directly in that directory');
+      Assert.IsFalse(ContainsFile(LResult, 'deep.dll'),
+        'A plain scan-dir must not walk subdirectories');
+      Assert.IsFalse(ContainsFile(LResult, 'test.exe'),
+        'A plain scan-dir must not include files outside that directory');
+    finally
+      LResult.Free;
+    end;
+  finally
+    LScanner.Free;
+  end;
+end;
+
+procedure TFileScannerTests.ScanLocation_DoubleStar_IncludesNestedFiles;
+var
+  LNested: string;
+  LResult: TArtefactList;
+  LScanner: TFileScanner;
+begin
+  LNested := TPath.Combine(FTempDir, 'subdir', 'nested');
+  TDirectory.CreateDirectory(LNested);
+  TFile.WriteAllBytes(TPath.Combine(LNested, 'deep.dll'), TBytes.Create($4D, $5A));
+
+  LScanner := TFileScanner.Create;
+  try
+    LResult := LScanner.ScanLocation('subdir\**', FTempDir, [], []);
+    try
+      Assert.IsTrue(ContainsFile(LResult, 'test.bpl'),
+        '** must still include binaries in the scan-dir root');
+      Assert.IsTrue(ContainsFile(LResult, 'deep.dll'),
+        '** must include binaries in subdirectories of the scan-dir');
+    finally
+      LResult.Free;
+    end;
+  finally
+    LScanner.Free;
+  end;
+end;
+
+procedure TFileScannerTests.ScanLocation_GlobAndExclude_FilterFiles;
+var
+  LResult: TArtefactList;
+  LScanner: TFileScanner;
+begin
+  LScanner := TFileScanner.Create;
+  try
+    LResult := LScanner.ScanLocation('subdir\*.bpl', FTempDir, [], ['*.bpl']);
+    try
+      Assert.IsFalse(ContainsFile(LResult, 'test.bpl'),
+        'An exclude glob must still reject a file matched by the scan-dir glob');
+    finally
+      LResult.Free;
+    end;
+
+    LResult := LScanner.ScanLocation('subdir\*.dll', FTempDir, [], []);
+    try
+      Assert.IsFalse(ContainsFile(LResult, 'test.bpl'),
+        'A *.dll scan-dir glob must not return a .bpl in that directory');
+    finally
+      LResult.Free;
+    end;
+  finally
+    LScanner.Free;
+  end;
+end;
+
+procedure TFileScannerTests.CollectFile_ExistingFile_IsHashed;
+var
+  LArtefact: TArtefactInfo;
+  LScanner: TFileScanner;
+begin
+  LScanner := TFileScanner.Create(FHashService);
+  try
+    Assert.IsTrue(LScanner.CollectFile(TPath.Combine(FTempDir, 'test.exe'),
+      'test.exe', [], [], LArtefact),
+      'An existing output file that passes the filters must be collected');
+    Assert.AreEqual(Int64(5), LArtefact.FileSize,
+      'The collected file must report its size');
+    Assert.IsTrue(LArtefact.Hash <> '',
+      'The collected file must be hashed when a hash service is available');
+  finally
+    LScanner.Free;
+  end;
+end;
+
+procedure TFileScannerTests.CollectFile_MissingFile_HasNoHash;
+var
+  LArtefact: TArtefactInfo;
+  LScanner: TFileScanner;
+begin
+  LScanner := TFileScanner.Create(FHashService);
+  try
+    Assert.IsTrue(LScanner.CollectFile(TPath.Combine(FTempDir, 'missing.exe'),
+      'missing.exe', [], [], LArtefact),
+      'The named output must be collected even when the file does not exist yet');
+    Assert.AreEqual(Int64(-1), LArtefact.FileSize,
+      'A missing file has no size');
+    Assert.AreEqual('', LArtefact.Hash,
+      'A missing file must not receive a hash');
+  finally
+    LScanner.Free;
+  end;
+end;
+
+procedure TFileScannerTests.CollectFile_ExcludePattern_RejectsFile;
+var
+  LArtefact: TArtefactInfo;
+  LScanner: TFileScanner;
+begin
+  LScanner := TFileScanner.Create;
+  try
+    Assert.IsFalse(LScanner.CollectFile(TPath.Combine(FTempDir, 'test.exe'),
+      'test.exe', [], ['*.exe'], LArtefact),
+      'An exclude glob must reject the named output file');
+  finally
+    LScanner.Free;
   end;
 end;
 
@@ -580,7 +777,7 @@ begin
 
     LScanner := TFileScanner.Create;
     try
-      LArtefacts := LScanner.Scan(LRoot, ['build/**'], ['build/**/Debug/**', '**/*.dcu']);
+      LArtefacts := LScanner.Scan(LRoot, ['build/**'], ['build/**/Debug/**', '**/*.dcu'], True);
       try
         Assert.IsTrue(ContainsFile(LArtefacts, 'app.exe'),
           'build/** must include build\Win32\Release\app.exe relative to the scan root');
@@ -602,7 +799,7 @@ begin
       end;
 
       LBackslashArtefacts := LScanner.Scan(LRoot,
-        ['build\**'], ['build\**\Debug\**', '**\*.dcu']);
+        ['build\**'], ['build\**\Debug\**', '**\*.dcu'], True);
       try
         Assert.IsTrue(ContainsFile(LBackslashArtefacts, 'app.exe'),
           'Backslash globs must match the same relative path as slash globs');

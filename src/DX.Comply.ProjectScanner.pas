@@ -105,6 +105,20 @@ type
     /// </summary>
     function ResolveBuildPath(const ARawPath, AProjectDir, AProjectName: string): string;
     /// <summary>
+    /// Returns .exe, .dll, or .bpl for the project output the .dproj names.
+    /// </summary>
+    function DetectOutputExtension(const AMainSourcePath: string): string;
+    /// <summary>
+    /// Reads DllSuffix for the active configuration. Returns False when the
+    /// value still contains an unresolved $(...) token.
+    /// </summary>
+    function TryResolveDllSuffix(const AProjectName: string; out ASuffix: string): Boolean;
+    /// <summary>
+    /// Fills ArtefactOutputDir and OutputFilePath from the active output
+    /// directories, AppType, and DllSuffix.
+    /// </summary>
+    procedure ResolveOutputFile(var AProjectInfo: TProjectInfo);
+    /// <summary>
     /// Builds the expected map file path for the selected project build.
     /// </summary>
     function BuildExpectedMapFilePath(const AProjectInfo: TProjectInfo): string;
@@ -1140,6 +1154,115 @@ begin
   end;
 end;
 
+function TProjectScanner.DetectOutputExtension(const AMainSourcePath: string): string;
+var
+  LAppType: string;
+  LKeyword: string;
+  LMatch: TMatch;
+  LText: string;
+begin
+  LAppType := Trim(GetPropertyValue('AppType', ''));
+  if SameText(LAppType, 'Library') then
+    Exit('.dll');
+  if SameText(LAppType, 'Package') then
+    Exit('.bpl');
+  if SameText(LAppType, 'Application') or SameText(LAppType, 'Console') then
+    Exit('.exe');
+
+  if SameText(TPath.GetExtension(AMainSourcePath), '.dpk') then
+    Exit('.bpl');
+
+  if (AMainSourcePath <> '') and TFile.Exists(AMainSourcePath) then
+  begin
+    try
+      LText := TFile.ReadAllText(AMainSourcePath);
+    except
+      LText := '';
+    end;
+    // The first program/library/package keyword decides the output when the
+    // .dproj does not say AppType. A leading comment or blank line is skipped
+    // because ^ matches each line.
+    LMatch := TRegEx.Match(LText, '^\s*(program|library|package)\b',
+      [roIgnoreCase, roMultiLine]);
+    if LMatch.Success then
+    begin
+      LKeyword := LowerCase(LMatch.Groups[1].Value);
+      if LKeyword = 'library' then
+        Exit('.dll');
+      if LKeyword = 'package' then
+        Exit('.bpl');
+      Exit('.exe');
+    end;
+  end;
+
+  Result := '.exe';
+end;
+
+function TProjectScanner.TryResolveDllSuffix(const AProjectName: string;
+  out ASuffix: string): Boolean;
+var
+  LRaw: string;
+begin
+  ASuffix := '';
+  LRaw := Trim(GetPropertyValue('DllSuffix', ''));
+  if LRaw = '' then
+    Exit(True);
+
+  ASuffix := NormalizePath(LRaw, AProjectName);
+  if Pos('$', ASuffix) > 0 then
+  begin
+    FWarnings.Add('Could not resolve DllSuffix "' + LRaw +
+      '". The output file name was left unset; the output directory is still scanned.');
+    ASuffix := '';
+    Exit(False);
+  end;
+  Result := True;
+end;
+
+procedure TProjectScanner.ResolveOutputFile(var AProjectInfo: TProjectInfo);
+var
+  LDir: string;
+  LExt: string;
+  LFileName: string;
+  LSuffix: string;
+  LSuffixResolved: Boolean;
+begin
+  AProjectInfo.OutputFilePath := '';
+  LExt := DetectOutputExtension(AProjectInfo.MainSourcePath);
+
+  // Packages are written to the BPL output. Exe and dll use the exe output.
+  // OutputDir prefers DCC_ExeOutput, so a package whose BPL folder differs
+  // from that path must not be scanned from the exe folder (issue #38).
+  LDir := '';
+  if SameText(LExt, '.bpl') then
+    LDir := AProjectInfo.BplOutputDir;
+  if LDir = '' then
+    LDir := AProjectInfo.OutputDir;
+  AProjectInfo.ArtefactOutputDir := LDir;
+
+  // DllSuffix is appended to dll and bpl names only. An application keeps
+  // ProjectName.exe even when the .dproj still carries a suffix.
+  LSuffix := '';
+  if SameText(LExt, '.exe') then
+    LSuffixResolved := True
+  else
+    LSuffixResolved := TryResolveDllSuffix(AProjectInfo.ProjectName, LSuffix);
+  if not LSuffixResolved then
+    Exit;
+  if AProjectInfo.ProjectName = '' then
+    Exit;
+
+  if SameText(LExt, '.exe') then
+    LFileName := AProjectInfo.ProjectName + LExt
+  else
+    LFileName := AProjectInfo.ProjectName + LSuffix + LExt;
+
+  if LDir = '' then
+    AProjectInfo.OutputFilePath := LFileName
+  else
+    AProjectInfo.OutputFilePath := TPath.Combine(LDir, LFileName);
+end;
+
 function TProjectScanner.ResolveBuildPath(const ARawPath, AProjectDir, AProjectName: string): string;
 var
   LPath: string;
@@ -1333,6 +1456,7 @@ begin
     end;
 
     Result.DllSuffix := GetPropertyValue('DllSuffix', '');
+    ResolveOutputFile(Result);
     Result.MapFilePath := BuildExpectedMapFilePath(Result);
 
     // Extract explicit project unit references.

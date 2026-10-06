@@ -43,6 +43,8 @@ Build the project as usual. The compiler produces a `.map` file alongside the ex
 dxcomply --project=MyApp.dproj --output=bom.json --no-pause
 ```
 
+The SBOM lists the program or package that was built, plus other binaries in that output directory. Installers and helper tools in subfolders are left out, so the document stays smaller. If the `.dproj` has no output directory, only binaries in the project directory itself are listed. Use `--scan-dir` for anything you stage on purpose. `--scan-tree` restores the old recursive listing and is deprecated.
+
 For very old projects that use `.dof` instead of `.dproj`, you can point `--project` at the `.dproj` if one exists, or at the `.dpr` file. DX.Comply will locate the MAP file based on the output directory conventions.
 
 ---
