@@ -8,8 +8,8 @@
 /// SBOM generation against the real engine .dproj, configuration defaults,
 /// and GenerateFromConfig fall-back behaviour when no config file exists.
 ///
-/// Integration tests (Generate_ValidProject_*) require DX.Comply.Engine.dproj
-/// to be reachable at build\Win32\Debug\..\..\..\src\.
+/// Integration tests (Generate_ValidProject_*) load DX.Comply.Engine.dproj
+/// through RepoRoot in DX.Comply.Tests.Paths.
 /// </remarks>
 ///
 /// <copyright>
@@ -45,7 +45,7 @@ type
     FProgressMessages: TStringList;
     FProgressValues: TList<Integer>;
     /// <summary>
-    /// Absolute path to DX.Comply.Engine.dproj resolved from the test binary location.
+    /// Absolute path to DX.Comply.Engine.dproj, resolved by RepoRoot.
     /// </summary>
     FEngineDprojPath: string;
     /// <summary>
@@ -199,6 +199,9 @@ type
 
 implementation
 
+uses
+  DX.Comply.Tests.Paths;
+
 { TEngineTests }
 
 procedure TEngineTests.Setup;
@@ -214,13 +217,10 @@ begin
   FProgressMessages := TStringList.Create;
   FProgressValues   := TList<Integer>.Create;
 
-  // Resolve path to the engine dproj fixture.
-  // Test binary is placed in: build\<Platform>\<Config>\
-  // Engine dproj is at:       src\DX.Comply.Engine.dproj
-  FEngineDprojPath := TPath.GetFullPath(
-    TPath.Combine(TPath.GetDirectoryName(ParamStr(0)),
-      '..' + PathDelim + '..' + PathDelim + '..' + PathDelim +
-      'src' + PathDelim + 'DX.Comply.Engine.dproj'));
+  // Engine dproj is at <repo>\src\DX.Comply.Engine.dproj. RepoRoot finds the
+  // checkout when the executable is outside build\(platform)\(config)\.
+  FEngineDprojPath := TPath.Combine(RepoRoot,
+    'src' + PathDelim + 'DX.Comply.Engine.dproj');
 end;
 
 procedure TEngineTests.TearDown;
