@@ -8,8 +8,8 @@
 /// SBOM generation against the real engine .dproj, configuration defaults,
 /// and GenerateFromConfig fall-back behaviour when no config file exists.
 ///
-/// Integration tests (Generate_ValidProject_*) require DX.Comply.Engine.dproj
-/// to be reachable at build\Win32\Debug\..\..\..\src\.
+/// Integration tests (Generate_ValidProject_*) load DX.Comply.Engine.dproj
+/// through RepoRoot in DX.Comply.Tests.Paths.
 /// </remarks>
 ///
 /// <copyright>
@@ -45,7 +45,7 @@ type
     FProgressMessages: TStringList;
     FProgressValues: TList<Integer>;
     /// <summary>
-    /// Absolute path to DX.Comply.Engine.dproj resolved from the test binary location.
+    /// Absolute path to DX.Comply.Engine.dproj, resolved by RepoRoot.
     /// </summary>
     FEngineDprojPath: string;
     /// <summary>
@@ -100,7 +100,11 @@ type
     [Test]
     procedure Generate_OutputFileContainsDxComplyMetadataProperties;
 
-    /// <summary>The generated SBOM must also persist consolidated per-unit evidence in formal metadata.</summary>
+    /// <summary>
+    /// Unit-evidence library components for resolved files must include hashes.
+    /// Runtime packages and source-scanned DLLs are also type library and carry
+    /// an empty hash on purpose, so they are not part of this check.
+    /// </summary>
     [Test]
     procedure Generate_OutputFileContainsUnitEvidenceProperties;
 
@@ -199,6 +203,9 @@ type
 
 implementation
 
+uses
+  DX.Comply.Tests.Paths;
+
 { TEngineTests }
 
 procedure TEngineTests.Setup;
@@ -214,13 +221,10 @@ begin
   FProgressMessages := TStringList.Create;
   FProgressValues   := TList<Integer>.Create;
 
-  // Resolve path to the engine dproj fixture.
-  // Test binary is placed in: build\<Platform>\<Config>\
-  // Engine dproj is at:       src\DX.Comply.Engine.dproj
-  FEngineDprojPath := TPath.GetFullPath(
-    TPath.Combine(TPath.GetDirectoryName(ParamStr(0)),
-      '..' + PathDelim + '..' + PathDelim + '..' + PathDelim +
-      'src' + PathDelim + 'DX.Comply.Engine.dproj'));
+  // Engine dproj is at <repo>\src\DX.Comply.Engine.dproj. RepoRoot finds the
+  // checkout when the executable is outside build\(platform)\(config)\.
+  FEngineDprojPath := TPath.Combine(RepoRoot,
+    'src' + PathDelim + 'DX.Comply.Engine.dproj');
 end;
 
 procedure TEngineTests.TearDown;
@@ -436,16 +440,69 @@ begin
 end;
 
 procedure TEngineTests.Generate_OutputFileContainsUnitEvidenceProperties;
+const
+  cEvidenceProperty = 'net.developer-experts.dx-comply:evidence';
+  cConfidenceProperty = 'net.developer-experts.dx-comply:confidence';
+  cFileSizeProperty = 'file:size';
 var
   LComponents: TJSONArray;
   LComponentObj: TJSONObject;
   LConfig: TSbomConfig;
   LGen: TDxComplyGenerator;
   LContent: string;
+  LHashObj: TJSONObject;
+  LHashes: TJSONArray;
   LJson: TJSONObject;
-  LFoundLibrary: Boolean;
+  LName: string;
   LTestsDprojPath: string;
+  LUnitEvidenceCount: Integer;
   I: Integer;
+
+  function PropertyValue(const AComponent: TJSONObject; const AName: string): string;
+  var
+    J: Integer;
+    LProperties: TJSONArray;
+    LProperty: TJSONObject;
+  begin
+    Result := '';
+    LProperties := AComponent.GetValue('properties') as TJSONArray;
+    if not Assigned(LProperties) then
+      Exit;
+
+    for J := 0 to LProperties.Count - 1 do
+    begin
+      if not (LProperties.Items[J] is TJSONObject) then
+        Continue;
+      LProperty := TJSONObject(LProperties.Items[J]);
+      if SameText(LProperty.GetValue<string>('name', ''), AName) then
+        Exit(LProperty.GetValue<string>('value', ''));
+    end;
+  end;
+
+  function IsUnitEvidence(const AComponent: TJSONObject): Boolean;
+  var
+    LConfidence: string;
+    LEvidence: string;
+  begin
+    Result := False;
+    if not SameText(AComponent.GetValue<string>('type', ''), 'library') then
+      Exit;
+
+    LEvidence := PropertyValue(AComponent, cEvidenceProperty);
+    if LEvidence = '' then
+      Exit;
+
+    // Runtime packages are declared BPLs. Source-scanned DLLs use confidence
+    // Source-scan. Both are type library and have an empty hash on purpose.
+    LConfidence := PropertyValue(AComponent, cConfidenceProperty);
+    if SameText(LConfidence, 'Source-scan') then
+      Exit;
+    if SameText(LEvidence, 'BPL') and SameText(LConfidence, 'Declared') then
+      Exit;
+
+    Result := True;
+  end;
+
 begin
   LTestsDprojPath := TPath.Combine(
     TPath.GetDirectoryName(TPath.GetDirectoryName(FEngineDprojPath)),
@@ -473,21 +530,31 @@ begin
       Assert.IsTrue(LComponents.Count > 1,
         'SBOM must contain more than just the primary artefact');
 
-      LFoundLibrary := False;
+      LUnitEvidenceCount := 0;
       for I := 0 to LComponents.Count - 1 do
       begin
         LComponentObj := LComponents.Items[I] as TJSONObject;
-        if LComponentObj.GetValue<string>('type') = 'library' then
-        begin
-          LFoundLibrary := True;
-          Assert.IsTrue(LComponentObj.GetValue('hashes') <> nil,
-            'Library components must include hashes');
-          Break;
-        end;
+        if not IsUnitEvidence(LComponentObj) then
+          Continue;
+
+        Inc(LUnitEvidenceCount);
+        // file:size is written only when the resolved file was present on disk.
+        if PropertyValue(LComponentObj, cFileSizeProperty) = '' then
+          Continue;
+
+        LName := LComponentObj.GetValue<string>('name', '');
+        LHashes := LComponentObj.GetValue('hashes') as TJSONArray;
+        Assert.IsNotNull(LHashes,
+          'Unit-evidence component "' + LName + '" must include hashes');
+        Assert.IsTrue(LHashes.Count > 0,
+          'Unit-evidence component "' + LName + '" must include a hash value');
+        LHashObj := LHashes.Items[0] as TJSONObject;
+        Assert.IsTrue(Trim(LHashObj.GetValue<string>('content', '')) <> '',
+          'Unit-evidence component "' + LName + '" must include a non-empty hash');
       end;
 
-      Assert.IsTrue(LFoundLibrary,
-        'SBOM must contain library components for resolved unit evidence');
+      Assert.IsTrue(LUnitEvidenceCount > 0,
+        'SBOM must contain at least one unit-evidence library component');
     finally
       LJson.Free;
     end;
