@@ -83,6 +83,9 @@ type
     procedure Write_Relationship_IsDescribes;
 
     [Test]
+    procedure Write_Relationships_DeliverableDependsOnCategories;
+
+    [Test]
     procedure Validate_ValidSpdx_ReturnsTrue;
 
     [Test]
@@ -323,6 +326,66 @@ begin
     LRel := (LJson.GetValue('relationships') as TJSONArray).Items[0] as TJSONObject;
     Assert.AreEqual('DESCRIBES', LRel.GetValue<string>('relationshipType'));
     Assert.AreEqual('SPDXRef-DOCUMENT', LRel.GetValue<string>('spdxElementId'));
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TSpdxWriterTests.Write_Relationships_DeliverableDependsOnCategories;
+var
+  LJson: TJSONObject;
+  LRelationships: TJSONArray;
+  LRel: TJSONObject;
+  I: Integer;
+
+  function HasRelationship(const AFrom, AType, ATo: string): Boolean;
+  var
+    J: Integer;
+    LItem: TJSONObject;
+  begin
+    Result := False;
+    for J := 0 to LRelationships.Count - 1 do
+    begin
+      LItem := LRelationships.Items[J] as TJSONObject;
+      if (LItem.GetValue<string>('spdxElementId') = AFrom) and
+         (LItem.GetValue<string>('relationshipType') = AType) and
+         (LItem.GetValue<string>('relatedSpdxElement') = ATo) then
+        Exit(True);
+    end;
+  end;
+
+begin
+  FArtefacts.Add(MakeArtefact('TestProject.exe', 'application', '', 1024));
+  FArtefacts.Add(MakeArtefact('rtl.bpl', 'runtime-package', '', -1));
+  FArtefacts.Add(MakeArtefact('vendor.dll', 'external-reference', '', -1));
+  FArtefacts.Add(MakeArtefact('System.dcu', 'unit-evidence', '', 10));
+
+  Assert.IsTrue(FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LJson := LoadOutputJson;
+  try
+    LRelationships := LJson.GetValue('relationships') as TJSONArray;
+    Assert.IsNotNull(LRelationships);
+    LRel := LRelationships.Items[0] as TJSONObject;
+    Assert.AreEqual('DESCRIBES', LRel.GetValue<string>('relationshipType'),
+      'DESCRIBES entries must stay ahead of the dependency edges');
+
+    Assert.IsTrue(HasRelationship(
+      'SPDXRef-Package-TestProject.exe', 'DEPENDS_ON', 'SPDXRef-Package-rtl.bpl'),
+      'the deliverable must DEPENDS_ON the runtime package');
+    Assert.IsTrue(HasRelationship(
+      'SPDXRef-Package-TestProject.exe', 'DEPENDS_ON', 'SPDXRef-Package-vendor.dll'),
+      'the deliverable must DEPENDS_ON the external DLL');
+    Assert.IsTrue(HasRelationship(
+      'SPDXRef-Package-TestProject.exe', 'CONTAINS', 'SPDXRef-Package-System.dcu'),
+      'the deliverable must CONTAIN the linked unit');
+
+    for I := 0 to LRelationships.Count - 1 do
+    begin
+      LRel := LRelationships.Items[I] as TJSONObject;
+      if LRel.GetValue<string>('relationshipType') = 'DESCRIBES' then
+        Assert.AreEqual('SPDXRef-DOCUMENT', LRel.GetValue<string>('spdxElementId'),
+          'DESCRIBES must still originate at the document');
+    end;
   finally
     LJson.Free;
   end;
