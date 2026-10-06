@@ -163,6 +163,9 @@ type
 
 implementation
 
+uses
+  DX.Comply.Tests.Paths;
+
 { TLegacyProjectTests }
 
 procedure TLegacyProjectTests.Setup;
@@ -188,22 +191,12 @@ begin
 end;
 
 function TLegacyProjectTests.FindRepoFile(const ARelative: string): string;
-var
-  I: Integer;
-  LCandidate: string;
-  LDir: string;
 begin
-  Result := '';
-  LDir := TPath.GetDirectoryName(ParamStr(0));
-  for I := 0 to 8 do
-  begin
-    LCandidate := TPath.Combine(LDir, ARelative);
-    if TFile.Exists(LCandidate) then
-      Exit(TPath.GetFullPath(LCandidate));
-    LDir := TPath.GetDirectoryName(LDir);
-    if LDir = '' then
-      Break;
-  end;
+  // RepoRoot covers the build server, where the exe is under builds\(id)\bin
+  // and the checkout is elsewhere.
+  Result := TPath.Combine(RepoRoot, ARelative);
+  if not TFile.Exists(Result) then
+    Result := '';
 end;
 
 function TLegacyProjectTests.ListHas(const AValues: TList<string>;
@@ -420,7 +413,7 @@ begin
       'The .cfg search path must not be added when the .dof defines one');
     Assert.IsFalse(WarningsContain(LProject, 'Ignoring requested configuration'),
       'The built-in Release default must not warn');
-    Assert.AreEqual(1, LProject.ExplicitUnitReferences.Count);
+    Assert.AreEqual(NativeInt(1), NativeInt(LProject.ExplicitUnitReferences.Count));
     Assert.AreEqual('Unit1', LProject.ExplicitUnitReferences[0].UnitName);
   finally
     LProject.Free;
@@ -470,7 +463,7 @@ begin
     Assert.IsTrue(SameText(LProject.ArtefactOutputDir,
       TPath.Combine(FTempDir, 'bpl')));
     Assert.IsTrue(SameText(LProject.DcpOutputDir, TPath.Combine(FTempDir, 'dcp')));
-    Assert.AreEqual(0, LProject.RuntimePackages.Count);
+    Assert.AreEqual(NativeInt(0), NativeInt(LProject.RuntimePackages.Count));
     Assert.IsTrue(SameText(LProject.MapFilePath,
       TPath.Combine(TPath.Combine(FTempDir, 'bpl'), 'SamplePkg70.map')));
   finally
