@@ -38,7 +38,9 @@ type
     FFormat: TSbomFormat;
     FOutput: string;
     FPlatform: string;
+    FPlatformExplicit: Boolean;
     FConfiguration: string;
+    FConfigurationExplicit: Boolean;
     FProductName: string;
     FProductVersion: string;
     FSupplier: string;
@@ -58,6 +60,7 @@ type
     FExplicitOverrides: TSbomConfigOverrides;
     FScanDirs: TArray<string>;
     FScanTree: Boolean;
+    FDelphi7Root: string;
     FParseError: string;
     /// <summary>
     /// Parses the --report value (markdown | html | both | none) and updates
@@ -136,6 +139,8 @@ type
     property ScanDirs: TArray<string> read FScanDirs;
     /// <summary>True when --scan-tree was requested. Deprecated.</summary>
     property ScanTree: Boolean read FScanTree;
+    /// <summary>Delphi 7 installation directory from --delphi7-root.</summary>
+    property Delphi7Root: string read FDelphi7Root;
     property ParseError: string read FParseError;
   end;
 
@@ -340,11 +345,13 @@ begin
       else if LKey = 'platform' then
       begin
         FPlatform := LValue;
+        FPlatformExplicit := True;
         Include(FExplicitOverrides, scoPlatform);
       end
       else if LKey = 'config-name' then
       begin
         FConfiguration := LValue;
+        FConfigurationExplicit := True;
         Include(FExplicitOverrides, scoConfiguration);
       end
       else if LKey = 'product' then
@@ -379,6 +386,8 @@ begin
         FMapDir := LValue;
         Include(FExplicitOverrides, scoMapFileDir);
       end
+      else if LKey = 'delphi7-root' then
+        FDelphi7Root := LValue
       else if LKey = 'report' then
       begin
         if not TryParseReport(LValue) then
@@ -448,7 +457,8 @@ begin
   Writeln('  dxcomply --project=<path> [options]');
   Writeln;
   Writeln('Options:');
-  Writeln('  --project=<path>              Path to the .dproj file (required)');
+  Writeln('  --project=<path>              Project file (required): .dproj, .dpr,');
+  Writeln('                                .dpk, .bdsproj, or .groupproj');
   Writeln('  --format=<format>             Output format (default: cyclonedx-json)');
   Writeln('                                  cyclonedx-json | cyclonedx-xml | spdx-json');
   Writeln('  --output=<path>               Output file path (default: bom.json)');
@@ -456,6 +466,10 @@ begin
   Writeln('                                File key: platform');
   Writeln('  --config-name=<name>          Build configuration (default: Release)');
   Writeln('                                File key: configName');
+  Writeln('                                For .dpr, .dpk, and .bdsproj, --platform');
+  Writeln('                                and --config-name are not applied.');
+  Writeln('                                The defaults are not reported. A value');
+  Writeln('                                you set is reported and ignored.');
   Writeln('  --product=<name>              Product name override');
   Writeln('  --version=<version>           Product version override');
   Writeln('  --supplier=<name>             Supplier/company name');
@@ -468,6 +482,9 @@ begin
   Writeln('                                directory, as older versions did.');
   Writeln('                                Kept for one release. Prefer --scan-dir.');
   Writeln('  --map-dir=<path>              Directory containing the pre-built MAP file');
+  Writeln('  --delphi7-root=<path>         Delphi 7 install directory (RootDir).');
+  Writeln('                                Optional. Used to resolve library units');
+  Writeln('                                for .dpr, .dpk, and .bdsproj projects.');
   Writeln('  --no-composition-evidence     Omit source/DCU units from SBOM (binary-only)');
   Writeln('  --include-platform-in-output  Append <Platform>.<Config> to the default');
   Writeln('                                output filename (e.g. bom.Win64.Release.json)');
@@ -488,6 +505,7 @@ begin
   Writeln;
   Writeln('Examples:');
   Writeln('  dxcomply --project=src\MyApp.dproj --format=cyclonedx-json --output=bom.json');
+  Writeln('  dxcomply --project=src\MyApp.dpr --delphi7-root=C:\Delphi7 --no-pause');
   Writeln('  dxcomply --project=src\MyApp.dproj --ci --config=.dxcomply.json --no-pause');
   Writeln('  dxcomply --project=src\MyApp.dproj --ci --config-name=Debug --no-pause');
 end;
@@ -517,7 +535,9 @@ begin
   Result.OutputPath      := FOutput;
   Result.Format          := FFormat;
   Result.Platform        := FPlatform;
+  Result.PlatformExplicit := FPlatformExplicit;
   Result.Configuration   := FConfiguration;
+  Result.ConfigurationExplicit := FConfigurationExplicit;
   Result.ProductName     := FProductName;
   Result.ProductVersion  := FProductVersion;
   Result.Supplier        := FSupplier;
@@ -526,6 +546,7 @@ begin
   Result.ScanDirs                    := FScanDirs;
   Result.ScanTree                    := FScanTree;
   Result.MapFileDir                  := FMapDir;
+  Result.Delphi7Root                 := FDelphi7Root;
   Result.IncludeCompositionEvidence  := not FNoCompositionEvidence;
   Result.ExplicitOverrides           := FExplicitOverrides;
   Result.IncludePlatformInOutput     := FIncludePlatformInOutput;

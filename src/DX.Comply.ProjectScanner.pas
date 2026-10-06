@@ -17,7 +17,7 @@
 /// - UTF-8 BOM in .dproj files
 /// - Multi-platform projects (Win32, Win64, macOS, etc.)
 /// - Config hierarchy mapping (Debug/Release to Cfg_N)
-/// - Both .dproj and .dpk file extensions
+/// - .dproj, .groupproj, .dpk, .dpr, and .bdsproj file extensions
 /// - MSBuild variable replacement ($(Platform), $(Config), $(MSBuildProjectName))
 /// - Missing/empty PropertyGroups with defensive fallbacks
 /// - Forward/backslash normalization
@@ -41,7 +41,8 @@ uses
   System.Generics.Collections,
   System.Win.Registry,
   Winapi.Windows,
-  DX.Comply.Engine.Intf;
+  DX.Comply.Engine.Intf,
+  DX.Comply.LegacyProject;
 
 type
   /// <summary>
@@ -54,13 +55,20 @@ type
       cDefaultPlatform = 'Win32';
       cDefaultConfig = 'Debug';
       /// <summary>Valid Delphi project file extensions.</summary>
-      cValidExtensions: array[0..2] of string = ('.dproj', '.dpk', '.groupproj');
+      cValidExtensions: array[0..4] of string = (
+        '.dproj', '.groupproj', '.dpk', '.dpr', '.bdsproj');
   private
     FXmlText: string;
     FCurrentPlatform: string;
     FCurrentConfig: string;
     FConfigKey: string;
     FWarnings: TList<string>;
+    /// <summary>
+    /// Optional Delphi 7 root passed in before Scan. Empty uses the registry.
+    /// </summary>
+    FDelphi7Root: string;
+    FPlatformExplicit: Boolean;
+    FConfigurationExplicit: Boolean;
     /// <summary>
     /// Detects the Cfg_N key that corresponds to the requested configuration
     /// name (e.g. Debug -> Cfg_1, Release -> Cfg_2) by inspecting
@@ -212,12 +220,33 @@ type
     /// Normalizes and resolves explicit project unit paths.
     /// </summary>
     function ResolveUnitReferencePath(const APath, AProjectDir, AProjectName: string): string;
+    /// <summary>
+    /// Resolves a legacy output or search directory. Empty input returns an
+    /// empty string. A path that still contains $(...) falls back to the
+    /// project directory when ARequired is True.
+    /// </summary>
+    function ResolveLegacyDirectory(const ARawPath, AProjectDir, AProjectName,
+      ADelphiRoot: string; ARequired: Boolean): string;
+    /// <summary>
+    /// Fills AProjectInfo from a .dpr, .dpk, or .bdsproj and its sibling
+    /// .dof/.cfg. .dof values win over .cfg values.
+    /// </summary>
+    procedure PopulateLegacyProject(var AProjectInfo: TProjectInfo;
+      const APlatform, AConfiguration: string);
+    /// <summary>
+    /// Adds Delphi 7 Lib/Source directories and the IDE library search path.
+    /// </summary>
+    procedure AddDelphi7LibraryPaths(const AProjectInfo: TProjectInfo;
+      const ARoot, ALibrarySearchPath, AProjectName: string);
   public
     constructor Create;
     destructor Destroy; override;
     // IProjectScanner
     function Scan(const AProjectPath, APlatform, AConfiguration: string): TProjectInfo;
     function Validate(const AProjectPath: string): Boolean;
+    procedure SetDelphi7Root(const ARoot: string);
+    procedure SetExplicitTargetRequest(APlatformExplicit,
+      AConfigurationExplicit: Boolean);
   end;
 
 implementation
@@ -1332,6 +1361,260 @@ begin
     Result := TPath.Combine(LCandidateDirs[0], LMapFileName);
 end;
 
+procedure TProjectScanner.SetDelphi7Root(const ARoot: string);
+begin
+  FDelphi7Root := Trim(ARoot);
+end;
+
+procedure TProjectScanner.SetExplicitTargetRequest(APlatformExplicit,
+  AConfigurationExplicit: Boolean);
+begin
+  FPlatformExplicit := APlatformExplicit;
+  FConfigurationExplicit := AConfigurationExplicit;
+end;
+
+function TProjectScanner.ResolveLegacyDirectory(const ARawPath, AProjectDir,
+  AProjectName, ADelphiRoot: string; ARequired: Boolean): string;
+var
+  LPath: string;
+begin
+  Result := '';
+  LPath := Trim(ARawPath);
+  if LPath = '' then
+  begin
+    if ARequired then
+      Result := AProjectDir;
+    Exit;
+  end;
+
+  LPath := ExpandLegacyMacros(LPath, ADelphiRoot);
+  if Pos('$(', LPath) > 0 then
+  begin
+    FWarnings.Add('Could not resolve path "' + ARawPath +
+      '" because no Delphi 7 root was found.');
+    if ARequired then
+      Result := AProjectDir;
+    Exit;
+  end;
+
+  Result := ResolveBuildPath(LPath, AProjectDir, AProjectName);
+  if (Result = '') and ARequired then
+    Result := AProjectDir;
+end;
+
+procedure TProjectScanner.AddDelphi7LibraryPaths(const AProjectInfo: TProjectInfo;
+  const ARoot, ALibrarySearchPath, AProjectName: string);
+var
+  LExpanded: string;
+  LItem: string;
+begin
+  if ARoot <> '' then
+  begin
+    AddExistingPath(TPath.Combine(ARoot, 'Lib'), AProjectInfo.GlobalSearchPaths);
+    AddExistingPath(TPath.Combine(ARoot, 'Source'), AProjectInfo.GlobalSearchPaths);
+    AddExistingPath(TPath.Combine(ARoot, 'Source\Rtl\Sys'), AProjectInfo.GlobalSearchPaths);
+    AddExistingPath(TPath.Combine(ARoot, 'Source\Rtl\Common'), AProjectInfo.GlobalSearchPaths);
+    AddExistingPath(TPath.Combine(ARoot, 'Source\Vcl'), AProjectInfo.GlobalSearchPaths);
+  end;
+
+  if Trim(ALibrarySearchPath) = '' then
+    Exit;
+
+  LExpanded := ExpandLegacyMacros(ALibrarySearchPath, ARoot);
+  for LItem in LExpanded.Split([';']) do
+  begin
+    if (Trim(LItem) = '') or (Pos('$(', LItem) > 0) then
+      Continue;
+    AddExistingPath(ResolveLegacyDirectory(LItem, AProjectInfo.ProjectDir,
+      AProjectName, ARoot, False), AProjectInfo.GlobalSearchPaths);
+  end;
+end;
+
+procedure TProjectScanner.PopulateLegacyProject(var AProjectInfo: TProjectInfo;
+  const APlatform, AConfiguration: string);
+var
+  LCfg: TLegacyOptionSet;
+  LDof: TLegacyOptionSet;
+  LExt: string;
+  LLibrarySearchPath: string;
+  LOptions: TLegacyOptionSet;
+  LOutputDir: string;
+  LPackageDplOutput: string;
+  LPackageItem: string;
+  LPackageList: string;
+  LPackageName: string;
+  LRegistryPackageDir: string;
+  LRegistryRoot: string;
+  LRoot: string;
+  LTargetMessage: string;
+  LSearchPath: string;
+  LSources: TLegacySources;
+  LUsesPackages: Boolean;
+  LWarning: string;
+begin
+  FCurrentPlatform := 'Win32';
+  FCurrentConfig := 'Default';
+  AProjectInfo.IsLegacyProject := True;
+  AProjectInfo.Platform := 'Win32';
+  AProjectInfo.Configuration := 'Default';
+  AProjectInfo.UsesDebugDCUs := False;
+  LTargetMessage := LegacyTargetMessage(APlatform, AConfiguration,
+    FPlatformExplicit, FConfigurationExplicit);
+  if LTargetMessage <> '' then
+    FWarnings.Add(LTargetMessage);
+
+  LSources := ResolveLegacySources(AProjectInfo.ProjectPath);
+  if LSources.ProjectName <> '' then
+    AProjectInfo.ProjectName := LSources.ProjectName;
+  AProjectInfo.MainSourcePath := LSources.MainSourcePath;
+  AProjectInfo.DllSuffix := LSources.LibSuffix;
+
+  if (LSources.DofPath = '') and (LSources.CfgPath = '') then
+    FWarnings.Add('No .dof or .cfg found next to the project. ' +
+      'Output paths, search paths, and version info fall back to Delphi 7 defaults ' +
+      '(the binary is written in the project directory).');
+
+  try
+    LDof := ParseDofOptions(LSources.DofPath);
+  except
+    on E: Exception do
+    begin
+      LDof := Default(TLegacyOptionSet);
+      FWarnings.Add('Could not read .dof: ' + E.Message);
+    end;
+  end;
+
+  try
+    LCfg := ParseCfgOptions(LSources.CfgPath);
+  except
+    on E: Exception do
+    begin
+      LCfg := Default(TLegacyOptionSet);
+      FWarnings.Add('Could not read .cfg: ' + E.Message);
+    end;
+  end;
+
+  LOptions := MergeLegacyOptions(LDof, LCfg);
+
+  if not TryResolveDelphi7Install(FDelphi7Root, LRoot, LLibrarySearchPath,
+    LRegistryRoot, LPackageDplOutput, FWarnings) then
+    LRoot := '';
+
+  if LRoot <> '' then
+  begin
+    AProjectInfo.Toolchain.ProductName := 'Borland Delphi';
+    AProjectInfo.Toolchain.Version := '7.0';
+    AProjectInfo.Toolchain.RootDir := LRoot;
+    AProjectInfo.Toolchain.BuildVersion :=
+      GetFileVersionText(TPath.Combine(LRoot, 'bin\dcc32.exe'));
+  end;
+
+  if LOptions.HasUnitOutputDir and (Trim(LOptions.UnitOutputDir) <> '') then
+    AProjectInfo.DcuOutputDir := ResolveLegacyDirectory(LOptions.UnitOutputDir,
+      AProjectInfo.ProjectDir, AProjectInfo.ProjectName, LRoot, False);
+  if LOptions.HasPackageDcpOutputDir and (Trim(LOptions.PackageDcpOutputDir) <> '') then
+    AProjectInfo.DcpOutputDir := ResolveLegacyDirectory(LOptions.PackageDcpOutputDir,
+      AProjectInfo.ProjectDir, AProjectInfo.ProjectName, LRoot, False);
+  if LOptions.HasPackageDllOutputDir and (Trim(LOptions.PackageDllOutputDir) <> '') then
+    AProjectInfo.BplOutputDir := ResolveLegacyDirectory(LOptions.PackageDllOutputDir,
+      AProjectInfo.ProjectDir, AProjectInfo.ProjectName, LRoot, False);
+
+  LOutputDir := '';
+  if LOptions.HasOutputDir and (Trim(LOptions.OutputDir) <> '') then
+    LOutputDir := ResolveLegacyDirectory(LOptions.OutputDir,
+      AProjectInfo.ProjectDir, AProjectInfo.ProjectName, LRoot, False);
+  AProjectInfo.OutputDir := LOutputDir;
+
+  LExt := ModuleKindOutputExtension(LSources.ModuleKind);
+  // A package is written to PackageDLLOutputDir (-LE). OutputDir (-E) is the
+  // exe/dll directory and is not a fallback for the BPL.
+  if SameText(LExt, '.bpl') then
+  begin
+    if AProjectInfo.BplOutputDir <> '' then
+      AProjectInfo.ArtefactOutputDir := AProjectInfo.BplOutputDir
+    else
+    begin
+      // PackageDLLOutputDir / -LE was blank. Delphi 7 writes the BPL to the
+      // IDE's global directory when that registry install was found.
+      LRegistryPackageDir := '';
+      if LRegistryRoot <> '' then
+        LRegistryPackageDir := ResolveLegacyDirectory(LPackageDplOutput,
+          LRegistryRoot, AProjectInfo.ProjectName, LRegistryRoot, False);
+      AProjectInfo.BplOutputDir := ResolveBlankPackageOutputDir(
+        AProjectInfo.ProjectDir, LRegistryPackageDir, LRegistryRoot <> '');
+      AProjectInfo.ArtefactOutputDir := AProjectInfo.BplOutputDir;
+      if LRegistryPackageDir = '' then
+        FWarnings.Add('No package output directory in the .dof or .cfg, and no ' +
+          'Delphi 7 Package DPL Output value was found. Using the project directory.');
+    end;
+  end
+  else if LOutputDir <> '' then
+    AProjectInfo.ArtefactOutputDir := LOutputDir
+  else
+  begin
+    AProjectInfo.ArtefactOutputDir := AProjectInfo.ProjectDir;
+    if not LOptions.HasOutputDir then
+      FWarnings.Add('No output directory in the .dof or .cfg. Using the project directory.');
+  end;
+
+  if AProjectInfo.OutputDir = '' then
+    AProjectInfo.OutputDir := AProjectInfo.ArtefactOutputDir;
+
+  if AProjectInfo.ProjectName <> '' then
+  begin
+    if SameText(LExt, '.exe') then
+      AProjectInfo.OutputFilePath := TPath.Combine(AProjectInfo.ArtefactOutputDir,
+        AProjectInfo.ProjectName + LExt)
+    else
+      AProjectInfo.OutputFilePath := TPath.Combine(AProjectInfo.ArtefactOutputDir,
+        AProjectInfo.ProjectName + AProjectInfo.DllSuffix + LExt);
+    AProjectInfo.MapFilePath := TPath.ChangeExtension(AProjectInfo.OutputFilePath, '.map');
+  end;
+
+  if Assigned(AProjectInfo.ExplicitUnitReferences) then
+  begin
+    AProjectInfo.ExplicitUnitReferences.Free;
+    AProjectInfo.ExplicitUnitReferences := nil;
+  end;
+  AProjectInfo.ExplicitUnitReferences := ExtractMainSourceUnitReferences(
+    AProjectInfo.MainSourcePath, AProjectInfo.ProjectDir, AProjectInfo.ProjectName);
+
+  LSearchPath := '';
+  if LOptions.HasSearchPath then
+    LSearchPath := ExpandLegacyMacros(LOptions.SearchPath, LRoot);
+  if (LRoot = '') and (Pos('$(DELPHI)', UpperCase(LSearchPath)) > 0) then
+    FWarnings.Add('A search path entry uses $(DELPHI), but no Delphi 7 root was found. ' +
+      'That entry was skipped.');
+
+  AddExistingPath(AProjectInfo.ProjectDir, AProjectInfo.ProjectSearchPaths);
+  AddDelimitedValues(LSearchPath, AProjectInfo.ProjectSearchPaths,
+    AProjectInfo.ProjectDir, AProjectInfo.ProjectName, True);
+
+  AddDelphi7LibraryPaths(AProjectInfo, LRoot, LLibrarySearchPath, AProjectInfo.ProjectName);
+
+  CopyUniqueValues(AProjectInfo.ProjectSearchPaths, AProjectInfo.SearchPaths);
+  CopyUniqueValues(AProjectInfo.GlobalSearchPaths, AProjectInfo.SearchPaths);
+
+  LUsesPackages := ResolveRuntimePackages(LDof, LCfg, LPackageList);
+  if LUsesPackages then
+    for LPackageItem in LPackageList.Split([';']) do
+    begin
+      LPackageName := Trim(LPackageItem);
+      if (LPackageName = '') or (LPackageName[1] = '$') then
+        Continue;
+      if not AProjectInfo.RuntimePackages.Contains(LPackageName) then
+        AProjectInfo.RuntimePackages.Add(LPackageName);
+    end;
+
+  AProjectInfo.ConditionalDefines := LOptions.Conditionals;
+  AProjectInfo.Version := LegacyVersionText(LOptions);
+  if LOptions.HasCompanyName then
+    AProjectInfo.CompanyName := Trim(LOptions.CompanyName);
+
+  for LWarning in FWarnings do
+    AProjectInfo.Warnings.Add(LWarning);
+end;
+
 function TProjectScanner.Scan(const AProjectPath, APlatform, AConfiguration: string): TProjectInfo;
 var
   LBplOutputDir: string;
@@ -1364,6 +1647,12 @@ begin
         Result.ProjectDir := TPath.GetDirectoryName(AProjectPath);
     end;
     Result.ProjectName := TPath.GetFileNameWithoutExtension(AProjectPath);
+
+    if IsLegacyProjectFile(AProjectPath) then
+    begin
+      PopulateLegacyProject(Result, APlatform, AConfiguration);
+      Exit;
+    end;
 
     if APlatform <> '' then
       FCurrentPlatform := APlatform

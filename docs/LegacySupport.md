@@ -2,7 +2,7 @@
 
 ## Overview
 
-The release installer is built for Delphi 13 and registers the IDE plugin there. The command line tool is separate. It does not compile the project. It reads a `.dproj`, `.dpk`, or `.groupproj` and a detailed MAP file, so the Delphi version that wrote the MAP file does not have to be Delphi 13.
+The release installer is built for Delphi 13 and registers the IDE plugin there. The command line tool is separate. It does not compile the project. It reads a `.dproj`, `.dpk`, or `.groupproj`, or a Delphi 7 `.dpr` with its `.dof` and `.cfg`, and a detailed MAP file, so the Delphi version that wrote the MAP file does not have to be Delphi 13.
 
 The MAP file lists the units linked into the executable. DX.Comply turns that list into a CycloneDX or SPDX SBOM, with a hash where it could open the file.
 
@@ -16,7 +16,7 @@ The release installer registers the IDE plugin for Delphi 13. In that IDE, the p
 
 ### CLI tool
 
-The CLI tool expects the MAP file to already exist, and `--project` must be a `.dproj`, `.dpk`, or `.groupproj`. You compile the project yourself (either interactively or in a CI pipeline), then run `dxcomply` to generate the SBOM from the build output.
+The CLI tool expects the MAP file to already exist. `--project` may be a `.dproj`, `.dpk`, or `.groupproj`. A Delphi 7 project is the `.dpr` together with its `.dof` and `.cfg`, or the `.dpk` when a package has no `.dproj`. Delphi 2005 and 2006 can use the `.bdsproj`. A `.dof` by itself is not a project file. You compile the project yourself (either interactively or in a CI pipeline), then run `dxcomply` to generate the SBOM from the build output.
 
 ---
 
@@ -40,12 +40,24 @@ Build the project as usual. The compiler produces a `.map` file alongside the ex
 ### 3. Run the CLI Tool
 
 ```bash
-dxcomply --project=MyApp.dproj --output=bom.json --no-pause
+dxcomply --project=MyApp.dpr --output=bom.json --no-pause
 ```
 
-The SBOM lists the program or package that was built, plus other binaries in that output directory. Installers and helper tools in subfolders are not included. If the `.dproj` has no output directory, only binaries in the project directory itself are listed. Use `--scan-dir` for binaries you stage on purpose. `--scan-tree` restores the old recursive listing and is deprecated.
+Delphi 2007 and later still use the `.dproj` (`dxcomply --project=MyApp.dproj`). Delphi 7 passes the `.dpr`, or the `.dpk` when a package has no `.dproj`. Delphi 2005 and 2006 can pass the `.bdsproj`. DX.Comply reads the main source name from a `.bdsproj` and then uses the sibling `.dof` and `.cfg`. It does not read build configurations stored inside the `.bdsproj`. If a `.dproj` is present, pass the `.dproj`.
 
-`--project` does not accept a `.dpr` or a `.dof`. Delphi 7, 2005, and 2006 projects are often only those files. If a `.dproj` exists for the same project, pass that path. When the MAP file is not in the output directory taken from the `.dproj`, pass `--map-dir`.
+The sibling `.dof` (INI) and `.cfg` (dcc32 response file) supply the output directory, search path, defines, runtime packages, and version info. When both files define a value, the `.dof` wins, including when the `.dof` value is empty. The `.cfg` is used only for settings the `.dof` does not define. `OutputDir` and `-E` are the exe/dll directory. `PackageDLLOutputDir` and `-LE` are the package directory. Runtime packages are listed only when the project is built with runtime packages: `UsePackages=1` uses `[Directories] Packages` (or `-LU` if that key is absent), `UsePackages=0` lists none, and a `.dof` that never mentions `UsePackages` uses `-LU`.
+
+Delphi 7, 2005, and 2006 projects have a single Win32 option set. `--platform` and `--config-name` are not applied. The recorded platform is Win32 and the configuration is Default. The built-in defaults (`Win32` and `Release`) are not reported. A platform or configuration you pass on the command line, or set with `platform` or `configuration` in `.dxcomply.json`, is reported and ignored. `configName` is accepted as another name for `configuration`.
+
+The output name comes from the project file name. The extension comes from the first `program` (`.exe`), `library` (`.dll`), or `package` (`.bpl`) keyword in the source. `{$LIBSUFFIX '...'}` is appended to dll and bpl names. The MAP file DX.Comply reads is that binary's name with a `.map` extension, in the same directory. If it is missing, the CLI stops and tells you to set Project Options, Linker, Map file to Detailed, or to add `-GD` to the `.cfg`, then rebuild. `--map-dir` still overrides the directory.
+
+`FileVersion` from `[Version Info Keys]` becomes the root component version (otherwise `MajorVer.MinorVer.Release.Build`). `CompanyName` becomes the supplier when `--supplier` and `product.supplier` are both empty. The root component name stays the project name.
+
+Delphi 7 library units are looked up from `HKCU` or `HKLM\Software\Borland\Delphi\7.0` (`RootDir` and `Library\Search Path`), then from the `DELPHI` environment variable. The scan does not fail when Delphi 7 is not installed; those library units are simply not resolved from an install tree. Pass `--delphi7-root` or set `delphi7Root` in `.dxcomply.json` to point at a Delphi 7 tree. `$(DELPHI)` in the search path expands to that root.
+
+A blank `PackageDLLOutputDir` uses the Delphi 7 global package output directory (`HKCU` or `HKLM\Software\Borland\Delphi\7.0\Library`, value `Package DPL Output`) when that install's `RootDir` was found. Otherwise the project directory is used and a warning is reported. Set the directory in the `.dof` or `.cfg` when the BPL is built somewhere else.
+
+The SBOM lists the program or package that was built, plus other binaries in that output directory. Installers and helper tools in subfolders are not included. If the project has no output directory, only binaries in the project directory itself are listed. Use `--scan-dir` for binaries you stage on purpose. `--scan-tree` restores the old recursive listing and is deprecated.
 
 ---
 
@@ -132,6 +144,6 @@ Some legacy Delphi 2007 projects use `AnyCPU` instead of `Win32` as the platform
 | Delphi XE to 10.4 | No | Yes |
 | Delphi 2009 / 2010 | No | Yes |
 | Delphi 2007 (has a `.dproj`) | No | Yes |
-| Delphi 7 / 2005 / 2006 | No | Only with a `.dproj`, `.dpk`, or `.groupproj` |
+| Delphi 7 / 2005 / 2006 | No | Yes. Pass the `.dpr` with its `.dof` and `.cfg`, or a `.dpk`, `.bdsproj`, or `.dproj` |
 | CI/CD pipeline (no IDE) | No | Yes |
 | Cross-version build server | No | Yes |

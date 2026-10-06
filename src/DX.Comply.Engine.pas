@@ -97,8 +97,18 @@ type
     Supplier: string;
     /// <summary>Target platform.</summary>
     Platform: string;
+    /// <summary>
+    /// True when the caller set the platform with --platform or with
+    /// platform in .dxcomply.json. The built-in Win32 default stays False.
+    /// </summary>
+    PlatformExplicit: Boolean;
     /// <summary>Build configuration.</summary>
     Configuration: string;
+    /// <summary>
+    /// True when the caller set the configuration with --config-name or with
+    /// configuration in .dxcomply.json. The built-in Release default stays False.
+    /// </summary>
+    ConfigurationExplicit: Boolean;
     /// <summary>Controls whether Deep-Evidence builds are disabled, conditional, or forced.</summary>
     DeepEvidenceMode: TDeepEvidenceBuildMode;
     /// <summary>Optional Delphi major version to use for the Deep-Evidence build.</summary>
@@ -142,6 +152,11 @@ type
     /// versions did. Deprecated and kept for one release. Default is False.
     /// </summary>
     ScanTree: Boolean;
+    /// <summary>
+    /// Optional Delphi 7 installation directory for legacy .dpr/.dpk/.bdsproj
+    /// scans. Empty uses the Borland registry key and the DELPHI variable.
+    /// </summary>
+    Delphi7Root: string;
     /// <summary>Creates a new TSbomConfig with default values.</summary>
     class function Default: TSbomConfig; static;
     /// <summary>
@@ -299,6 +314,7 @@ type
 implementation
 
 uses
+  DX.Comply.LegacyProject,
   DX.Comply.Report.Support,
   DX.Comply.VersionInfo;
 
@@ -309,7 +325,9 @@ begin
   Result.OutputPath := 'bom.json';
   Result.Format := sfCycloneDxJson;
   Result.Platform := 'Win32';
+  Result.PlatformExplicit := False;
   Result.Configuration := 'Release';
+  Result.ConfigurationExplicit := False;
   Result.DeepEvidenceMode := debWhenMapMissing;
   Result.DeepEvidenceDelphiVersion := 0;
   Result.DeepEvidenceBuildScriptPath := '';
@@ -327,6 +345,7 @@ begin
   Result.MapFileDir := '';
   Result.ScanTree := False;
   SetLength(Result.ScanDirs, 0);
+  Result.Delphi7Root := '';
 end;
 
 
@@ -1082,19 +1101,36 @@ begin
         end;
 
         // Target platform. Empty values keep the default.
+        // A non-empty value is explicit, not the built-in Win32 default.
         if LJson.GetValue('platform') <> nil then
         begin
           LText := Trim(LJson.GetValue<string>('platform'));
           if LText <> '' then
+          begin
             Result.Platform := LText;
+            Result.PlatformExplicit := True;
+          end;
         end;
 
         // Build configuration. CLI flag is --config-name (issue #50).
+        // configuration is the other name. configName wins when both are set.
         if LJson.GetValue('configName') <> nil then
         begin
           LText := Trim(LJson.GetValue<string>('configName'));
           if LText <> '' then
+          begin
             Result.Configuration := LText;
+            Result.ConfigurationExplicit := True;
+          end;
+        end
+        else if LJson.GetValue('configuration') <> nil then
+        begin
+          LText := Trim(LJson.GetValue<string>('configuration'));
+          if LText <> '' then
+          begin
+            Result.Configuration := LText;
+            Result.ConfigurationExplicit := True;
+          end;
         end;
 
         // Include patterns
@@ -1192,6 +1228,10 @@ begin
         // MAP file directory override
         if LJson.GetValue('mapDir') <> nil then
           Result.MapFileDir := LJson.GetValue<string>('mapDir');
+
+        // Delphi 7 install override for legacy .dpr/.dpk/.bdsproj scans.
+        if LJson.GetValue('delphi7Root') <> nil then
+          Result.Delphi7Root := LJson.GetValue<string>('delphi7Root');
 
         // Composition evidence inclusion
         if LJson.GetValue('includeCompositionEvidence') <> nil then
@@ -1307,6 +1347,8 @@ begin
       IntToStr(ABuildEvidence.EvidenceItems.Count));
     AddComponentProperty(PropertyName('build', 'search-path-count'),
       IntToStr(ABuildEvidence.SearchPaths.Count));
+    AddComponentProperty(PropertyName('build', 'conditional-defines'),
+      AProjectInfo.ConditionalDefines);
     AddComponentProperty(PropertyName('composition', 'resolved-unit-count'),
       IntToStr(ACompositionEvidence.Units.Count));
     AddConsolidatedUnitEvidenceProperties;
@@ -1533,10 +1575,13 @@ begin
   LValidation := TValidationResult.CreateValid;
   LReportedWarnings := TList<string>.Create;
   try
+    FProjectScanner.SetDelphi7Root(FConfig.Delphi7Root);
+    FProjectScanner.SetExplicitTargetRequest(FConfig.PlatformExplicit,
+      FConfig.ConfigurationExplicit);
     LProjectInfo := FProjectScanner.Scan(AProjectPath, FConfig.Platform, FConfig.Configuration);
 
-    // Apply MapFileDir override. This allows legacy projects to specify where the
-    // MAP file is located when automatic detection from the .dproj fails.
+    // Apply MapFileDir override. Legacy projects look next to the output
+    // binary unless the caller points at another directory.
     if FConfig.MapFileDir <> '' then
       LProjectInfo.MapFilePath := TPath.Combine(FConfig.MapFileDir,
         LProjectInfo.ProjectName + LProjectInfo.EffectiveMapSuffix + '.map');
@@ -1552,7 +1597,26 @@ begin
   try
     ReportWarnings(LProjectInfo.Warnings, LReportedWarnings, 12);
 
+    // Legacy projects are not compiled here. The MAP file must already sit
+    // next to the output binary (or in --map-dir).
+    if LProjectInfo.IsLegacyProject and
+       ((Trim(LProjectInfo.MapFilePath) = '') or not TFile.Exists(LProjectInfo.MapFilePath)) then
+    begin
+      DoProgress('Error: ' + LegacyMapFileMissingMessage(LProjectInfo.MapFilePath), -1);
+      Exit(False);
+    end;
+
     DoProgress('Ensuring MAP file...', 15);
+    if LProjectInfo.IsLegacyProject then
+    begin
+      LDeepEvidenceBuildResult := Default(TDeepEvidenceBuildResult);
+      LDeepEvidenceBuildResult.Success := True;
+      LDeepEvidenceBuildResult.Executed := False;
+      LDeepEvidenceBuildResult.Message :=
+        'Legacy project: DX.Comply does not compile it. Using the MAP file from your build.';
+      DoProgress(LDeepEvidenceBuildResult.Message, 18);
+    end
+    else
     try
       LDeepEvidenceBuildResult := EnsureDeepEvidenceBuild(LProjectInfo);
     except
@@ -1654,6 +1718,8 @@ begin
         LMetadata.ProductName := LProjectInfo.ProjectName;
       if LMetadata.ProductVersion = '' then
         LMetadata.ProductVersion := LProjectInfo.Version;
+      if LMetadata.Supplier = '' then
+        LMetadata.Supplier := LProjectInfo.CompanyName;
 
       Result := FSbomWriter.Write(LOutputPath, LMetadata, LArtefacts, LProjectInfo);
 
@@ -1762,8 +1828,17 @@ begin
 end;
 
 function TDxComplyGenerator.GenerateFromConfig(const AProjectPath, AConfigPath: string): Boolean;
+var
+  LCliConfig: TSbomConfig;
 begin
-  FConfig := MergeFileConfig(FConfig, LoadConfig(AConfigPath));
+  LCliConfig := FConfig;
+  FConfig := MergeFileConfig(LCliConfig, LoadConfig(AConfigPath));
+  if (FConfig.Delphi7Root = '') and (LCliConfig.Delphi7Root <> '') then
+    FConfig.Delphi7Root := LCliConfig.Delphi7Root;
+  if LCliConfig.PlatformExplicit then
+    FConfig.PlatformExplicit := True;
+  if LCliConfig.ConfigurationExplicit then
+    FConfig.ConfigurationExplicit := True;
   Result := Generate(AProjectPath);
 end;
 

@@ -83,7 +83,7 @@ DX.Comply writes **CycloneDX 1.5** JSON by default. Each linked unit is a `libra
 
 The installer in the current release is built for Delphi 13 (RAD Studio 37.0). Run it from the [Releases](https://github.com/omonien/DX.Comply/releases) page. It registers the IDE plugin for Delphi 13 and copies the command line tool onto the machine.
 
-The command line tool does not use the IDE and does not compile the project. It reads a `.dproj`, `.dpk`, or `.groupproj` together with a detailed MAP file from a build. That MAP file can come from an older Delphi, as long as `--project` is one of those three file types.
+The command line tool does not use the IDE and does not compile the project. It reads a `.dproj`, `.dpk`, or `.groupproj`, or a Delphi 7 `.dpr` with its `.dof` and `.cfg`, together with a detailed MAP file from a build. That MAP file can come from an older Delphi.
 
 ### Manual
 
@@ -137,17 +137,17 @@ Run `dxcomply --help` for the full list of switches. See [docs/CI-Integration.md
 
 ### Option C: Older Delphi, with a detailed MAP file
 
-The command line tool can write an SBOM for a project that was built with an older Delphi when two things are true: the build produced a **detailed MAP file**, and `--project` points at a `.dproj`, `.dpk`, or `.groupproj`.
+The command line tool can write an SBOM for a project that was built with an older Delphi when the build produced a **detailed MAP file**.
 
 1. In the IDE that builds the project, set **Map file** to **Detailed**.
 2. Build the project. This produces a `.map` file.
-3. Run the CLI against the `.dproj`:
+3. Run the CLI against the project file. Delphi 2007 and later use a `.dproj`, `.dpk`, or `.groupproj`. A Delphi 7 project is the `.dpr` together with its `.dof` and `.cfg`, or the `.dpk` when a package has no `.dproj`. Delphi 2005 and 2006 can use the `.bdsproj`. If a `.dproj` is also present, pass the `.dproj`.
 
 ```bash
-dxcomply --project=MyApp.dproj --output=bom.json --no-pause
+dxcomply --project=MyApp.dpr --output=bom.json --no-pause
 ```
 
-If the MAP file is not in the output directory taken from the `.dproj`, pass `--map-dir`. A `.dpr` or `.dof` is not a valid `--project` file. Delphi 7 projects are often only those two files, so they are not accepted unless a `.dproj` (or `.dpk` or `.groupproj`) exists for the same project.
+The CLI reads the sibling `.dof` and `.cfg`. When both files define a setting, the `.dof` value is used. These projects have one Win32 option set, so `--platform` and `--config-name` are not applied. The built-in Win32 and Release defaults are not reported. A platform or configuration you set on the command line or in `.dxcomply.json` is reported and ignored. A blank package output directory uses the registry value `Package DPL Output` when Delphi 7's `RootDir` was found, and the project directory otherwise. The `.map` file must sit next to the output binary. If it is missing, the CLI stops. Library units come from a Delphi 7 install when `Software\Borland\Delphi\7.0` is in the registry. The scan still runs when that install is missing; pass `--delphi7-root` or set `delphi7Root` in `.dxcomply.json`. For a `.dproj`, if the MAP file is not in the output directory taken from the project, pass `--map-dir`.
 
 > **Tip:** You can automate this with a **Post-Build Event** in a dedicated build configuration. Create a configuration named e.g. `SBOM` that enables detailed MAP output and runs `dxcomply` as a post-build step. This way, a single build generates both your application and its SBOM.
 
@@ -302,7 +302,7 @@ The CRA requires (Annex I, Part II):
 | Mode | Requirement |
 |---|---|
 | **IDE plugin** | Release installer: Delphi 13. The design-time package is the IDE integration. |
-| **CLI tool** | Windows executable. Needs a `.dproj`, `.dpk`, or `.groupproj` and a detailed MAP file. It does not compile the project. |
+| **CLI tool** | Windows executable. Needs a `.dproj`, `.dpk`, `.groupproj`, or a Delphi 7 `.dpr` with `.dof` and `.cfg`, and a detailed MAP file. It does not compile the project. |
 | **Platform** | Windows build host |
 
 No internet connection is required. All processing is local.
