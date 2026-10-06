@@ -95,7 +95,11 @@ type
     [Test]
     procedure Write_SpecialChars_AreEscaped;
 
-    /// <summary>Metadata children must follow the CycloneDX 1.5 sequence.</summary>
+    /// <summary>
+    /// Metadata children must follow the CycloneDX 1.5 sequence.
+    /// The metadata component may contain its own properties element, so the
+    /// check uses the properties element that is a direct child of metadata.
+    /// </summary>
     [Test]
     procedure Write_MetadataElementOrder_MatchesSchema;
 
@@ -126,6 +130,9 @@ begin
   FMetadata.Timestamp := '2026-02-24T10:00:00+01:00';
   FMetadata.ToolName := 'DX.Comply';
   FMetadata.ToolVersion := '';
+  // DUnitX reuses one fixture instance. Drop property arrays left by an earlier test.
+  SetLength(FMetadata.Properties, 0);
+  SetLength(FMetadata.ComponentProperties, 0);
 
   FProjectInfo := TProjectInfo.Create;
   FProjectInfo.ProjectName := 'TestProject';
@@ -238,13 +245,91 @@ begin
     'The tool version must come from the running module');
 end;
 
+function MetadataDirectChildPos(const AMetadata, AElementName: string): Integer;
+var
+  I: Integer;
+  J: Integer;
+  LDepth: Integer;
+  LName: string;
+  LQuote: Char;
+  LSelfClosing: Boolean;
+begin
+  // 1-based position of an opening tag that is a direct child of <metadata>.
+  // Nested elements, including properties inside metadata/component, are ignored.
+  Result := 0;
+  LDepth := 0;
+  I := 1;
+  while I <= Length(AMetadata) do
+  begin
+    if AMetadata[I] <> '<' then
+    begin
+      Inc(I);
+      Continue;
+    end;
+
+    if (I < Length(AMetadata)) and (AMetadata[I + 1] = '/') then
+    begin
+      if LDepth > 0 then
+        Dec(LDepth);
+      Inc(I);
+      Continue;
+    end;
+
+    if (I < Length(AMetadata)) and
+      ((AMetadata[I + 1] = '!') or (AMetadata[I + 1] = '?')) then
+    begin
+      Inc(I);
+      Continue;
+    end;
+
+    J := I + 1;
+    while (J <= Length(AMetadata)) and
+      (AMetadata[J] <> ' ') and (AMetadata[J] <> #9) and
+      (AMetadata[J] <> #10) and (AMetadata[J] <> #13) and
+      (AMetadata[J] <> '>') and (AMetadata[J] <> '/') do
+      Inc(J);
+    LName := Copy(AMetadata, I + 1, J - I - 1);
+
+    LSelfClosing := False;
+    LQuote := #0;
+    while (J <= Length(AMetadata)) and (AMetadata[J] <> '>') do
+    begin
+      if LQuote <> #0 then
+      begin
+        if AMetadata[J] = LQuote then
+          LQuote := #0;
+      end
+      else if (AMetadata[J] = '"') or (AMetadata[J] = '''') then
+        LQuote := AMetadata[J]
+      else if AMetadata[J] = '/' then
+        LSelfClosing := True;
+      Inc(J);
+    end;
+
+    if (LDepth = 1) and SameText(LName, AElementName) then
+      Exit(I);
+
+    if not LSelfClosing then
+      Inc(LDepth);
+    if J <= Length(AMetadata) then
+      I := J + 1
+    else
+      I := J;
+  end;
+end;
+
 procedure TCycloneDxXmlWriterTests.Write_MetadataElementOrder_MatchesSchema;
 var
   LComponentAt, LContent, LMetadata, LPropertiesAt, LSupplierAt, LToolsAt: string;
-  LMetaStart, LMetaEnd: Integer;
+  LMetaEnd, LMetaStart, LPropertiesPos: Integer;
 begin
   SetLength(FMetadata.Properties, 1);
   FMetadata.Properties[0] := TSbomProperty.Create('dx:profile', 'cra');
+  // Component properties are nested inside metadata/component. They must not
+  // be treated as the metadata-level properties element.
+  SetLength(FMetadata.ComponentProperties, 1);
+  FMetadata.ComponentProperties[0] := TSbomProperty.Create(
+    'net.developer-experts.dx-comply:build.configuration', 'Release');
   FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo);
   LContent := LoadOutputContent;
 
@@ -256,12 +341,16 @@ begin
 
   LToolsAt := IntToStr(Pos('<tools>', LMetadata));
   LComponentAt := IntToStr(Pos('<component ', LMetadata));
-  LPropertiesAt := IntToStr(Pos('<properties>', LMetadata));
+  LPropertiesPos := MetadataDirectChildPos(LMetadata, 'properties');
+  LPropertiesAt := IntToStr(LPropertiesPos);
   LSupplierAt := IntToStr(Pos('<supplier>', LMetadata));
   Assert.IsTrue(Pos('<tools>', LMetadata) < Pos('<component ', LMetadata),
     'metadata tools must precede metadata component. tools at ' + LToolsAt +
     ', component at ' + LComponentAt);
-  Assert.IsTrue(Pos('</component>', LMetadata) < Pos('<properties>', LMetadata),
+  Assert.IsTrue(LPropertiesPos > 0,
+    'metadata must contain a properties element that is a direct child. properties at ' +
+    LPropertiesAt);
+  Assert.IsTrue(Pos('</component>', LMetadata) < LPropertiesPos,
     'metadata properties must follow the metadata component. properties at ' + LPropertiesAt);
   Assert.IsTrue(Pos('<supplier>', LMetadata) < Pos('<name>', LMetadata),
     'component supplier must precede name. supplier at ' + LSupplierAt);
