@@ -28,7 +28,8 @@ uses
   Winapi.Windows,
   DUnitX.TestFramework,
   DX.Comply.CycloneDx.Writer,
-  DX.Comply.Engine.Intf;
+  DX.Comply.Engine.Intf,
+  DX.Comply.VersionInfo;
 
 type
   /// <summary>
@@ -161,6 +162,14 @@ type
     /// <summary>CLI --version override (Metadata.ProductVersion) must appear in metadata.component.version.</summary>
     [Test]
     procedure Write_VersionOverride_AppearsInComponentVersion;
+
+    /// <summary>The tools entry must use the running module version when metadata does not override it.</summary>
+    [Test]
+    procedure Write_ToolVersion_ComesFromModule;
+
+    /// <summary>An explicit metadata tool version must be written as supplied.</summary>
+    [Test]
+    procedure Write_ToolVersion_UsesMetadataOverride;
   end;
 
 implementation
@@ -181,7 +190,7 @@ begin
   FMetadata.Supplier       := 'Test Supplier';
   FMetadata.Timestamp      := '2026-01-01T00:00:00';
   FMetadata.ToolName       := 'DX.Comply';
-  FMetadata.ToolVersion    := '1.0.0';
+  FMetadata.ToolVersion    := '';
 
   FProjectInfo := TProjectInfo.Create;
   FProjectInfo.ProjectName := 'TestApp';
@@ -830,6 +839,47 @@ begin
     Assert.IsNotNull(LComponent, 'metadata.component must be present');
     Assert.AreEqual('9.9.9-cli', LComponent.GetValue<string>('version'),
       'metadata.component.version must reflect the CLI --version override');
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TCycloneDxWriterTests.Write_ToolVersion_ComesFromModule;
+var
+  LComponents: TJSONArray;
+  LJson, LMetadata, LTool, LTools: TJSONObject;
+begin
+  FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo);
+  LJson := LoadOutputJson;
+  Assert.IsNotNull(LJson);
+  try
+    LMetadata := LJson.GetValue('metadata') as TJSONObject;
+    LTools := LMetadata.GetValue('tools') as TJSONObject;
+    LComponents := LTools.GetValue('components') as TJSONArray;
+    LTool := LComponents.Items[0] as TJSONObject;
+    Assert.AreEqual(GetDxComplyToolVersion, LTool.GetValue<string>('version'),
+      'tools.components[0].version must be the running module version');
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TCycloneDxWriterTests.Write_ToolVersion_UsesMetadataOverride;
+var
+  LComponents: TJSONArray;
+  LJson, LMetadata, LTool, LTools: TJSONObject;
+begin
+  FMetadata.ToolVersion := '9.9.9-meta';
+  FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo);
+  LJson := LoadOutputJson;
+  Assert.IsNotNull(LJson);
+  try
+    LMetadata := LJson.GetValue('metadata') as TJSONObject;
+    LTools := LMetadata.GetValue('tools') as TJSONObject;
+    LComponents := LTools.GetValue('components') as TJSONArray;
+    LTool := LComponents.Items[0] as TJSONObject;
+    Assert.AreEqual('9.9.9-meta', LTool.GetValue<string>('version'),
+      'An explicit metadata tool version must be written unchanged');
   finally
     LJson.Free;
   end;

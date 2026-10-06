@@ -46,6 +46,10 @@ Source: "..\build\Win32\Release\dcu\DX.Comply.Engine.dcp"; DestDir: "{app}\dcp";
 Source: "..\build\Win32\Release\dcu\DX.Comply.IDE.dcp"; DestDir: "{app}\dcp"; Flags: ignoreversion
 ; CLI tool
 Source: "..\build\Win32\Release\DX.Comply.CLI.exe"; DestDir: "{app}\bin"; DestName: "dxcomply.exe"; Flags: ignoreversion
+; Deep-Evidence build script, next to each binary. The orchestrator runs this
+; copy instead of a script found inside the project being scanned.
+Source: "..\build\DelphiBuildDPROJ.ps1"; DestDir: "{app}\bin"; Flags: ignoreversion
+Source: "..\build\DelphiBuildDPROJ.ps1"; DestDir: "{app}\bpl"; Flags: ignoreversion
 ; Documentation
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion

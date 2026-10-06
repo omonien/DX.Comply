@@ -13,8 +13,10 @@
 /// both a pass/fail indicator and a list of human-readable error messages.
 ///
 /// Since full JSON Schema / XSD validation would require heavy external dependencies,
-/// this validator performs structural "deep checks" that cover all required fields
-/// and value constraints defined in the respective specifications.
+/// this validator performs structural checks for required fields and value
+/// constraints. CycloneDX XML checks also enforce the 1.5 child order of
+/// metadata and component. That is still not a substitute for xmllint against
+/// bom-1.5.xsd.
 /// </remarks>
 ///
 /// <copyright>
@@ -87,6 +89,13 @@ type
     /// </summary>
     function ValidateAuto(const AContent: string): TValidationResult;
   end;
+
+/// <summary>
+/// Returns CycloneDX 1.5 sequence errors for metadata and component children.
+/// An empty array means those elements are in an order the XSD accepts.
+/// This does not validate the rest of the document.
+/// </summary>
+function CycloneDxXmlSequenceErrors(const AContent: string): TArray<string>;
 
 implementation
 
@@ -480,7 +489,189 @@ begin
   if Pos('<dependencies>', AContent) = 0 then
     AddWarning('Missing recommended element: <dependencies>');
 
+  for var LSequenceError in CycloneDxXmlSequenceErrors(AContent) do
+    AddError(LSequenceError);
+
   Result := BuildResult;
+end;
+
+function CycloneDxXmlSequenceErrors(const AContent: string): TArray<string>;
+const
+  cMetadataOrder: array[0..8] of string = (
+    'timestamp', 'lifecycles', 'tools', 'authors', 'component',
+    'manufacture', 'supplier', 'licenses', 'properties');
+  cComponentOrder: array[0..22] of string = (
+    'supplier', 'author', 'publisher', 'group', 'name', 'version',
+    'description', 'scope', 'hashes', 'licenses', 'copyright', 'cpe',
+    'purl', 'swid', 'modified', 'pedigree', 'externalReferences',
+    'properties', 'components', 'evidence', 'releaseNotes', 'modelCard', 'data');
+var
+  LErrors: TList<string>;
+  LPos: Integer;
+  LStack: TArray<string>;
+  LChildren: TArray<TArray<string>>;
+  LName: string;
+  LClosing, LSelfClosing: Boolean;
+  LQuote: Char;
+
+  procedure CheckOrder(const AParent: string; const ANames: TArray<string>;
+    const AExpected: array of string);
+  var
+    I, J, LIndex, LLast: Integer;
+  begin
+    LLast := -1;
+    for I := 0 to High(ANames) do
+    begin
+      LIndex := -1;
+      for J := Low(AExpected) to High(AExpected) do
+        if SameText(AExpected[J], ANames[I]) then
+        begin
+          LIndex := J;
+          Break;
+        end;
+      if LIndex < 0 then
+        Continue;
+      if LIndex < LLast then
+        LErrors.Add('<' + AParent + '>: <' + ANames[I] +
+          '> is out of CycloneDX 1.5 sequence order');
+      LLast := LIndex;
+    end;
+  end;
+
+  procedure Push(const AName: string);
+  var
+    LFrame: Integer;
+  begin
+    LFrame := Length(LStack);
+    SetLength(LStack, LFrame + 1);
+    SetLength(LChildren, LFrame + 1);
+    LStack[LFrame] := AName;
+    SetLength(LChildren[LFrame], 0);
+  end;
+
+  procedure Pop;
+  var
+    LFrame: Integer;
+    LParent: string;
+    LNames: TArray<string>;
+  begin
+    if Length(LStack) = 0 then
+      Exit;
+    LFrame := High(LStack);
+    LParent := LStack[LFrame];
+    LNames := LChildren[LFrame];
+    SetLength(LStack, LFrame);
+    SetLength(LChildren, LFrame);
+    if SameText(LParent, 'metadata') then
+      CheckOrder(LParent, LNames, cMetadataOrder)
+    else if SameText(LParent, 'component') then
+      CheckOrder(LParent, LNames, cComponentOrder);
+  end;
+
+  procedure AddChild(const AName: string);
+  var
+    LCount, LFrame: Integer;
+  begin
+    if Length(LStack) = 0 then
+      Exit;
+    LFrame := High(LStack);
+    LCount := Length(LChildren[LFrame]);
+    SetLength(LChildren[LFrame], LCount + 1);
+    LChildren[LFrame][LCount] := AName;
+  end;
+
+begin
+  LErrors := TList<string>.Create;
+  try
+    LPos := 1;
+    SetLength(LStack, 0);
+    SetLength(LChildren, 0);
+    while LPos <= Length(AContent) do
+    begin
+      if AContent[LPos] <> '<' then
+      begin
+        Inc(LPos);
+        Continue;
+      end;
+
+      if (LPos < Length(AContent)) and (AContent[LPos + 1] = '?') then
+      begin
+        Inc(LPos);
+        while (LPos < Length(AContent)) and
+          not ((AContent[LPos] = '?') and (AContent[LPos + 1] = '>')) do
+          Inc(LPos);
+        Inc(LPos, 2);
+        Continue;
+      end;
+
+      if Copy(AContent, LPos, 4) = '<!--' then
+      begin
+        Inc(LPos, 4);
+        while (LPos <= Length(AContent) - 2) and (Copy(AContent, LPos, 3) <> '-->') do
+          Inc(LPos);
+        Inc(LPos, 3);
+        Continue;
+      end;
+
+      Inc(LPos);
+      LClosing := (LPos <= Length(AContent)) and (AContent[LPos] = '/');
+      if LClosing then
+        Inc(LPos);
+
+      LName := '';
+      while (LPos <= Length(AContent)) and (AContent[LPos] > ' ') and
+        (AContent[LPos] <> '>') and (AContent[LPos] <> '/') do
+      begin
+        LName := LName + AContent[LPos];
+        Inc(LPos);
+      end;
+      if Pos(':', LName) > 0 then
+        LName := Copy(LName, Pos(':', LName) + 1, MaxInt);
+
+      LSelfClosing := False;
+      LQuote := #0;
+      while LPos <= Length(AContent) do
+      begin
+        if LQuote <> #0 then
+        begin
+          if AContent[LPos] = LQuote then
+            LQuote := #0;
+          Inc(LPos);
+          Continue;
+        end;
+        if (AContent[LPos] = '"') or (AContent[LPos] = '''') then
+        begin
+          LQuote := AContent[LPos];
+          Inc(LPos);
+          Continue;
+        end;
+        if AContent[LPos] = '/' then
+          LSelfClosing := True;
+        if AContent[LPos] = '>' then
+        begin
+          Inc(LPos);
+          Break;
+        end;
+        Inc(LPos);
+      end;
+
+      if LName = '' then
+        Continue;
+
+      if LClosing then
+        Pop
+      else
+      begin
+        AddChild(LName);
+        if not LSelfClosing then
+          Push(LName);
+      end;
+    end;
+
+    Result := LErrors.ToArray;
+  finally
+    LErrors.Free;
+  end;
 end;
 
 // ---------------------------------------------------------------------------

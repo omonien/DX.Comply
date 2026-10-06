@@ -147,6 +147,19 @@ type
 
     [Test]
     procedure GetArtefactType_Unknown_ReturnsUnknown;
+
+    /// <summary>
+    /// README include/exclude globs must match paths relative to the scan root,
+    /// including when the absolute path contains an extra "build" directory.
+    /// </summary>
+    [Test]
+    procedure Scan_ReadmeGlobs_MatchRelativeToScanRoot;
+
+    /// <summary>
+    /// A pattern that cannot be compiled must be reported, not ignored.
+    /// </summary>
+    [Test]
+    procedure Scan_InvalidPattern_RecordsWarning;
   end;
 
 implementation
@@ -533,6 +546,101 @@ var
 begin
   LScanner := TFileScanner.Create;
   Assert.AreEqual('unknown', LScanner.GetArtefactType('SomeFile.xyz'));
+end;
+
+procedure TFileScannerTests.Scan_ReadmeGlobs_MatchRelativeToScanRoot;
+var
+  LArtefacts: TArtefactList;
+  LBackslashArtefacts: TArtefactList;
+  LReleasePath: string;
+  LRoot: string;
+  LScanner: TFileScanner;
+
+  procedure WriteFile(const ARelativePath: string);
+  var
+    LFullPath: string;
+  begin
+    LFullPath := TPath.Combine(LRoot, ARelativePath);
+    TDirectory.CreateDirectory(TPath.GetDirectoryName(LFullPath));
+    TFile.WriteAllBytes(LFullPath, TBytes.Create($4D, $5A));
+  end;
+
+begin
+  // The scan root sits under a parent directory named "build". Patterns match
+  // the path relative to that root, so build/** keeps output\helper.exe out.
+  LRoot := TPath.Combine(TPath.GetTempPath, 'dx_glob_' + IntToStr(GetTickCount));
+  LRoot := TPath.Combine(LRoot, 'build', 'client');
+  TDirectory.CreateDirectory(LRoot);
+  try
+    WriteFile('output\helper.exe');
+    WriteFile('build\Win32\Release\app.exe');
+    WriteFile('build\Win32\Debug\debug.exe');
+    WriteFile('build\Win32\Release\unit.dcu');
+    WriteFile('notes.dcu');
+
+    LScanner := TFileScanner.Create;
+    try
+      LArtefacts := LScanner.Scan(LRoot, ['build/**'], ['build/**/Debug/**', '**/*.dcu']);
+      try
+        Assert.IsTrue(ContainsFile(LArtefacts, 'app.exe'),
+          'build/** must include build\Win32\Release\app.exe relative to the scan root');
+        LReleasePath := FindArtefact(LArtefacts, 'app.exe').FilePath;
+        Assert.IsTrue(LReleasePath.StartsWith(LRoot),
+          'The matched file must be the absolute path under the scan root');
+        Assert.IsFalse(ContainsFile(LArtefacts, 'debug.exe'),
+          'build/**/Debug/** must exclude the Debug tree');
+        Assert.IsFalse(ContainsFile(LArtefacts, 'unit.dcu'),
+          '**/*.dcu must exclude a dcu under build');
+        Assert.IsFalse(ContainsFile(LArtefacts, 'notes.dcu'),
+          '**/*.dcu must exclude a dcu at the scan root');
+        Assert.IsFalse(ContainsFile(LArtefacts, 'helper.exe'),
+          'A file outside the relative build directory must not match build/**');
+        Assert.AreEqual(NativeInt(0), NativeInt(Length(LScanner.PatternWarnings)),
+          'The README patterns must compile');
+      finally
+        LArtefacts.Free;
+      end;
+
+      LBackslashArtefacts := LScanner.Scan(LRoot,
+        ['build\**'], ['build\**\Debug\**', '**\*.dcu']);
+      try
+        Assert.IsTrue(ContainsFile(LBackslashArtefacts, 'app.exe'),
+          'Backslash globs must match the same relative path as slash globs');
+        Assert.IsFalse(ContainsFile(LBackslashArtefacts, 'debug.exe'),
+          'Backslash exclude globs must exclude the Debug tree');
+      finally
+        LBackslashArtefacts.Free;
+      end;
+    finally
+      LScanner.Free;
+    end;
+  finally
+    if TDirectory.Exists(TPath.GetDirectoryName(TPath.GetDirectoryName(LRoot))) then
+      TDirectory.Delete(TPath.GetDirectoryName(TPath.GetDirectoryName(LRoot)), True);
+  end;
+end;
+
+procedure TFileScannerTests.Scan_InvalidPattern_RecordsWarning;
+var
+  LArtefacts: TArtefactList;
+  LScanner: TFileScanner;
+begin
+  LScanner := TFileScanner.Create;
+  try
+    LArtefacts := LScanner.Scan(FTempDir, [], ['*' + #10 + '.exe']);
+    try
+      Assert.IsTrue(Length(LScanner.PatternWarnings) > 0,
+        'An invalid exclude pattern must be reported');
+      Assert.IsTrue(Pos('control character', LScanner.PatternWarnings[0]) > 0,
+        'The warning must describe why the pattern was rejected');
+      Assert.IsTrue(ContainsFile(LArtefacts, 'test.exe'),
+        'An invalid exclude pattern must not hide files');
+    finally
+      LArtefacts.Free;
+    end;
+  finally
+    LScanner.Free;
+  end;
 end;
 
 initialization

@@ -37,6 +37,7 @@ requires
 
 contains
   DX.Comply.Engine.Intf in 'DX.Comply.Engine.Intf.pas',
+  DX.Comply.VersionInfo in 'DX.Comply.VersionInfo.pas',
   DX.Comply.BuildEvidence.Intf in 'DX.Comply.BuildEvidence.Intf.pas',
   DX.Comply.BuildOrchestrator in 'DX.Comply.BuildOrchestrator.pas',
   DX.Comply.BuildEvidence.Reader in 'DX.Comply.BuildEvidence.Reader.pas',

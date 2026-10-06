@@ -273,7 +273,8 @@ type
 implementation
 
 uses
-  DX.Comply.Report.Support;
+  DX.Comply.Report.Support,
+  DX.Comply.VersionInfo;
 
 { TSbomConfig }
 
@@ -1244,7 +1245,7 @@ begin
   Result.Supplier := AConfig.Supplier;
   Result.Timestamp := DateToISO8601(Now, False);
   Result.ToolName := 'DX.Comply';
-  Result.ToolVersion := '1.0.0';
+  Result.ToolVersion := GetDxComplyToolVersion;
   LBomProperties := TList<TSbomProperty>.Create;
   LComponentProperties := TList<TSbomProperty>.Create;
   try
@@ -1340,6 +1341,7 @@ var
   LReportedWarnings: TList<string>;
   LReportData: TComplianceReportData;
   LValidation: TValidationResult;
+  LPatternWarning: string;
 begin
   Result := False;
 
@@ -1449,6 +1451,9 @@ begin
     // Scan artefacts
     LArtefacts := FFileScanner.Scan(LProjectInfo.OutputDir,
       FConfig.IncludePatterns, FConfig.ExcludePatterns);
+    if (FFileScanner as TObject) is TFileScanner then
+      for LPatternWarning in TFileScanner(FFileScanner as TObject).PatternWarnings do
+        DoProgress('Warning: ' + LPatternWarning, 30);
     try
       DoProgress(Format('Found %d artefacts', [LArtefacts.Count]), 50);
 

@@ -44,7 +44,6 @@ type
       cSpecVersion = '1.5';
       cNamespace = 'http://cyclonedx.org/schema/bom/1.5';
       cToolName = 'DX.Comply';
-      cToolVersion = '1.0.0';
       cIndent = '  ';
   private
     FLines: TStringList;
@@ -72,7 +71,9 @@ type
 implementation
 
 uses
-  System.RegularExpressions;
+  System.RegularExpressions,
+  DX.Comply.Schema.Validator,
+  DX.Comply.VersionInfo;
 
 { TCycloneDxXmlWriter }
 
@@ -162,21 +163,27 @@ begin
   else
     AddElement('timestamp', DateToISO8601(Now, False));
 
-  AddPropertyElements(AMetadata.Properties);
-
-  // CycloneDX 1.5 XML uses <tools><tool> (not <tools><components>)
+  // CycloneDX 1.5 metadata sequence: timestamp, lifecycles, tools, authors,
+  // component, manufacture, supplier, licenses, properties.
   OpenTag('tools');
   OpenTag('tool');
   AddElement('vendor', 'Olaf Monien');
   AddElement('name', cToolName);
-  AddElement('version', cToolVersion);
+  AddElement('version', ResolveDxComplyToolVersion(AMetadata.ToolVersion));
   CloseTag('tool');
   CloseTag('tools');
 
   // Component (the project being documented). Prefer metadata overrides
-  // (CLI --product / --version) over values from the .dproj — issue #26.
+  // (CLI --product / --version) over values from the .dproj. Issue #26.
+  // Component sequence places supplier before name and version.
   OpenTag('component', 'type="application" bom-ref="' +
     EscapeXml(AProjectInfo.ProjectName) + '"');
+  if AMetadata.Supplier <> '' then
+  begin
+    OpenTag('supplier');
+    AddElement('name', AMetadata.Supplier);
+    CloseTag('supplier');
+  end;
   if AMetadata.ProductName <> '' then
     AddElement('name', AMetadata.ProductName)
   else
@@ -185,14 +192,10 @@ begin
     AddElement('version', AMetadata.ProductVersion)
   else if AProjectInfo.Version <> '' then
     AddElement('version', AProjectInfo.Version);
-  if AMetadata.Supplier <> '' then
-  begin
-    OpenTag('supplier');
-    AddElement('name', AMetadata.Supplier);
-    CloseTag('supplier');
-  end;
   AddPropertyElements(AMetadata.ComponentProperties);
   CloseTag('component');
+
+  AddPropertyElements(AMetadata.Properties);
 
   CloseTag('metadata');
 end;
@@ -221,8 +224,7 @@ begin
   if AArtefact.Hash <> '' then
     AddElement('version', Copy(AArtefact.Hash, 1, 12));
 
-  AddElement('purl', 'file:' + AArtefact.RelativePath);
-
+  // Component sequence: name, version, then hashes, then purl, then properties.
   if AArtefact.Hash <> '' then
   begin
     OpenTag('hashes');
@@ -234,6 +236,8 @@ begin
       '<hash alg="SHA-256">' + LowerCase(AArtefact.Hash) + '</hash>';
     CloseTag('hashes');
   end;
+
+  AddElement('purl', 'file:' + AArtefact.RelativePath);
 
   // Evidence and confidence must be written for source-scanned DLLs, which
   // have no file on disk (size -1) and an empty origin. Gating the whole
@@ -405,6 +409,11 @@ begin
 
   // Check for metadata section
   if Pos('<metadata', AContent) = 0 then
+    Exit;
+
+  // Presence of the expected tags is not enough: metadata.properties before
+  // tools, or component.purl before hashes, is invalid against bom-1.5.xsd.
+  if Length(CycloneDxXmlSequenceErrors(AContent)) > 0 then
     Exit;
 
   Result := True;

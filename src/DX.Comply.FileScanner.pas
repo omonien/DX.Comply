@@ -46,13 +46,19 @@ type
     FHashService: IHashService;
     FIncludePatterns: TArray<string>;
     FExcludePatterns: TArray<string>;
-    /// <summary>Cache of compiled regexes keyed by the regex string — avoids recompilation.</summary>
+    /// <summary>Cache of compiled regexes keyed by the regex string. Avoids recompilation.</summary>
     FRegexCache: TDictionary<string, TRegEx>;
+    /// <summary>Patterns that could not be compiled during the last Scan.</summary>
+    FPatternWarnings: TList<string>;
     function MatchesPattern(const APath: string; const APatterns: TArray<string>): Boolean;
     function IsIncluded(const APath: string): Boolean;
     function IsExcluded(const APath: string): Boolean;
     function GlobToRegex(const AGlob: string): string;
     function GetCachedRegex(const ARegexPattern: string): TRegEx;
+    function NormalizeMatchPath(const APath: string): string;
+    procedure AddPatternWarning(const APattern, AReason: string);
+    procedure PreparePatterns(const APatterns: TArray<string>);
+    function IsCompilableGlob(const AGlob: string): Boolean;
   public
     /// <summary>
     /// Creates a new TFileScanner instance.
@@ -71,6 +77,11 @@ type
     function Scan(const ADirectory: string;
       const AIncludePatterns, AExcludePatterns: TArray<string>): TArtefactList;
     function GetArtefactType(const AFilePath: string): string;
+    /// <summary>
+    /// Warnings from include/exclude patterns that could not be compiled
+    /// during the most recent Scan. Empty when every pattern was usable.
+    /// </summary>
+    function PatternWarnings: TArray<string>;
   end;
 
 implementation
@@ -82,6 +93,7 @@ begin
   inherited Create;
   FHashService := AHashService;
   FRegexCache := TDictionary<string, TRegEx>.Create;
+  FPatternWarnings := TList<string>.Create;
 end;
 
 constructor TFileScanner.Create;
@@ -93,7 +105,62 @@ destructor TFileScanner.Destroy;
 begin
   FHashService := nil;
   FRegexCache.Free;
+  FPatternWarnings.Free;
   inherited;
+end;
+
+function TFileScanner.PatternWarnings: TArray<string>;
+begin
+  if FPatternWarnings = nil then
+    SetLength(Result, 0)
+  else
+    Result := FPatternWarnings.ToArray;
+end;
+
+function TFileScanner.NormalizeMatchPath(const APath: string): string;
+begin
+  Result := StringReplace(APath, '\', '/', [rfReplaceAll]);
+end;
+
+procedure TFileScanner.AddPatternWarning(const APattern, AReason: string);
+var
+  LMessage: string;
+begin
+  LMessage := 'Invalid include/exclude pattern "' + APattern + '": ' + AReason;
+  if (FPatternWarnings <> nil) and (FPatternWarnings.IndexOf(LMessage) < 0) then
+    FPatternWarnings.Add(LMessage);
+end;
+
+function TFileScanner.IsCompilableGlob(const AGlob: string): Boolean;
+var
+  I: Integer;
+begin
+  Result := True;
+  for I := 1 to Length(AGlob) do
+    if Ord(AGlob[I]) < 32 then
+    begin
+      AddPatternWarning(AGlob, 'pattern contains a control character');
+      Exit(False);
+    end;
+end;
+
+procedure TFileScanner.PreparePatterns(const APatterns: TArray<string>);
+var
+  LPattern: string;
+begin
+  for LPattern in APatterns do
+  begin
+    if Trim(LPattern) = '' then
+      Continue;
+    if not IsCompilableGlob(LPattern) then
+      Continue;
+    try
+      GetCachedRegex(GlobToRegex(LPattern));
+    except
+      on E: Exception do
+        AddPatternWarning(LPattern, E.Message);
+    end;
+  end;
 end;
 
 function TFileScanner.GetCachedRegex(const ARegexPattern: string): TRegEx;
@@ -110,49 +177,78 @@ end;
 
 function TFileScanner.GlobToRegex(const AGlob: string): string;
 var
+  LGlob: string;
   LResult: string;
   I: Integer;
-begin
-  // Convert glob pattern to regex
-  LResult := '^';
-  for I := 1 to Length(AGlob) do
+
+  procedure AppendLiteral(const AChar: Char);
   begin
-    case AGlob[I] of
-      '*': LResult := LResult + '.*';
-      '?': LResult := LResult + '.';
+    case AChar of
       '.', '^', '$', '+', '(', ')', '[', ']', '{', '}', '|', '\':
-        LResult := LResult + '\' + AGlob[I];
+        LResult := LResult + '\' + AChar;
     else
-      LResult := LResult + AGlob[I];
+      LResult := LResult + AChar;
     end;
   end;
-  LResult := LResult + '$';
-  Result := LResult;
+
+begin
+  // Match the path relative to the scan root. '/' and '\' are the same,
+  // '*' stays inside one directory, and '**' crosses directories.
+  LGlob := StringReplace(AGlob, '\', '/', [rfReplaceAll]);
+  LResult := '^';
+  I := 1;
+  while I <= Length(LGlob) do
+  begin
+    if (LGlob[I] = '*') and (I < Length(LGlob)) and (LGlob[I + 1] = '*') then
+    begin
+      Inc(I, 2);
+      if (I <= Length(LGlob)) and (LGlob[I] = '/') then
+      begin
+        Inc(I);
+        LResult := LResult + '(?:.*/)?';
+      end
+      else
+        LResult := LResult + '.*';
+    end
+    else if LGlob[I] = '*' then
+    begin
+      LResult := LResult + '[^/]*';
+      Inc(I);
+    end
+    else if LGlob[I] = '?' then
+    begin
+      LResult := LResult + '[^/]';
+      Inc(I);
+    end
+    else
+    begin
+      AppendLiteral(LGlob[I]);
+      Inc(I);
+    end;
+  end;
+  Result := LResult + '$';
 end;
 
 function TFileScanner.MatchesPattern(const APath: string; const APatterns: TArray<string>): Boolean;
 var
-  LPattern, LNormalizedPattern, LRegex: string;
+  LPattern, LRegex: string;
   I: Integer;
 begin
   Result := False;
   for I := 0 to High(APatterns) do
   begin
     LPattern := APatterns[I];
-    // Handle directory separators
-    LNormalizedPattern := StringReplace(LPattern, '/', '\', [rfReplaceAll]);
-    LRegex := GlobToRegex(LNormalizedPattern);
-    // Make pattern match anywhere in path if it doesn't start with explicit path
-    if (Pos('\', LNormalizedPattern) = 0) and (Pos('/', LPattern) = 0) then
-      LRegex := '.*' + LRegex;
+    if Trim(LPattern) = '' then
+      Continue;
+    if not IsCompilableGlob(LPattern) then
+      Continue;
     try
-      if GetCachedRegex(LRegex).IsMatch(APath) then
-      begin
-        Result := True;
-        Exit;
-      end;
+      LRegex := GlobToRegex(LPattern);
+      if GetCachedRegex(LRegex).IsMatch(NormalizeMatchPath(APath)) then
+        Exit(True);
     except
-      // Invalid pattern — skip silently
+      on E: Exception do
+        AddPatternWarning(LPattern, E.Message);
     end;
   end;
 end;
@@ -178,12 +274,12 @@ begin
     Result := False;
   end
   else
-    Result := MatchesPattern(APath, FIncludePatterns);
+    Result := MatchesPattern(NormalizeMatchPath(APath), FIncludePatterns);
 end;
 
 function TFileScanner.IsExcluded(const APath: string): Boolean;
 begin
-  Result := MatchesPattern(APath, FExcludePatterns);
+  Result := MatchesPattern(NormalizeMatchPath(APath), FExcludePatterns);
 end;
 
 function TFileScanner.Scan(const ADirectory: string;
@@ -198,6 +294,10 @@ begin
 
   FIncludePatterns := AIncludePatterns;
   FExcludePatterns := AExcludePatterns;
+  if FPatternWarnings <> nil then
+    FPatternWarnings.Clear;
+  PreparePatterns(FIncludePatterns);
+  PreparePatterns(FExcludePatterns);
 
   // An empty or syntactically invalid directory path must never crash the
   // scan. TPath.GetFullPath raises EInOutArgumentException ("Invalid characters
@@ -224,18 +324,21 @@ begin
 
   for LFile in LFiles do
   begin
-    // Skip if excluded
-    if IsExcluded(LFile) then
-      Continue;
-
-    // Skip if not included
-    if not IsIncluded(LFile) then
-      Continue;
-
     // Create artefact info
     LArtefact := Default(TArtefactInfo);
     LArtefact.FilePath := LFile;
-    LArtefact.RelativePath := LFile.Remove(0, Length(LBaseDir) + 1);
+    LArtefact.RelativePath := LFile.Substring(Length(LBaseDir));
+    if (LArtefact.RelativePath <> '') and
+       ((LArtefact.RelativePath[1] = '\') or (LArtefact.RelativePath[1] = '/')) then
+      LArtefact.RelativePath := LArtefact.RelativePath.Substring(1);
+
+    // Include/exclude globs are matched against the path relative to the
+    // scan root, so a pattern such as build/** does not depend on the
+    // absolute prefix of the project directory.
+    if IsExcluded(LArtefact.RelativePath) then
+      Continue;
+    if not IsIncluded(LArtefact.RelativePath) then
+      Continue;
     LArtefact.ArtefactType := GetArtefactType(LFile);
 
     try

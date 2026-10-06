@@ -85,13 +85,45 @@ type
     /// </summary>
     [Test]
     procedure CreatePlan_ProjectAtDriveRoot_ScriptPathEmpty;
+
+    /// <summary>
+    /// The command line must use the parameter names DelphiBuildDPROJ.ps1 accepts,
+    /// with every value quoted.
+    /// </summary>
+    [Test]
+    procedure CreatePlan_CommandLine_UsesScriptParameterNames;
+
+    /// <summary>
+    /// Configuration and platform values that are not a single token must be rejected.
+    /// </summary>
+    [Test]
+    procedure CreatePlan_UnsafeConfiguration_Raises;
+
+    /// <summary>
+    /// A platform value with shell metacharacters must be rejected.
+    /// </summary>
+    [Test]
+    procedure CreatePlan_UnsafePlatform_Raises;
+
+    /// <summary>
+    /// A script planted in the project directory must not be the one that runs.
+    /// </summary>
+    [Test]
+    procedure CreatePlan_DoesNotUseScriptFromProjectTree;
+
+    /// <summary>
+    /// ExecutePlan must stop a build that runs past the timeout and still return.
+    /// </summary>
+    [Test]
+    procedure ExecutePlan_TimeoutStopsProcess;
   end;
 
 implementation
 
 uses
   System.IOUtils,
-  System.SysUtils;
+  System.SysUtils,
+  Winapi.Windows;
 
 function TBuildOrchestratorTests.BuildOptions(AMode: TDeepEvidenceBuildMode;
   const ABuildScriptPathOverride: string; ADelphiVersion: Integer): TDeepEvidenceBuildOptions;
@@ -158,10 +190,16 @@ begin
       'The plan must append one MSBuild property to force detailed map generation');
     Assert.AreEqual('DCC_MapFile=3', LPlan.AdditionalMSBuildProperties[0],
       'The build plan must force detailed map generation');
-    Assert.IsTrue(Pos('-DelphiVersion 13', LPlan.CommandLine) > 0,
-      'The requested Delphi version must be forwarded into the build command line');
-    Assert.IsTrue(Pos('-AdditionalMSBuildProperties "DCC_MapFile=3"', LPlan.CommandLine) > 0,
-      'The command line must forward the detailed map property to the build script');
+    Assert.IsTrue(Pos('-ProjectFile "C:\Repo\src\DX.Comply.Engine.dproj"', LPlan.CommandLine) > 0,
+      'The command line must pass -ProjectFile');
+    Assert.IsTrue(Pos('-Config "Release"', LPlan.CommandLine) > 0,
+      'The command line must pass -Config quoted');
+    Assert.IsTrue(Pos('-Platform "Win64"', LPlan.CommandLine) > 0,
+      'The command line must pass -Platform quoted');
+    Assert.IsTrue(Pos('-DelphiVersion "13"', LPlan.CommandLine) > 0,
+      'The requested Delphi version must be forwarded as a quoted argument');
+    Assert.IsTrue(Pos('-ExtraProperty "DCC_MapFile=3"', LPlan.CommandLine) > 0,
+      'The command line must forward the detailed map property as -ExtraProperty');
   finally
     LProjectInfo.Free;
   end;
@@ -296,6 +334,156 @@ begin
         'ScriptPath must be empty when no build script is found');
   finally
     LProjectInfo.Free;
+  end;
+end;
+
+procedure TBuildOrchestratorTests.CreatePlan_CommandLine_UsesScriptParameterNames;
+var
+  LPlan: TDeepEvidenceBuildPlan;
+  LProjectInfo: TProjectInfo;
+begin
+  LProjectInfo := TProjectInfo.Create;
+  try
+    LProjectInfo.ProjectPath := 'C:\Repo\My App\DX.Comply.Engine.dproj';
+    LProjectInfo.ProjectDir := 'C:\Repo\My App';
+    LProjectInfo.Platform := 'Win64';
+    LProjectInfo.Configuration := 'Release';
+    LProjectInfo.MapFilePath := 'C:\Repo\build\Win64\Release\DX.Comply.Engine.map';
+
+    LPlan := FBuildOrchestrator.CreatePlan(LProjectInfo, BuildOptions(debWhenMapMissing, '', 37));
+
+    Assert.IsTrue(Pos('-ProjectFile "C:\Repo\My App\DX.Comply.Engine.dproj"', LPlan.CommandLine) > 0,
+      'A project path that contains spaces must be quoted');
+    Assert.IsTrue(Pos('-Config "Release"', LPlan.CommandLine) > 0,
+      'Configuration must be quoted');
+    Assert.IsTrue(Pos('-Platform "Win64"', LPlan.CommandLine) > 0,
+      'Platform must be quoted');
+    Assert.IsTrue(Pos('-DelphiVersion "37"', LPlan.CommandLine) > 0,
+      'DelphiVersion must be quoted');
+    Assert.AreEqual(0, Pos('-ProjectPath ', LPlan.CommandLine),
+      'The command line must use -ProjectFile');
+    Assert.AreEqual(0, Pos('-Configuration ', LPlan.CommandLine),
+      'The command line must use -Config');
+    Assert.AreEqual(0, Pos('-AdditionalMSBuildProperties ', LPlan.CommandLine),
+      'The command line must use -ExtraProperty');
+  finally
+    LProjectInfo.Free;
+  end;
+end;
+
+procedure TBuildOrchestratorTests.CreatePlan_UnsafeConfiguration_Raises;
+var
+  LProjectInfo: TProjectInfo;
+begin
+  LProjectInfo := TProjectInfo.Create;
+  try
+    LProjectInfo.ProjectPath := 'C:\Repo\src\MyApp.dproj';
+    LProjectInfo.ProjectDir := 'C:\Repo\src';
+    LProjectInfo.Platform := 'Win64';
+    LProjectInfo.Configuration := 'Release; Remove-Item C:\';
+    LProjectInfo.MapFilePath := 'C:\Repo\missing.map';
+
+    Assert.WillRaise(
+      procedure
+      begin
+        FBuildOrchestrator.CreatePlan(LProjectInfo, BuildOptions(debAlways));
+      end,
+      EArgumentException,
+      'A configuration value with more than one token must be rejected');
+  finally
+    LProjectInfo.Free;
+  end;
+end;
+
+procedure TBuildOrchestratorTests.CreatePlan_UnsafePlatform_Raises;
+var
+  LProjectInfo: TProjectInfo;
+begin
+  LProjectInfo := TProjectInfo.Create;
+  try
+    LProjectInfo.ProjectPath := 'C:\Repo\src\MyApp.dproj';
+    LProjectInfo.ProjectDir := 'C:\Repo\src';
+    LProjectInfo.Platform := 'Win64 & whoami';
+    LProjectInfo.Configuration := 'Release';
+    LProjectInfo.MapFilePath := 'C:\Repo\missing.map';
+
+    Assert.WillRaise(
+      procedure
+      begin
+        FBuildOrchestrator.CreatePlan(LProjectInfo, BuildOptions(debAlways));
+      end,
+      EArgumentException,
+      'A platform value with shell metacharacters must be rejected');
+  finally
+    LProjectInfo.Free;
+  end;
+end;
+
+procedure TBuildOrchestratorTests.CreatePlan_DoesNotUseScriptFromProjectTree;
+var
+  LPlan: TDeepEvidenceBuildPlan;
+  LProjectDir: string;
+  LProjectInfo: TProjectInfo;
+  LScriptPath: string;
+begin
+  LProjectDir := TPath.Combine(TPath.GetTempPath, 'dx_proj_script_' + IntToStr(GetTickCount));
+  TDirectory.CreateDirectory(LProjectDir);
+  LScriptPath := TPath.Combine(LProjectDir, 'DelphiBuildDPROJ.ps1');
+  TFile.WriteAllText(LScriptPath, 'Write-Host hijacked');
+  try
+    LProjectInfo := TProjectInfo.Create;
+    try
+      LProjectInfo.ProjectPath := TPath.Combine(LProjectDir, 'MyApp.dproj');
+      LProjectInfo.ProjectDir := LProjectDir;
+      LProjectInfo.Platform := 'Win32';
+      LProjectInfo.Configuration := 'Debug';
+      LProjectInfo.MapFilePath := TPath.Combine(LProjectDir, 'MyApp.map');
+
+      LPlan := FBuildOrchestrator.CreatePlan(LProjectInfo, BuildOptions(debAlways));
+
+      if LPlan.ScriptPath <> '' then
+        Assert.AreNotEqual(TPath.GetFullPath(LScriptPath), TPath.GetFullPath(LPlan.ScriptPath),
+          'The build must not run a script supplied by the project tree');
+      Assert.AreNotEqual('override', LPlan.ScriptSource,
+        'An automatic lookup must not be reported as an override');
+    finally
+      LProjectInfo.Free;
+    end;
+  finally
+    TDirectory.Delete(LProjectDir, True);
+  end;
+end;
+
+procedure TBuildOrchestratorTests.ExecutePlan_TimeoutStopsProcess;
+var
+  LPlan: TDeepEvidenceBuildPlan;
+  LResult: TDeepEvidenceBuildResult;
+  LScriptPath: string;
+  LTempDir: string;
+begin
+  LTempDir := TPath.Combine(TPath.GetTempPath, 'dx_build_timeout_' + IntToStr(GetTickCount));
+  TDirectory.CreateDirectory(LTempDir);
+  LScriptPath := TPath.Combine(LTempDir, 'sleep.ps1');
+  TFile.WriteAllText(LScriptPath, 'Start-Sleep -Seconds 30');
+  try
+    LPlan := Default(TDeepEvidenceBuildPlan);
+    LPlan.Enabled := True;
+    LPlan.ShouldExecute := True;
+    LPlan.ScriptPath := LScriptPath;
+    LPlan.WorkingDirectory := LTempDir;
+    LPlan.CommandLine := 'cmd.exe /c ping -n 30 127.0.0.1 > nul';
+    LPlan.TimeoutMs := 1000;
+    LPlan.ExpectedMapFilePath := '';
+
+    LResult := FBuildOrchestrator.ExecutePlan(LPlan);
+
+    Assert.IsTrue(LResult.Executed, 'The timed-out build must have been started');
+    Assert.IsFalse(LResult.Success, 'A build that exceeds the timeout must fail');
+    Assert.IsTrue(Pos('timed out', LResult.Message) > 0,
+      'The failure message must say that the build timed out');
+  finally
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir, True);
   end;
 end;
 
