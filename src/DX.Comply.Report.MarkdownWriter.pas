@@ -1,6 +1,6 @@
 ﻿/// <summary>
 /// DX.Comply.Report.MarkdownWriter
-/// Generates human-readable compliance reports in Markdown format.
+/// Generates human-readable SBOM reports in Markdown format.
 /// </summary>
 ///
 /// <remarks>
@@ -156,7 +156,7 @@ procedure TMarkdownReportWriter.AddValidation(Lines: TStrings; const AData: TCom
 var
   LEntry: string;
 begin
-  Lines.Add('## Validation');
+  Lines.Add('## Structural check');
   Lines.Add('| Field | Value |');
   Lines.Add('| --- | --- |');
   AddKeyValue(Lines, 'Status', ValidationStatusText(AData));
@@ -249,7 +249,7 @@ begin
     else
       AddKeyValue(Lines, 'Composition Evidence', 'Excluded (binary-only)');
     AddKeyValue(Lines, 'Warnings', IntToStr(LWarningsCount));
-    AddKeyValue(Lines, 'Validation', ValidationStatusText(AData));
+    AddKeyValue(Lines, 'Structural check', ValidationStatusText(AData));
     Lines.Add('');
     AddValidation(Lines, AData);
     AddArtefacts(Lines, AData);

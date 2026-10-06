@@ -73,7 +73,7 @@
     "properties": [
       {
         "name": "net.developer-experts.dx-comply:document.profile",
-        "value": "cra-compliance-assessment"
+        "value": "build-evidence"
       },
       {
         "name": "net.developer-experts.dx-comply:deep-evidence.mode",

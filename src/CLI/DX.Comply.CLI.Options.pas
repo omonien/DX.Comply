@@ -113,10 +113,10 @@ type
     /// <summary>
     /// When True (and --output is not supplied), the default bom.json
     /// filename is decorated with the selected platform and configuration
-    /// (e.g. bom.Win64.Release.json) — issue #25.
+    /// (e.g. bom.Win64.Release.json). See issue #25.
     /// </summary>
     property IncludePlatformInOutput: Boolean read FIncludePlatformInOutput;
-    /// <summary>True when the user passed --report=… to enable companion reports — issue #30.</summary>
+    /// <summary>True when the user passed --report=... to enable companion reports (issue #30).</summary>
     property ReportEnabled: Boolean read FReportEnabled;
     /// <summary>Effective report format when ReportEnabled is True.</summary>
     property ReportFormat: THumanReadableReportFormat read FReportFormat;
@@ -361,7 +361,7 @@ begin
   Writeln('  --no-composition-evidence     Omit source/DCU units from SBOM (binary-only)');
   Writeln('  --include-platform-in-output  Append <Platform>.<Config> to the default');
   Writeln('                                output filename (e.g. bom.Win64.Release.json)');
-  Writeln('                                — ignored when --output is supplied');
+  Writeln('                                Ignored when --output is supplied');
   Writeln('  --report[=<format>]           Generate companion human-readable report');
   Writeln('                                  markdown | html | both (default) | none');
   Writeln('  --ci                          CI mode: use .dxcomply.json config file');
@@ -428,7 +428,7 @@ begin
   Result.MapFileDir                  := FMapDir;
   Result.IncludeCompositionEvidence  := not FNoCompositionEvidence;
 
-  // Enable companion human-readable reports on demand — issue #30.
+  // Enable companion human-readable reports on demand (issue #30).
   // README documented HTML/Markdown as output formats but they live in the
   // optional HumanReadableReport block, not in TSbomFormat. The CLI exposes
   // them via --report so users can turn them on without a config file.

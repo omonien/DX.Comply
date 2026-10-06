@@ -197,7 +197,7 @@ begin
     'GetFormat must return sfCycloneDxJson');
 end;
 
-// ---- Write — file creation --------------------------------------------------
+// ---- Write: file creation --------------------------------------------------
 
 procedure TCycloneDxWriterTests.Write_EmptyArtefacts_CreatesValidFile;
 var
@@ -231,7 +231,7 @@ begin
   end;
 end;
 
-// ---- Write — component contents ---------------------------------------------
+// ---- Write: component contents ---------------------------------------------
 
 procedure TCycloneDxWriterTests.Write_WithArtefact_ComponentInOutput;
 var
@@ -343,7 +343,7 @@ begin
   end;
 end;
 
-// ---- Write — metadata -------------------------------------------------------
+// ---- Write: metadata -------------------------------------------------------
 
 procedure TCycloneDxWriterTests.Write_MetadataContainsTimestamp;
 var
@@ -390,7 +390,7 @@ var
 begin
   SetLength(FMetadata.Properties, 2);
   FMetadata.Properties[0] := TSbomProperty.Create(
-    'net.developer-experts.dx-comply:document.profile', 'cra-compliance-assessment');
+    'net.developer-experts.dx-comply:document.profile', 'build-evidence');
   FMetadata.Properties[1] := TSbomProperty.Create(
     'net.developer-experts.dx-comply:assessment.warning-count', '0');
   SetLength(FMetadata.ComponentProperties, 1);
@@ -413,7 +413,7 @@ begin
       'metadata.component.properties must be present when component properties are provided');
     Assert.AreEqual('net.developer-experts.dx-comply:document.profile',
       (LBomProperties.Items[0] as TJSONObject).GetValue<string>('name'));
-    Assert.AreEqual('cra-compliance-assessment',
+    Assert.AreEqual('build-evidence',
       (LBomProperties.Items[0] as TJSONObject).GetValue<string>('value'));
     Assert.AreEqual('net.developer-experts.dx-comply:assessment.warning-count',
       (LBomProperties.Items[1] as TJSONObject).GetValue<string>('name'));
@@ -424,7 +424,7 @@ begin
   end;
 end;
 
-// ---- Write — dependencies ---------------------------------------------------
+// ---- Write: dependencies ---------------------------------------------------
 
 procedure TCycloneDxWriterTests.Write_DependenciesSection_Exists;
 var
@@ -442,7 +442,7 @@ begin
   end;
 end;
 
-// ---- Write — JSON validity --------------------------------------------------
+// ---- Write: JSON validity --------------------------------------------------
 
 procedure TCycloneDxWriterTests.Write_OutputIsValidJson;
 var
@@ -459,7 +459,7 @@ begin
   end;
 end;
 
-// ---- Write — uniqueness -----------------------------------------------------
+// ---- Write: uniqueness -----------------------------------------------------
 
 procedure TCycloneDxWriterTests.Write_SerialNumber_UniquePerCall;
 var

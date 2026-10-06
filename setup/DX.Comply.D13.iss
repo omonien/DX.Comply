@@ -35,8 +35,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "german"; MessagesFile: "compiler:Languages\German.isl"
 
 [Messages]
-english.BeveledLabel=DX.Comply - CRA Compliance for Delphi
-german.BeveledLabel=DX.Comply - CRA-Compliance für Delphi
+english.BeveledLabel=DX.Comply - SBOM documentation for Delphi
+german.BeveledLabel=DX.Comply - SBOM-Dokumentation für Delphi
 
 [Files]
 ; BPLs and DCPs
@@ -53,8 +53,8 @@ Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\assets\DX.Comply.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Registry]
-; Register IDE BPL in Known Packages (HKCU — no admin required)
-Root: HKCU; Subkey: "{#BDSRegKey}\Known Packages"; ValueType: string; ValueName: "{app}\bpl\DX.Comply.IDE{#DllSuffix}.bpl"; ValueData: "DX.Comply CRA Compliance Documentation"; Flags: uninsdeletevalue
+; Register IDE BPL in Known Packages (HKCU, no admin required)
+Root: HKCU; Subkey: "{#BDSRegKey}\Known Packages"; ValueType: string; ValueName: "{app}\bpl\DX.Comply.IDE{#DllSuffix}.bpl"; ValueData: "DX.Comply SBOM documentation"; Flags: uninsdeletevalue
 ; Add BPL directory to the IDE search path so the Engine BPL is found at runtime
 Root: HKCU; Subkey: "{#BDSRegKey}\Environment Variables"; ValueType: string; ValueName: "DXCOMPLY"; ValueData: "{app}\bpl"; Flags: uninsdeletevalue
 

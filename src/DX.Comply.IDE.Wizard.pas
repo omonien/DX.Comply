@@ -1,6 +1,6 @@
 ﻿/// <summary>
 /// DX.Comply.IDE.Wizard
-/// Delphi IDE wizard that exposes CRA compliance documentation generation
+/// Delphi IDE wizard that exposes SBOM generation
 /// through a dedicated Project menu entry.
 /// </summary>
 ///
@@ -208,7 +208,7 @@ var
   GAboutBoxIndex: Integer = -1;
 
 const
-  cProjectMenuCaption = 'DX.Comply - CRA Compliance';
+  cProjectMenuCaption = 'DX.Comply - SBOM';
 
 { TDxComplyWizard }
 
@@ -259,7 +259,7 @@ begin
     end;
 
     if not Assigned(LProjectMenu) then
-      Exit; // IDE not yet fully initialized — caller may schedule a retry
+      Exit; // IDE not yet fully initialized. The caller may schedule a retry.
 
     // Separator before our entry for visual grouping.
     FProjectMenuSeparator := TMenuItem.Create(nil);
@@ -271,7 +271,7 @@ begin
     AssignProjectMenuBitmap;
 
     LSubMenuItem := TMenuItem.Create(FProjectMenuItem);
-    LSubMenuItem.Caption := 'Generate documentation...';
+    LSubMenuItem.Caption := 'Generate SBOM...';
     LSubMenuItem.OnClick := OnProjectMenuItemClick;
     FProjectMenuItem.Add(LSubMenuItem);
 
@@ -374,7 +374,7 @@ var
   LSuccess: Boolean;
 begin
   TIDELogger.Clear;
-  TIDELogger.Info('DX.Comply: Starting CRA compliance documentation generation...');
+  TIDELogger.Info('DX.Comply: Starting SBOM generation...');
 
   try
     LProject := GetActiveProject;
@@ -716,7 +716,7 @@ begin
           AConfig.Platform, LProjectInfo.MapFilePath,
           LSelectedConfiguration, LDisablePrompt) then
         begin
-          TIDELogger.Warning('DX.Comply: CRA compliance generation was cancelled by the user.');
+          TIDELogger.Warning('DX.Comply: SBOM generation was cancelled by the user.');
           Result := False;
           Exit;
         end;
@@ -792,7 +792,7 @@ begin
   FOptionsPage := nil;
 end;
 
-// IOTANotifier – no-ops required by the interface contract.
+// IOTANotifier: no-ops required by the interface contract.
 procedure TDxComplyWizard.AfterSave;  begin end;
 procedure TDxComplyWizard.BeforeSave; begin end;
 procedure TDxComplyWizard.Destroyed;  begin end;
@@ -820,11 +820,10 @@ end;
 {$R DX.Comply.IDE.Splash.res}
 
 const
-  cSplashTitle = 'DX.Comply - CRA Compliance Documentation';
+  cSplashTitle = 'DX.Comply - SBOM documentation for Delphi';
   cSplashLicenseStatus = 'Open Source - MIT License';
   cAboutDescription =
-    'Generates CycloneDX Software Bills of Materials (SBOMs) directly from ' +
-    'RAD Studio projects for EU Cyber Resilience Act compliance.';
+    'Writes a Software Bill of Materials (SBOM) from a RAD Studio project.';
 
 /// <summary>
 /// Loads the 48x48 splash bitmap from the embedded resource.
@@ -912,7 +911,7 @@ initialization
   try
     GWizardIndex := (BorlandIDEServices as IOTAWizardServices).AddWizard(TDxComplyWizard.Create);
   except
-    // Fail silently — GWizardIndex stays -1 and no wizard is registered.
+    // Fail silently. GWizardIndex stays -1 and no wizard is registered.
     // The user can work around this by restarting the IDE once.
   end;
 

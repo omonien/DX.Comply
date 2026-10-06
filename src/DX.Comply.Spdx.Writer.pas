@@ -12,8 +12,7 @@
 ///
 /// SPDX 2.3 specification: https://spdx.github.io/spdx-spec/v2.3/
 ///
-/// Note: This is a Pro-tier feature but is included in the Community edition
-/// for completeness. Access control is handled at the application level.
+/// SPDX JSON is part of the MIT-licensed tool, the same as the CycloneDX writers.
 /// </remarks>
 ///
 /// <copyright>
@@ -225,7 +224,7 @@ begin
     LRoot.AddPair('spdxVersion', cSpdxVersion);
     LRoot.AddPair('dataLicense', cDataLicense);
     LRoot.AddPair('SPDXID', LDocumentSpdxId);
-    // Prefer metadata override (CLI --product) over project name — issue #26.
+    // Prefer metadata override (CLI --product) over project name (issue #26).
     if AMetadata.ProductName <> '' then
       LRoot.AddPair('name', AMetadata.ProductName)
     else

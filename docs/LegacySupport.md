@@ -1,10 +1,10 @@
-# DX.Comply — Legacy Delphi Support
+# DX.Comply: Legacy Delphi Support
 
 ## Overview
 
-DX.Comply can generate SBOMs for projects built with **any Delphi version** — including Delphi 7, 2007, 2010, XE, and beyond. The IDE plugin requires Delphi 11+, but the CLI tool works with any Delphi version as long as a **detailed MAP file** is available.
+DX.Comply can generate SBOMs for projects built with **any Delphi version**, including Delphi 7, 2007, 2010, XE, and later. The IDE plugin requires Delphi 11+, but the CLI tool works with any Delphi version as long as a **detailed MAP file** is available.
 
-The key insight: the MAP file contains a complete list of every unit linked into the executable. DX.Comply extracts this information and transforms it into a standards-compliant SBOM.
+The MAP file lists the units linked into the executable. DX.Comply turns that list into a CycloneDX or SPDX SBOM, with a hash where it could open the file.
 
 ---
 
@@ -87,7 +87,7 @@ In a CI/CD pipeline, compile the project with detailed MAP output first, then ru
     --no-pause
 ```
 
-The critical part is `/p:DCC_MapFile=3` — this tells MSBuild to produce the detailed MAP file that DX.Comply needs for full unit-level evidence.
+The critical part is `/p:DCC_MapFile=3`. This tells MSBuild to produce the detailed MAP file that DX.Comply needs for unit-level evidence.
 
 ---
 
@@ -127,8 +127,8 @@ Some legacy Delphi 2007 projects use `AnyCPU` instead of `Win32` as the platform
 | Scenario | IDE Plugin | CLI Tool |
 |---|:---:|:---:|
 | Delphi 13 / 12 / 11 | Yes | Yes |
-| Delphi XE – 10.4 | — | Yes |
-| Delphi 2009 / 2010 | — | Yes |
-| Delphi 7 / 2005 / 2006 / 2007 | — | Yes |
-| CI/CD pipeline (no IDE) | — | Yes |
-| Cross-version build server | — | Yes |
+| Delphi XE to 10.4 | No | Yes |
+| Delphi 2009 / 2010 | No | Yes |
+| Delphi 7 / 2005 / 2006 / 2007 | No | Yes |
+| CI/CD pipeline (no IDE) | No | Yes |
+| Cross-version build server | No | Yes |

@@ -95,11 +95,10 @@ const
   cCraOverviewUrl = 'https://digital-strategy.ec.europa.eu/en/policies/cyber-resilience-act';
   cCraRegulationUrl = 'https://eur-lex.europa.eu/eli/reg/2024/2847/oj/eng';
   cAboutBodyText =
-    'The EU Cyber Resilience Act (CRA) requires software vendors to document ' +
-    'what is inside their products. DX.Comply generates that Software Bill of ' +
-    'Materials directly from your RAD Studio project, together with optional ' +
-    'human-readable Markdown and HTML reports. You generate it, archive it, ' +
-    'and keep it ready for CRA documentation and audit review workflows.';
+    'DX.Comply lists the units, packages and DLL names it can see in a Delphi ' +
+    'build, with a hash where it could open the file. The SBOM is a starting ' +
+    'point for the SBOM part of EU CRA technical documentation. It does not ' +
+    'make a product compliant.';
   cHeaderBitmapFileName = 'DX.Comply.Icon.bmp';
   cHeaderPngFileName = 'DX.Comply.Icon.png';
 
