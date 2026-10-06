@@ -25,6 +25,7 @@ uses
   DUnitX.TestFramework,
   DUnitX.Loggers.Console,
   DUnitX.Loggers.XML.NUnit,
+  DX.Comply.Tests.Paths in 'DX.Comply.Tests.Paths.pas',
   DX.Comply.Tests.BuildEvidence.Intf in 'DX.Comply.Tests.BuildEvidence.Intf.pas',
   DX.Comply.Tests.BuildEvidence.Reader in 'DX.Comply.Tests.BuildEvidence.Reader.pas',
   DX.Comply.Tests.BuildOrchestrator in 'DX.Comply.Tests.BuildOrchestrator.pas',
