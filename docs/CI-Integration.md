@@ -113,6 +113,8 @@ store the configuration in `.dxcomply.json` at the repository root.
 {
   "output": "bom.json",
   "format": "cyclonedx-json",
+  "platform": "Win32",
+  "configName": "Release",
   "include": ["build/**"],
   "exclude": [
     "build/**/Debug/**",
@@ -126,15 +128,23 @@ store the configuration in `.dxcomply.json` at the repository root.
 }
 ```
 
-Then invoke in CI mode — the config file drives all settings:
+`configName` selects the build configuration used to read the `.dproj` (Debug, Release, or a custom name). `platform` selects the target. Both match the CLI flags `--config-name` and `--platform`.
+
+Then invoke in CI mode:
 
 ```
 dxcomply --project=src/MyApp.dproj --ci --config=.dxcomply.json --no-pause
 ```
 
-When `--ci` is given and the config file exists, `GenerateFromConfig` is called
-instead of `Generate`, so command-line format/output flags are ignored in favour
-of the file contents.
+When `--ci` is given and the config file exists, DX.Comply loads that file and then applies the options you actually passed on the command line. Precedence is:
+
+1. Built-in defaults.
+2. Values from `.dxcomply.json`.
+3. Command-line options that appear in the invocation. These win.
+
+A default you did not pass does not override the file. `dxcomply --ci --config-name=Debug` keeps Debug even if the file says `"configName": "Release"`. `dxcomply --ci --platform=Win64` keeps the file's `configName` and replaces only the platform. Without `--ci`, the file is not read. `--config` only changes the path used together with `--ci`.
+
+The line printed after a successful run is the output path after that merge, including a `configName` or `platform` taken from the file.
 
 ### Multi-platform builds
 
@@ -176,8 +186,9 @@ includes the `DCC_MapFile=3` MSBuild property:
 msbuild src/MyApp.dproj /p:Config=Release /p:Platform=Win32 /p:DCC_MapFile=3
 ```
 
-If you use `.dxcomply.json`, the `deepEvidence.build` option is ignored by the
-CLI — the MAP file must already exist before `dxcomply` runs.
+If you use `.dxcomply.json`, `deepEvidence.build` is ignored. Set
+`deepEvidence.mode` to `always` or `when-missing` instead. The CLI still does
+not compile the project: the MAP file must already exist before `dxcomply` runs.
 
 ---
 

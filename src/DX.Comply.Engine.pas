@@ -54,6 +54,28 @@ uses
 
 type
   /// <summary>
+  /// Fields of TSbomConfig that a caller set on purpose.
+  /// GenerateFromConfig keeps these when a .dxcomply.json file is also loaded,
+  /// so an explicit CLI option is not replaced by the file (issue #50).
+  /// </summary>
+  TSbomConfigOverride = (
+    scoOutputPath,
+    scoFormat,
+    scoPlatform,
+    scoConfiguration,
+    scoProductName,
+    scoProductVersion,
+    scoSupplier,
+    scoIncludePatterns,
+    scoExcludePatterns,
+    scoMapFileDir,
+    scoIncludeCompositionEvidence,
+    scoReport
+  );
+  /// <summary>Set of TSbomConfig fields that were set explicitly.</summary>
+  TSbomConfigOverrides = set of TSbomConfigOverride;
+
+  /// <summary>
   /// Configuration for SBOM generation.
   /// </summary>
   TSbomConfig = record
@@ -95,8 +117,27 @@ type
     /// Default is True (evidence included).
     /// </summary>
     IncludeCompositionEvidence: Boolean;
+    /// <summary>
+    /// When True, and OutputPath was not set explicitly, append the platform
+    /// and configuration to the output filename (issue #25). Applied after a
+    /// config file is merged so the file's output, platform, and configName
+    /// are the values that get decorated.
+    /// </summary>
+    IncludePlatformInOutput: Boolean;
+    /// <summary>
+    /// Which fields were set explicitly by the caller. Empty means every field
+    /// is still a default and may be replaced by .dxcomply.json.
+    /// </summary>
+    ExplicitOverrides: TSbomConfigOverrides;
     /// <summary>Creates a new TSbomConfig with default values.</summary>
     class function Default: TSbomConfig; static;
+    /// <summary>
+    /// Appends the platform and configuration to a filename.
+    /// Both values are reduced to letters, digits, hyphen and underscore
+    /// before they are interpolated.
+    /// </summary>
+    class function DecorateOutputFileName(const AOutputPath, APlatform,
+      AConfiguration: string): string; static;
   end;
 
   /// <summary>
@@ -122,7 +163,7 @@ type
     FConfig: TSbomConfig;
     FOnProgress: TProgressEvent;
     procedure DoProgress(const AMessage: string; const AProgress: Integer);
-    function LoadConfig(const AConfigPath: string): TSbomConfig;
+    function MergeFileConfig(const ACaller, AFile: TSbomConfig): TSbomConfig;
     function CreateWriter(AFormat: TSbomFormat): ISbomWriter;
     function CreateReportWriter(AFormat: THumanReadableReportFormat): IHumanReadableReportWriter;
     function BuildMetadata(const AConfig: TSbomConfig; const AProjectInfo: TProjectInfo;
@@ -201,7 +242,14 @@ type
       const AOutputPath: string = '';
       AFormat: TSbomFormat = sfCycloneDxJson): Boolean;
     /// <summary>
+    /// Reads a .dxcomply.json file. A missing file returns
+    /// TSbomConfig.Default. Does not modify this generator.
+    /// </summary>
+    function LoadConfig(const AConfigPath: string): TSbomConfig;
+    /// <summary>
     /// Generates an SBOM using a configuration file.
+    /// File values replace built-in defaults. Fields listed in
+    /// Config.ExplicitOverrides keep the caller's value (issue #50).
     /// </summary>
     function GenerateFromConfig(const AProjectPath, AConfigPath: string): Boolean;
     /// <summary>
@@ -247,6 +295,36 @@ begin
   SetLength(Result.IncludePatterns, 0);
   SetLength(Result.ExcludePatterns, 0);
   Result.IncludeCompositionEvidence := True;
+  Result.IncludePlatformInOutput := False;
+  Result.ExplicitOverrides := [];
+  Result.MapFileDir := '';
+end;
+
+class function TSbomConfig.DecorateOutputFileName(const AOutputPath, APlatform,
+  AConfiguration: string): string;
+
+  function SanitizeSegment(const AValue: string): string;
+  var
+    LChar: Char;
+  begin
+    // Same whitelist as TCliOptions.SanitizeForFilename.
+    Result := '';
+    for LChar in AValue do
+      if CharInSet(LChar, ['A'..'Z', 'a'..'z', '0'..'9', '-', '_']) then
+        Result := Result + LChar;
+  end;
+
+var
+  LDir, LName, LExt, LSafePlatform, LSafeConfig: string;
+begin
+  if AOutputPath = '' then
+    Exit('');
+  LDir := ExtractFilePath(AOutputPath);
+  LExt := ExtractFileExt(AOutputPath);
+  LName := ChangeFileExt(ExtractFileName(AOutputPath), '');
+  LSafePlatform := SanitizeSegment(APlatform);
+  LSafeConfig := SanitizeSegment(AConfiguration);
+  Result := LDir + LName + '.' + LSafePlatform + '.' + LSafeConfig + LExt;
 end;
 
 { TDxComplyGenerator }
@@ -924,6 +1002,7 @@ end;
 
 function TDxComplyGenerator.LoadConfig(const AConfigPath: string): TSbomConfig;
 var
+  LRoot: TJSONValue;
   LJson: TJSONObject;
   LContent: TStringList;
   LArray: TJSONArray;
@@ -934,6 +1013,7 @@ var
   LReport: TJSONObject;
   LReportFormatStr: string;
   LWarnings: TJSONObject;
+  LText: string;
   I: Integer;
 begin
   Result := TSbomConfig.Default;
@@ -944,10 +1024,15 @@ begin
   LContent := TStringList.Create;
   try
     LContent.LoadFromFile(AConfigPath, TEncoding.UTF8);
-    LJson := TJSONObject.ParseJSONValue(LContent.Text) as TJSONObject;
+    // Parse into TJSONValue first. Casting with "as TJSONObject" before the
+    // try leaks the value when the root is an array or a string.
+    LRoot := TJSONObject.ParseJSONValue(LContent.Text);
+    if LRoot = nil then
+      Exit;
     try
-      if Assigned(LJson) then
+      if LRoot is TJSONObject then
       begin
+        LJson := TJSONObject(LRoot);
         // Output path
         if LJson.GetValue('output') <> nil then
           Result.OutputPath := LJson.GetValue<string>('output');
@@ -962,6 +1047,22 @@ begin
             Result.Format := sfCycloneDxXml
           else if LFormatStr = 'spdx-json' then
             Result.Format := sfSpdxJson;
+        end;
+
+        // Target platform. Empty values keep the default.
+        if LJson.GetValue('platform') <> nil then
+        begin
+          LText := Trim(LJson.GetValue<string>('platform'));
+          if LText <> '' then
+            Result.Platform := LText;
+        end;
+
+        // Build configuration. CLI flag is --config-name (issue #50).
+        if LJson.GetValue('configName') <> nil then
+        begin
+          LText := Trim(LJson.GetValue<string>('configName'));
+          if LText <> '' then
+            Result.Configuration := LText;
         end;
 
         // Include patterns
@@ -983,9 +1084,9 @@ begin
         end;
 
         // Product info
-        if LJson.GetValue('product') <> nil then
+        if LJson.GetValue('product') is TJSONObject then
         begin
-          LProduct := LJson.GetValue('product') as TJSONObject;
+          LProduct := TJSONObject(LJson.GetValue('product'));
           if LProduct.GetValue('name') <> nil then
             Result.ProductName := LProduct.GetValue<string>('name');
           if LProduct.GetValue('version') <> nil then
@@ -1008,13 +1109,10 @@ begin
             else
               Result.DeepEvidenceMode := debWhenMapMissing;
           end;
-          if LDeepEvidence.GetValue('build') <> nil then
-          begin
-            if LDeepEvidence.GetValue<Boolean>('build') then
-              Result.DeepEvidenceMode := debWhenMapMissing
-            else
-              Result.DeepEvidenceMode := debWhenMapMissing;
-          end;
+          // deepEvidence.build used to be read here, but both branches stored
+          // debWhenMapMissing, so the flag could not turn the build off and
+          // it overwrote an explicit mode. The CLI does not compile the
+          // project. Use deepEvidence.mode (always | when-missing) instead.
           if LDeepEvidence.GetValue('delphiVersion') <> nil then
             Result.DeepEvidenceDelphiVersion := LDeepEvidence.GetValue<Integer>('delphiVersion');
           if LDeepEvidence.GetValue('buildScriptPath') <> nil then
@@ -1069,7 +1167,7 @@ begin
             LJson.GetValue<Boolean>('includeCompositionEvidence');
       end;
     finally
-      LJson.Free;
+      LRoot.Free;
     end;
   finally
     LContent.Free;
@@ -1443,9 +1541,58 @@ begin
   end;
 end;
 
+function TDxComplyGenerator.MergeFileConfig(const ACaller, AFile: TSbomConfig): TSbomConfig;
+begin
+  // Precedence (issue #50):
+  // 1. Built-in defaults, already applied by LoadConfig / TSbomConfig.Default.
+  // 2. Keys present in the config file (AFile).
+  // 3. Caller fields listed in ExplicitOverrides. An explicit CLI option wins.
+  // Fields the caller left at the default are not treated as overrides.
+  Result := AFile;
+
+  if scoOutputPath in ACaller.ExplicitOverrides then
+    Result.OutputPath := ACaller.OutputPath;
+  if scoFormat in ACaller.ExplicitOverrides then
+    Result.Format := ACaller.Format;
+  if scoPlatform in ACaller.ExplicitOverrides then
+    Result.Platform := ACaller.Platform;
+  if scoConfiguration in ACaller.ExplicitOverrides then
+    Result.Configuration := ACaller.Configuration;
+  if scoProductName in ACaller.ExplicitOverrides then
+    Result.ProductName := ACaller.ProductName;
+  if scoProductVersion in ACaller.ExplicitOverrides then
+    Result.ProductVersion := ACaller.ProductVersion;
+  if scoSupplier in ACaller.ExplicitOverrides then
+    Result.Supplier := ACaller.Supplier;
+  if scoIncludePatterns in ACaller.ExplicitOverrides then
+    Result.IncludePatterns := ACaller.IncludePatterns;
+  if scoExcludePatterns in ACaller.ExplicitOverrides then
+    Result.ExcludePatterns := ACaller.ExcludePatterns;
+  if scoMapFileDir in ACaller.ExplicitOverrides then
+    Result.MapFileDir := ACaller.MapFileDir;
+  if scoIncludeCompositionEvidence in ACaller.ExplicitOverrides then
+    Result.IncludeCompositionEvidence := ACaller.IncludeCompositionEvidence;
+  if scoReport in ACaller.ExplicitOverrides then
+  begin
+    // Only the switch and the format come from the CLI. The file keeps its
+    // report output path and include flags, which the CLI cannot set.
+    Result.HumanReadableReport.Enabled := ACaller.HumanReadableReport.Enabled;
+    Result.HumanReadableReport.Format := ACaller.HumanReadableReport.Format;
+  end;
+
+  Result.IncludePlatformInOutput := ACaller.IncludePlatformInOutput;
+  Result.ExplicitOverrides := ACaller.ExplicitOverrides;
+
+  if Result.IncludePlatformInOutput and
+     not (scoOutputPath in ACaller.ExplicitOverrides) and
+     (Result.OutputPath <> '') then
+    Result.OutputPath := TSbomConfig.DecorateOutputFileName(
+      Result.OutputPath, Result.Platform, Result.Configuration);
+end;
+
 function TDxComplyGenerator.GenerateFromConfig(const AProjectPath, AConfigPath: string): Boolean;
 begin
-  FConfig := LoadConfig(AConfigPath);
+  FConfig := MergeFileConfig(FConfig, LoadConfig(AConfigPath));
   Result := Generate(AProjectPath);
 end;
 
