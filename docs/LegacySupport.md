@@ -43,6 +43,8 @@ Build the project as usual. The compiler produces a `.map` file alongside the ex
 dxcomply --project=MyApp.dproj --output=bom.json --no-pause
 ```
 
+The SBOM lists the program or package that was built, plus other binaries in that output directory. Installers and helper tools in subfolders are not included. If the `.dproj` has no output directory, only binaries in the project directory itself are listed. Use `--scan-dir` for binaries you stage on purpose. `--scan-tree` restores the old recursive listing and is deprecated.
+
 `--project` does not accept a `.dpr` or a `.dof`. Delphi 7, 2005, and 2006 projects are often only those files. If a `.dproj` exists for the same project, pass that path. When the MAP file is not in the output directory taken from the `.dproj`, pass `--map-dir`.
 
 ---

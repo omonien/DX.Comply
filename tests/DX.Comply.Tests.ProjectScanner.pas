@@ -169,6 +169,40 @@ type
     /// </summary>
     [Test]
     procedure Scan_DprojWithEnvVarInOutputDir_ExpandsEnvVar;
+
+    /// <summary>
+    /// The engine package output is the BPL name plus DllSuffix, in the
+    /// active config/platform output directory.
+    /// </summary>
+    [Test]
+    procedure Scan_EngineDproj_ResolvesPackageOutputFile;
+
+    /// <summary>A library output name includes DllSuffix before .dll.</summary>
+    [Test]
+    procedure Scan_LibraryDproj_AppendsDllSuffix;
+
+    /// <summary>An application output name does not include DllSuffix.</summary>
+    [Test]
+    procedure Scan_ApplicationDproj_IgnoresDllSuffix;
+
+    /// <summary>
+    /// A package whose BPL folder differs from DCC_ExeOutput is named in the
+    /// BPL folder.
+    /// </summary>
+    [Test]
+    procedure Scan_PackageDproj_UsesBplOutputDir;
+
+    /// <summary>
+    /// When AppType is absent, a source file that starts with library is a dll.
+    /// </summary>
+    [Test]
+    procedure Scan_LibrarySource_DetectedWithoutAppType;
+
+    /// <summary>
+    /// An unresolved $(Auto) suffix must not invent an output file name.
+    /// </summary>
+    [Test]
+    procedure Scan_UnresolvedDllSuffix_LeavesOutputFileEmpty;
   end;
 
 implementation
@@ -738,6 +772,242 @@ begin
     end;
   finally
     Winapi.Windows.SetEnvironmentVariable(PChar(cEnvVarName), nil);
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_EngineDproj_ResolvesPackageOutputFile;
+var
+  LProjectInfo: TProjectInfo;
+begin
+  LProjectInfo := FScanner.Scan(FEngineDprojPath, 'Win32', 'Debug');
+  try
+    Assert.IsTrue(LProjectInfo.OutputFilePath.EndsWith('DX.Comply.Engine370.bpl'),
+      'Package output must be ProjectName + DllSuffix + .bpl, but was: ' +
+      LProjectInfo.OutputFilePath);
+    Assert.IsTrue(Pos('Win32', LProjectInfo.ArtefactOutputDir) > 0,
+      'ArtefactOutputDir must contain the active platform');
+    Assert.IsTrue(Pos('Debug', LProjectInfo.ArtefactOutputDir) > 0,
+      'ArtefactOutputDir must contain the active configuration');
+  finally
+    LProjectInfo.Free;
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_LibraryDproj_AppendsDllSuffix;
+var
+  LProjectInfo: TProjectInfo;
+  LScanner: IProjectScanner;
+  LTempDir: string;
+  LTempDproj: string;
+const
+  cDproj =
+    '<?xml version="1.0" encoding="utf-8"?>' + sLineBreak +
+    '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">' + sLineBreak +
+    '  <PropertyGroup>' + sLineBreak +
+    '    <MainSource>Demo.dpr</MainSource>' + sLineBreak +
+    '    <AppType>Library</AppType>' + sLineBreak +
+    '    <DllSuffix>_sfx</DllSuffix>' + sLineBreak +
+    '    <DCC_ExeOutput>.\out\$(Platform)\$(Config)</DCC_ExeOutput>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '</Project>';
+begin
+  LTempDir := TPath.Combine(TPath.GetTempPath, 'DXComplyTest_DllSuffix');
+  ForceDirectories(LTempDir);
+  LTempDproj := TPath.Combine(LTempDir, 'Demo.dproj');
+  try
+    TFile.WriteAllText(LTempDproj, cDproj, TEncoding.UTF8);
+    LScanner := TProjectScanner.Create;
+    LProjectInfo := LScanner.Scan(LTempDproj, 'Win64', 'Debug');
+    try
+      Assert.IsTrue(LProjectInfo.OutputFilePath.EndsWith('Demo_sfx.dll'),
+        'Library output must append DllSuffix, but was: ' + LProjectInfo.OutputFilePath);
+      Assert.IsTrue(Pos('Win64', LProjectInfo.OutputFilePath) > 0,
+        'Library output path must contain the active platform');
+      Assert.IsTrue(Pos('Debug', LProjectInfo.OutputFilePath) > 0,
+        'Library output path must contain the active configuration');
+    finally
+      LProjectInfo.Free;
+    end;
+  finally
+    if TFile.Exists(LTempDproj) then
+      TFile.Delete(LTempDproj);
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir);
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_ApplicationDproj_IgnoresDllSuffix;
+var
+  LProjectInfo: TProjectInfo;
+  LScanner: IProjectScanner;
+  LTempDir: string;
+  LTempDproj: string;
+  LWarning: string;
+const
+  cDproj =
+    '<?xml version="1.0" encoding="utf-8"?>' + sLineBreak +
+    '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">' + sLineBreak +
+    '  <PropertyGroup>' + sLineBreak +
+    '    <MainSource>Demo.dpr</MainSource>' + sLineBreak +
+    '    <AppType>Application</AppType>' + sLineBreak +
+    '    <DllSuffix>$(Auto)</DllSuffix>' + sLineBreak +
+    '    <DCC_ExeOutput>.\bin</DCC_ExeOutput>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '</Project>';
+begin
+  LTempDir := TPath.Combine(TPath.GetTempPath, 'DXComplyTest_ExeName');
+  ForceDirectories(LTempDir);
+  LTempDproj := TPath.Combine(LTempDir, 'Demo.dproj');
+  try
+    TFile.WriteAllText(LTempDproj, cDproj, TEncoding.UTF8);
+    LScanner := TProjectScanner.Create;
+    LProjectInfo := LScanner.Scan(LTempDproj, 'Win32', 'Release');
+    try
+      Assert.IsTrue(LProjectInfo.OutputFilePath.EndsWith('Demo.exe'),
+        'Application output must not append DllSuffix, but was: ' +
+        LProjectInfo.OutputFilePath);
+      Assert.IsTrue(Pos('$(Auto)', LProjectInfo.OutputFilePath) = 0,
+        'An unresolved suffix must not be written into an exe name');
+      for LWarning in LProjectInfo.Warnings do
+        Assert.IsTrue(Pos('DllSuffix', LWarning) = 0,
+          'An application must not warn about DllSuffix: ' + LWarning);
+    finally
+      LProjectInfo.Free;
+    end;
+  finally
+    if TFile.Exists(LTempDproj) then
+      TFile.Delete(LTempDproj);
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir);
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_PackageDproj_UsesBplOutputDir;
+var
+  LProjectInfo: TProjectInfo;
+  LScanner: IProjectScanner;
+  LTempDir: string;
+  LTempDproj: string;
+const
+  cDproj =
+    '<?xml version="1.0" encoding="utf-8"?>' + sLineBreak +
+    '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">' + sLineBreak +
+    '  <PropertyGroup>' + sLineBreak +
+    '    <MainSource>Demo.dpk</MainSource>' + sLineBreak +
+    '    <AppType>Package</AppType>' + sLineBreak +
+    '    <DllSuffix>290</DllSuffix>' + sLineBreak +
+    '    <DCC_ExeOutput>.\bin</DCC_ExeOutput>' + sLineBreak +
+    '    <DCC_BplOutput>.\bpl\$(Platform)\$(Config)</DCC_BplOutput>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '</Project>';
+begin
+  LTempDir := TPath.Combine(TPath.GetTempPath, 'DXComplyTest_BplDir');
+  ForceDirectories(LTempDir);
+  LTempDproj := TPath.Combine(LTempDir, 'Demo.dproj');
+  try
+    TFile.WriteAllText(LTempDproj, cDproj, TEncoding.UTF8);
+    LScanner := TProjectScanner.Create;
+    LProjectInfo := LScanner.Scan(LTempDproj, 'Win32', 'Release');
+    try
+      Assert.IsTrue(Pos('\bpl\', LowerCase(LProjectInfo.OutputFilePath)) > 0,
+        'Package output must live under the BPL directory, but was: ' +
+        LProjectInfo.OutputFilePath);
+      Assert.IsTrue(LProjectInfo.OutputFilePath.EndsWith('Demo290.bpl'),
+        'Package output must include DllSuffix');
+      Assert.IsTrue(LowerCase(LProjectInfo.OutputDir).EndsWith('\bin'),
+        'OutputDir still prefers DCC_ExeOutput, but was: ' + LProjectInfo.OutputDir);
+      Assert.IsTrue(Pos('\bpl\', LowerCase(LProjectInfo.ArtefactOutputDir)) > 0,
+        'ArtefactOutputDir must be the BPL directory');
+    finally
+      LProjectInfo.Free;
+    end;
+  finally
+    if TFile.Exists(LTempDproj) then
+      TFile.Delete(LTempDproj);
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir);
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_LibrarySource_DetectedWithoutAppType;
+var
+  LProjectInfo: TProjectInfo;
+  LScanner: IProjectScanner;
+  LTempDir: string;
+  LTempDproj: string;
+begin
+  LTempDir := TPath.Combine(TPath.GetTempPath, 'DXComplyTest_LibSource');
+  ForceDirectories(LTempDir);
+  LTempDproj := TPath.Combine(LTempDir, 'Demo.dproj');
+  try
+    TFile.WriteAllText(TPath.Combine(LTempDir, 'Demo.dpr'),
+      'library Demo;' + sLineBreak + 'begin' + sLineBreak + 'end.' + sLineBreak,
+      TEncoding.UTF8);
+    TFile.WriteAllText(LTempDproj,
+      '<?xml version="1.0" encoding="utf-8"?>' + sLineBreak +
+      '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">' + sLineBreak +
+      '  <PropertyGroup>' + sLineBreak +
+      '    <MainSource>Demo.dpr</MainSource>' + sLineBreak +
+      '    <DCC_ExeOutput>.\bin</DCC_ExeOutput>' + sLineBreak +
+      '  </PropertyGroup>' + sLineBreak +
+      '</Project>', TEncoding.UTF8);
+    LScanner := TProjectScanner.Create;
+    LProjectInfo := LScanner.Scan(LTempDproj, 'Win32', 'Release');
+    try
+      Assert.IsTrue(LProjectInfo.OutputFilePath.EndsWith('Demo.dll'),
+        'A library source file must produce a .dll when AppType is absent, but was: ' +
+        LProjectInfo.OutputFilePath);
+    finally
+      LProjectInfo.Free;
+    end;
+  finally
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_UnresolvedDllSuffix_LeavesOutputFileEmpty;
+var
+  LProjectInfo: TProjectInfo;
+  LScanner: IProjectScanner;
+  LTempDir: string;
+  LTempDproj: string;
+  LWarning: string;
+  LSawSuffixWarning: Boolean;
+begin
+  LTempDir := TPath.Combine(TPath.GetTempPath, 'DXComplyTest_AutoSuffix');
+  ForceDirectories(LTempDir);
+  LTempDproj := TPath.Combine(LTempDir, 'Demo.dproj');
+  try
+    TFile.WriteAllText(LTempDproj,
+      '<?xml version="1.0" encoding="utf-8"?>' + sLineBreak +
+      '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">' + sLineBreak +
+      '  <PropertyGroup>' + sLineBreak +
+      '    <MainSource>Demo.dpk</MainSource>' + sLineBreak +
+      '    <AppType>Package</AppType>' + sLineBreak +
+      '    <DllSuffix>$(Auto)</DllSuffix>' + sLineBreak +
+      '    <DCC_BplOutput>.\bpl</DCC_BplOutput>' + sLineBreak +
+      '  </PropertyGroup>' + sLineBreak +
+      '</Project>', TEncoding.UTF8);
+    LScanner := TProjectScanner.Create;
+    LProjectInfo := LScanner.Scan(LTempDproj, 'Win32', 'Release');
+    try
+      Assert.AreEqual('', LProjectInfo.OutputFilePath,
+        'An unresolved $(Auto) suffix must not invent an output file name');
+      Assert.IsTrue(Pos('bpl', LowerCase(LProjectInfo.ArtefactOutputDir)) > 0,
+        'The BPL directory must still be the directory that is scanned');
+      LSawSuffixWarning := False;
+      for LWarning in LProjectInfo.Warnings do
+        if Pos('DllSuffix', LWarning) > 0 then
+          LSawSuffixWarning := True;
+      Assert.IsTrue(LSawSuffixWarning,
+        'An unresolved DllSuffix must be reported');
+    finally
+      LProjectInfo.Free;
+    end;
+  finally
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir, True);
   end;
 end;
 

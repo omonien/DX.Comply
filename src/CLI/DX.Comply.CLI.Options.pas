@@ -56,12 +56,18 @@ type
     FReportEnabled: Boolean;
     FReportFormat: THumanReadableReportFormat;
     FExplicitOverrides: TSbomConfigOverrides;
+    FScanDirs: TArray<string>;
+    FScanTree: Boolean;
     FParseError: string;
     /// <summary>
     /// Parses the --report value (markdown | html | both | none) and updates
     /// the report enable flag / format. Returns True on success.
     /// </summary>
     function TryParseReport(const AValue: string): Boolean;
+    /// <summary>
+    /// Accepts true/false, yes/no, and 1/0. Returns False for anything else.
+    /// </summary>
+    function TryParseBool(const AValue: string; out AFlag: Boolean): Boolean;
     /// <summary>
     /// Converts a format string token to the corresponding TSbomFormat enum
     /// value. Returns sfCycloneDxJson for unrecognised tokens.
@@ -126,6 +132,10 @@ type
     property ReportEnabled: Boolean read FReportEnabled;
     /// <summary>Effective report format when ReportEnabled is True.</summary>
     property ReportFormat: THumanReadableReportFormat read FReportFormat;
+    /// <summary>Extra binary directories from repeatable --scan-dir.</summary>
+    property ScanDirs: TArray<string> read FScanDirs;
+    /// <summary>True when --scan-tree was requested. Deprecated.</summary>
+    property ScanTree: Boolean read FScanTree;
     property ParseError: string read FParseError;
   end;
 
@@ -161,6 +171,24 @@ begin
   else
     // 'cyclonedx-json' and anything unrecognised fall back to the default
     Result := sfCycloneDxJson;
+end;
+
+function TCliOptions.TryParseBool(const AValue: string; out AFlag: Boolean): Boolean;
+var
+  LValue: string;
+begin
+  LValue := LowerCase(Trim(AValue));
+  if (LValue = 'true') or (LValue = 'yes') or (LValue = '1') then
+  begin
+    AFlag := True;
+    Exit(True);
+  end;
+  if (LValue = 'false') or (LValue = 'no') or (LValue = '0') then
+  begin
+    AFlag := False;
+    Exit(True);
+  end;
+  Result := False;
 end;
 
 function TCliOptions.TryParseReport(const AValue: string): Boolean;
@@ -266,6 +294,14 @@ begin
       Continue;
     end;
 
+    // Deprecated recursive walk of the output directory. Kept for one release.
+    if LArg = '--scan-tree' then
+    begin
+      FScanTree := True;
+      Include(FExplicitOverrides, scoScanTree);
+      Continue;
+    end;
+
     // Bare --report (no value) enables both markdown and html.
     if LArg = '--report' then
     begin
@@ -353,6 +389,21 @@ begin
         end;
         Include(FExplicitOverrides, scoReport);
       end
+      else if LKey = 'scan-dir' then
+      begin
+        AppendPattern(FScanDirs, LValue);
+        Include(FExplicitOverrides, scoScanDirs);
+      end
+      else if LKey = 'scan-tree' then
+      begin
+        if not TryParseBool(LValue, FScanTree) then
+        begin
+          FParseError := 'Invalid value for --scan-tree: ' + LValue +
+            ' (expected true or false)';
+          Exit(False);
+        end;
+        Include(FExplicitOverrides, scoScanTree);
+      end
       else
       begin
         FParseError := 'Unknown option: --' + LKey;
@@ -410,6 +461,12 @@ begin
   Writeln('  --supplier=<name>             Supplier/company name');
   Writeln('  --include=<pattern>           File include pattern (repeatable)');
   Writeln('  --exclude=<pattern>           File exclude pattern (repeatable)');
+  Writeln('  --scan-dir=<path>             Also scan this directory for binaries');
+  Writeln('                                (repeatable). A plain path is not recursive.');
+  Writeln('                                A path that contains ** walks subdirectories.');
+  Writeln('  --scan-tree                   Deprecated: recursively scan the output');
+  Writeln('                                directory, as older versions did.');
+  Writeln('                                Kept for one release. Prefer --scan-dir.');
   Writeln('  --map-dir=<path>              Directory containing the pre-built MAP file');
   Writeln('  --no-composition-evidence     Omit source/DCU units from SBOM (binary-only)');
   Writeln('  --include-platform-in-output  Append <Platform>.<Config> to the default');
@@ -466,6 +523,8 @@ begin
   Result.Supplier        := FSupplier;
   Result.IncludePatterns             := FIncludePatterns;
   Result.ExcludePatterns             := FExcludePatterns;
+  Result.ScanDirs                    := FScanDirs;
+  Result.ScanTree                    := FScanTree;
   Result.MapFileDir                  := FMapDir;
   Result.IncludeCompositionEvidence  := not FNoCompositionEvidence;
   Result.ExplicitOverrides           := FExplicitOverrides;

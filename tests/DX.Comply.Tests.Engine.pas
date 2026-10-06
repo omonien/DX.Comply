@@ -53,6 +53,11 @@ type
     /// Progress callback. Captures messages and percentage values for assertion.
     /// </summary>
     procedure OnProgress(const AMessage: string; const AProgress: Integer);
+    function CreateScopeProject(const AFolder: string; AWithOutputDir: Boolean): string;
+    function ScopeConfig: TSbomConfig;
+    function CountComponents(const AJson: TJSONObject; const AName: string): NativeInt;
+    function ComponentHasHash(const AJson: TJSONObject; const AName: string): Boolean;
+    function GenerateScope(const AProjectPath: string; const AConfig: TSbomConfig): TJSONObject;
   public
     [Setup]
     procedure Setup;
@@ -271,6 +276,67 @@ type
     /// </summary>
     [Test]
     procedure GenerateFromConfig_IncludePlatformInOutput_DecoratesMergedOutput;
+
+    /// <summary>The recursive output walk is off unless the caller opts in.</summary>
+    [Test]
+    procedure Config_Default_ScanTreeIsFalse;
+
+    // ---- Artefact scope (issue #38) ------------------------------------------
+
+    /// <summary>
+    /// Default generation lists the named output and binaries beside it,
+    /// and leaves setup\ and nested build folders out.
+    /// </summary>
+    [Test]
+    procedure Generate_OutputScope_ListsNamedOutputAndSiblingsOnly;
+
+    /// <summary>
+    /// The named output stays in the SBOM when the file is missing, without a hash.
+    /// </summary>
+    [Test]
+    procedure Generate_OutputScope_MissingNamedFile_HasNoHash;
+
+    /// <summary>
+    /// Runtime packages and external DLLs are still components when the scan
+    /// did not find those files.
+    /// </summary>
+    [Test]
+    procedure Generate_OutputScope_KeepsDeclaredDependencies;
+
+    /// <summary>Exclude globs still filter scanned binaries.</summary>
+    [Test]
+    procedure Generate_OutputScope_ExcludeFiltersScannedFiles;
+
+    /// <summary>
+    /// --scan-dir / scanDirs is not recursive unless the value contains **.
+    /// </summary>
+    [Test]
+    procedure Generate_OutputScope_ScanDirRespectsRecursion;
+
+    /// <summary>
+    /// scanTree walks the output directory recursively and is reported as deprecated.
+    /// </summary>
+    [Test]
+    procedure Generate_OutputScope_ScanTreeWalksOutputDirectory;
+
+    /// <summary>
+    /// With no DCC_ExeOutput, the project directory is scanned non-recursively.
+    /// </summary>
+    [Test]
+    procedure Generate_OutputScope_ProjectDirFallbackSkipsSubfolders;
+
+    /// <summary>A package is scanned from the BPL directory, not DCC_ExeOutput.</summary>
+    [Test]
+    procedure Generate_OutputScope_PackageUsesBplDirectory;
+
+    /// <summary>scanDirs in .dxcomply.json adds that directory.</summary>
+    [Test]
+    procedure GenerateFromConfig_ScanDirs_AddsStagedBinaries;
+
+    /// <summary>scanTree in .dxcomply.json restores the recursive walk.</summary>
+    [Test]
+    procedure GenerateFromConfig_ScanTree_RestoresRecursiveWalk;
+
   end;
 
 implementation
@@ -1539,6 +1605,467 @@ begin
     'an unresolved external identifier must not be reported as a DLL name');
 end;
 
+procedure TEngineTests.Config_Default_ScanTreeIsFalse;
+var
+  LConfig: TSbomConfig;
+begin
+  LConfig := TSbomConfig.Default;
+  Assert.IsFalse(LConfig.ScanTree,
+    'TSbomConfig.Default.ScanTree must be False');
+  Assert.AreEqual(NativeInt(0), NativeInt(Length(LConfig.ScanDirs)),
+    'TSbomConfig.Default.ScanDirs must be empty');
+end;
+
+function TEngineTests.CreateScopeProject(const AFolder: string;
+  AWithOutputDir: Boolean): string;
+var
+  LRoot: string;
+  LXml: string;
+begin
+  LRoot := TPath.Combine(FTempDir, AFolder);
+  TDirectory.CreateDirectory(LRoot);
+  TDirectory.CreateDirectory(TPath.Combine(LRoot, 'setup'));
+  TDirectory.CreateDirectory(TPath.Combine(LRoot, 'output'));
+  TDirectory.CreateDirectory(TPath.Combine(LRoot, 'output', 'nested'));
+  TDirectory.CreateDirectory(TPath.Combine(LRoot, 'staging'));
+  TDirectory.CreateDirectory(TPath.Combine(LRoot, 'staging', 'nested'));
+
+  TFile.WriteAllText(TPath.Combine(LRoot, 'MyApp.dpr'),
+    'program MyApp;' + sLineBreak +
+    'procedure NotShipped; external ''notshipped.dll'';' + sLineBreak +
+    'begin' + sLineBreak +
+    'end.' + sLineBreak, TEncoding.UTF8);
+
+  LXml :=
+    '<?xml version="1.0" encoding="utf-8"?>' + sLineBreak +
+    '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">' + sLineBreak +
+    '  <PropertyGroup>' + sLineBreak +
+    '    <MainSource>MyApp.dpr</MainSource>' + sLineBreak +
+    '    <AppType>Application</AppType>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '  <PropertyGroup Condition="''$(Base)''!=''''">' + sLineBreak;
+  if AWithOutputDir then
+    LXml := LXml + '    <DCC_ExeOutput>.\output</DCC_ExeOutput>' + sLineBreak;
+  LXml := LXml +
+    '    <DCC_UsePackage>rtl</DCC_UsePackage>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '</Project>';
+
+  Result := TPath.Combine(LRoot, 'MyApp.dproj');
+  TFile.WriteAllText(Result, LXml, TEncoding.UTF8);
+
+  // Two copies of MyApp.exe: one in the project root (the fallback output)
+  // and one in output\ (the configured output). The map files exist so the
+  // Deep-Evidence build is skipped.
+  TFile.WriteAllBytes(TPath.Combine(LRoot, 'MyApp.exe'), TBytes.Create($4D, $5A, $01));
+  TFile.WriteAllBytes(TPath.Combine(LRoot, 'setup', 'setup.exe'), TBytes.Create($4D, $5A, $02));
+  TFile.WriteAllBytes(TPath.Combine(LRoot, 'output', 'MyApp.exe'), TBytes.Create($4D, $5A, $03));
+  TFile.WriteAllBytes(TPath.Combine(LRoot, 'output', 'plugin.dll'), TBytes.Create($4D, $5A, $04));
+  TFile.WriteAllBytes(TPath.Combine(LRoot, 'output', 'nested', 'old.exe'), TBytes.Create($4D, $5A, $05));
+  TFile.WriteAllBytes(TPath.Combine(LRoot, 'staging', 'extra.dll'), TBytes.Create($4D, $5A, $06));
+  TFile.WriteAllBytes(TPath.Combine(LRoot, 'staging', 'nested', 'deep.dll'), TBytes.Create($4D, $5A, $07));
+  TFile.WriteAllText(TPath.Combine(LRoot, 'MyApp.map'), 'map', TEncoding.UTF8);
+  TFile.WriteAllText(TPath.Combine(LRoot, 'output', 'MyApp.map'), 'map', TEncoding.UTF8);
+end;
+
+function TEngineTests.ScopeConfig: TSbomConfig;
+begin
+  Result := TSbomConfig.Default;
+  Result.OutputPath := FOutputFile;
+  Result.IncludeCompositionEvidence := False;
+  Result.Platform := 'Win32';
+  Result.Configuration := 'Release';
+end;
+
+function TEngineTests.CountComponents(const AJson: TJSONObject;
+  const AName: string): NativeInt;
+var
+  LComponents: TJSONArray;
+  LComponent: TJSONObject;
+  I: Integer;
+begin
+  Result := 0;
+  if not Assigned(AJson) then
+    Exit;
+  LComponents := AJson.GetValue('components') as TJSONArray;
+  if not Assigned(LComponents) then
+    Exit;
+  for I := 0 to LComponents.Count - 1 do
+  begin
+    if not (LComponents.Items[I] is TJSONObject) then
+      Continue;
+    LComponent := TJSONObject(LComponents.Items[I]);
+    if SameText(LComponent.GetValue<string>('name', ''), AName) then
+      Inc(Result);
+  end;
+end;
+
+function TEngineTests.ComponentHasHash(const AJson: TJSONObject;
+  const AName: string): Boolean;
+var
+  LComponents: TJSONArray;
+  LComponent: TJSONObject;
+  I: Integer;
+begin
+  Result := False;
+  if not Assigned(AJson) then
+    Exit;
+  LComponents := AJson.GetValue('components') as TJSONArray;
+  if not Assigned(LComponents) then
+    Exit;
+  for I := 0 to LComponents.Count - 1 do
+  begin
+    if not (LComponents.Items[I] is TJSONObject) then
+      Continue;
+    LComponent := TJSONObject(LComponents.Items[I]);
+    if SameText(LComponent.GetValue<string>('name', ''), AName) and
+       (LComponent.GetValue('hashes') <> nil) then
+      Exit(True);
+  end;
+end;
+
+function TEngineTests.GenerateScope(const AProjectPath: string;
+  const AConfig: TSbomConfig): TJSONObject;
+var
+  LGen: TDxComplyGenerator;
+begin
+  LGen := TDxComplyGenerator.Create(AConfig);
+  try
+    LGen.OnProgress := OnProgress;
+    Assert.IsTrue(LGen.Generate(AProjectPath, FOutputFile, sfCycloneDxJson),
+      'Generate must succeed for the scope fixture');
+    Result := TJSONObject.ParseJSONValue(
+      TFile.ReadAllText(FOutputFile, TEncoding.UTF8)) as TJSONObject;
+    Assert.IsNotNull(Result, 'SBOM must be JSON');
+  finally
+    LGen.Free;
+  end;
+end;
+
+procedure TEngineTests.Generate_OutputScope_ListsNamedOutputAndSiblingsOnly;
+var
+  LConfig: TSbomConfig;
+  LJson: TJSONObject;
+  LProject: string;
+begin
+  LProject := CreateScopeProject('with-output', True);
+  LConfig := ScopeConfig;
+  LJson := GenerateScope(LProject, LConfig);
+  try
+    Assert.AreEqual(NativeInt(1), CountComponents(LJson, 'MyApp.exe'),
+      'The named exe in the output directory must be listed once');
+    Assert.IsTrue(ComponentHasHash(LJson, 'MyApp.exe'),
+      'The named exe must be hashed when the file exists');
+    Assert.AreEqual(NativeInt(1), CountComponents(LJson, 'plugin.dll'),
+      'A DLL beside the exe must be listed');
+    Assert.AreEqual(NativeInt(0), CountComponents(LJson, 'old.exe'),
+      'A binary in a subdirectory of the output directory must not be listed');
+    Assert.AreEqual(NativeInt(0), CountComponents(LJson, 'setup.exe'),
+      'A binary under setup\ must not be listed');
+    Assert.AreEqual(NativeInt(0), CountComponents(LJson, 'extra.dll'),
+      'A staged directory must not be scanned unless scanDirs says so');
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TEngineTests.Generate_OutputScope_MissingNamedFile_HasNoHash;
+var
+  LConfig: TSbomConfig;
+  LJson: TJSONObject;
+  LProject: string;
+  LRoot: string;
+begin
+  LProject := CreateScopeProject('missing-exe', True);
+  LRoot := TPath.GetDirectoryName(LProject);
+  TFile.Delete(TPath.Combine(LRoot, 'output', 'MyApp.exe'));
+
+  LConfig := ScopeConfig;
+  LJson := GenerateScope(LProject, LConfig);
+  try
+    Assert.AreEqual(NativeInt(1), CountComponents(LJson, 'MyApp.exe'),
+      'The named output must stay in the SBOM when the file is missing');
+    Assert.IsFalse(ComponentHasHash(LJson, 'MyApp.exe'),
+      'A missing output file must not be given a hash');
+    Assert.IsTrue(ComponentHasHash(LJson, 'plugin.dll'),
+      'A sibling that does exist must still be hashed');
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TEngineTests.Generate_OutputScope_KeepsDeclaredDependencies;
+var
+  LConfig: TSbomConfig;
+  LJson: TJSONObject;
+  LProject: string;
+begin
+  LProject := CreateScopeProject('declared', True);
+  LConfig := ScopeConfig;
+  LJson := GenerateScope(LProject, LConfig);
+  try
+    Assert.AreEqual(NativeInt(1), CountComponents(LJson, 'rtl.bpl'),
+      'A declared runtime package must be listed even when the BPL was not scanned');
+    Assert.IsFalse(ComponentHasHash(LJson, 'rtl.bpl'),
+      'A runtime package that was not found on disk has no hash');
+    Assert.AreEqual(NativeInt(1), CountComponents(LJson, 'notshipped.dll'),
+      'An external DLL from source must be listed even when the file was not scanned');
+    Assert.IsFalse(ComponentHasHash(LJson, 'notshipped.dll'),
+      'An external DLL that was not found on disk has no hash');
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TEngineTests.Generate_OutputScope_ExcludeFiltersScannedFiles;
+var
+  LConfig: TSbomConfig;
+  LJson: TJSONObject;
+  LProject: string;
+begin
+  LProject := CreateScopeProject('exclude', True);
+  LConfig := ScopeConfig;
+  LConfig.ExcludePatterns := TArray<string>.Create('*.dll');
+  LJson := GenerateScope(LProject, LConfig);
+  try
+    Assert.AreEqual(NativeInt(0), CountComponents(LJson, 'plugin.dll'),
+      'An exclude glob must drop a DLL found in the output directory');
+    Assert.AreEqual(NativeInt(1), CountComponents(LJson, 'MyApp.exe'),
+      'The named exe must remain when the exclude glob does not match it');
+    Assert.AreEqual(NativeInt(1), CountComponents(LJson, 'notshipped.dll'),
+      'An external DLL reference is not removed by an artefact exclude glob');
+    Assert.AreEqual(NativeInt(1), CountComponents(LJson, 'rtl.bpl'),
+      'A runtime package is not removed by an artefact exclude glob');
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TEngineTests.Generate_OutputScope_ScanDirRespectsRecursion;
+var
+  LConfig: TSbomConfig;
+  LJson: TJSONObject;
+  LProject: string;
+begin
+  LProject := CreateScopeProject('scan-dir', True);
+  LConfig := ScopeConfig;
+  LConfig.ScanDirs := TArray<string>.Create('staging');
+  LJson := GenerateScope(LProject, LConfig);
+  try
+    Assert.AreEqual(NativeInt(1), CountComponents(LJson, 'extra.dll'),
+      'scanDirs must include binaries directly in that directory');
+    Assert.AreEqual(NativeInt(0), CountComponents(LJson, 'deep.dll'),
+      'scanDirs must not walk subdirectories unless the value contains **');
+  finally
+    LJson.Free;
+  end;
+
+  LConfig.ScanDirs := TArray<string>.Create('staging\**');
+  LJson := GenerateScope(LProject, LConfig);
+  try
+    Assert.AreEqual(NativeInt(1), CountComponents(LJson, 'deep.dll'),
+      'A scanDirs value that contains ** must include nested binaries');
+    Assert.AreEqual(NativeInt(1), CountComponents(LJson, 'extra.dll'),
+      'A recursive scan dir must still include binaries in the directory itself');
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TEngineTests.Generate_OutputScope_ScanTreeWalksOutputDirectory;
+var
+  LConfig: TSbomConfig;
+  LJson: TJSONObject;
+  LProject: string;
+begin
+  LProject := CreateScopeProject('scan-tree', True);
+  LConfig := ScopeConfig;
+  LConfig.ScanTree := True;
+  FProgressMessages.Clear;
+  LJson := GenerateScope(LProject, LConfig);
+  try
+    Assert.AreEqual(NativeInt(1), CountComponents(LJson, 'old.exe'),
+      'scanTree must include binaries under the output directory');
+    Assert.AreEqual(NativeInt(0), CountComponents(LJson, 'setup.exe'),
+      'scanTree walks the output directory, not folders outside it');
+    Assert.IsTrue(Pos('deprecated', FProgressMessages.Text) > 0,
+      'scanTree must be reported as deprecated');
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TEngineTests.Generate_OutputScope_ProjectDirFallbackSkipsSubfolders;
+var
+  LConfig: TSbomConfig;
+  LJson: TJSONObject;
+  LProject: string;
+begin
+  LProject := CreateScopeProject('fallback', False);
+  LConfig := ScopeConfig;
+  LJson := GenerateScope(LProject, LConfig);
+  try
+    Assert.AreEqual(NativeInt(1), CountComponents(LJson, 'MyApp.exe'),
+      'With no output directory, the exe in the project directory is the named output');
+    Assert.IsTrue(ComponentHasHash(LJson, 'MyApp.exe'),
+      'That exe must be hashed');
+    Assert.AreEqual(NativeInt(0), CountComponents(LJson, 'setup.exe'),
+      'Subfolders of the project directory must not be scanned by default');
+    Assert.AreEqual(NativeInt(0), CountComponents(LJson, 'plugin.dll'),
+      'Binaries under output\ must not be scanned when that folder is not the output directory');
+  finally
+    LJson.Free;
+  end;
+
+  LConfig.ScanTree := True;
+  LJson := GenerateScope(LProject, LConfig);
+  try
+    Assert.AreEqual(NativeInt(1), CountComponents(LJson, 'setup.exe'),
+      'scanTree on a project without an output directory walks the project tree');
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TEngineTests.Generate_OutputScope_PackageUsesBplDirectory;
+var
+  LConfig: TSbomConfig;
+  LJson: TJSONObject;
+  LProject: string;
+  LRoot: string;
+begin
+  LRoot := TPath.Combine(FTempDir, 'package');
+  TDirectory.CreateDirectory(TPath.Combine(LRoot, 'bin'));
+  TDirectory.CreateDirectory(TPath.Combine(LRoot, 'bpl'));
+  TDirectory.CreateDirectory(TPath.Combine(LRoot, 'bpl', 'nested'));
+  TFile.WriteAllText(TPath.Combine(LRoot, 'Demo.dpk'),
+    'package Demo;' + sLineBreak + 'end.' + sLineBreak, TEncoding.UTF8);
+  TFile.WriteAllText(TPath.Combine(LRoot, 'Demo.dproj'),
+    '<?xml version="1.0" encoding="utf-8"?>' + sLineBreak +
+    '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">' + sLineBreak +
+    '  <PropertyGroup>' + sLineBreak +
+    '    <MainSource>Demo.dpk</MainSource>' + sLineBreak +
+    '    <AppType>Package</AppType>' + sLineBreak +
+    '    <DllSuffix>290</DllSuffix>' + sLineBreak +
+    '    <DCC_ExeOutput>.\bin</DCC_ExeOutput>' + sLineBreak +
+    '    <DCC_BplOutput>.\bpl</DCC_BplOutput>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '</Project>', TEncoding.UTF8);
+  TFile.WriteAllBytes(TPath.Combine(LRoot, 'bin', 'stray.exe'), TBytes.Create($4D, $5A, $11));
+  TFile.WriteAllBytes(TPath.Combine(LRoot, 'bpl', 'Demo290.bpl'), TBytes.Create($4D, $5A, $12));
+  TFile.WriteAllBytes(TPath.Combine(LRoot, 'bpl', 'plugin.dll'), TBytes.Create($4D, $5A, $13));
+  TFile.WriteAllBytes(TPath.Combine(LRoot, 'bpl', 'nested', 'old.bpl'), TBytes.Create($4D, $5A, $14));
+  // OutputDir prefers the exe folder, so the expected map lives there.
+  TFile.WriteAllText(TPath.Combine(LRoot, 'bin', 'Demo290.map'), 'map', TEncoding.UTF8);
+
+  LProject := TPath.Combine(LRoot, 'Demo.dproj');
+  LConfig := ScopeConfig;
+  LJson := GenerateScope(LProject, LConfig);
+  try
+    Assert.AreEqual(NativeInt(1), CountComponents(LJson, 'Demo290.bpl'),
+      'The package output must be listed under its DllSuffix name');
+    Assert.IsTrue(ComponentHasHash(LJson, 'Demo290.bpl'),
+      'The package output must be hashed when the BPL exists');
+    Assert.AreEqual(NativeInt(1), CountComponents(LJson, 'plugin.dll'),
+      'A DLL beside the BPL must be listed');
+    Assert.AreEqual(NativeInt(0), CountComponents(LJson, 'stray.exe'),
+      'Binaries in DCC_ExeOutput must not be listed when the package output is the BPL directory');
+    Assert.AreEqual(NativeInt(0), CountComponents(LJson, 'old.bpl'),
+      'A nested BPL must not be listed');
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TEngineTests.GenerateFromConfig_ScanDirs_AddsStagedBinaries;
+var
+  LConfigJson: TStringList;
+  LConfigPath: string;
+  LGen: TDxComplyGenerator;
+  LJson: TJSONObject;
+  LProject: string;
+begin
+  LProject := CreateScopeProject('json-scan-dir', True);
+  LConfigPath := TPath.Combine(FTempDir, 'scan-dirs.json');
+  LConfigJson := TStringList.Create;
+  try
+    LConfigJson.Add('{');
+    LConfigJson.Add('  "output": "' + StringReplace(FOutputFile, '\', '\\', [rfReplaceAll]) + '",');
+    LConfigJson.Add('  "includeCompositionEvidence": false,');
+    LConfigJson.Add('  "scanDirs": ["staging"],');
+    LConfigJson.Add('  "scanTree": false');
+    LConfigJson.Add('}');
+    LConfigJson.SaveToFile(LConfigPath, TEncoding.UTF8);
+  finally
+    LConfigJson.Free;
+  end;
+
+  LGen := TDxComplyGenerator.Create;
+  try
+    LGen.OnProgress := OnProgress;
+    Assert.IsTrue(LGen.GenerateFromConfig(LProject, LConfigPath),
+      'GenerateFromConfig must succeed when scanDirs is set');
+  finally
+    LGen.Free;
+  end;
+
+  LJson := TJSONObject.ParseJSONValue(TFile.ReadAllText(FOutputFile, TEncoding.UTF8)) as TJSONObject;
+  try
+    Assert.AreEqual(NativeInt(1), CountComponents(LJson, 'extra.dll'),
+      'scanDirs in .dxcomply.json must add binaries from that directory');
+    Assert.AreEqual(NativeInt(0), CountComponents(LJson, 'deep.dll'),
+      'A scanDirs entry without ** must not include nested binaries');
+    Assert.AreEqual(NativeInt(0), CountComponents(LJson, 'setup.exe'),
+      'scanDirs must not bring back the recursive project walk');
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TEngineTests.GenerateFromConfig_ScanTree_RestoresRecursiveWalk;
+var
+  LConfigJson: TStringList;
+  LConfigPath: string;
+  LGen: TDxComplyGenerator;
+  LJson: TJSONObject;
+  LProject: string;
+begin
+  LProject := CreateScopeProject('json-scan-tree', True);
+  LConfigPath := TPath.Combine(FTempDir, 'scan-tree.json');
+  LConfigJson := TStringList.Create;
+  try
+    LConfigJson.Add('{');
+    LConfigJson.Add('  "output": "' + StringReplace(FOutputFile, '\', '\\', [rfReplaceAll]) + '",');
+    LConfigJson.Add('  "includeCompositionEvidence": false,');
+    LConfigJson.Add('  "scanTree": true');
+    LConfigJson.Add('}');
+    LConfigJson.SaveToFile(LConfigPath, TEncoding.UTF8);
+  finally
+    LConfigJson.Free;
+  end;
+
+  FProgressMessages.Clear;
+  LGen := TDxComplyGenerator.Create;
+  try
+    LGen.OnProgress := OnProgress;
+    Assert.IsTrue(LGen.GenerateFromConfig(LProject, LConfigPath),
+      'GenerateFromConfig must succeed when scanTree is set');
+  finally
+    LGen.Free;
+  end;
+
+  LJson := TJSONObject.ParseJSONValue(TFile.ReadAllText(FOutputFile, TEncoding.UTF8)) as TJSONObject;
+  try
+    Assert.AreEqual(NativeInt(1), CountComponents(LJson, 'old.exe'),
+      'scanTree in .dxcomply.json must walk the output directory');
+    Assert.AreEqual(NativeInt(0), CountComponents(LJson, 'setup.exe'),
+      'scanTree must not include folders outside the output directory');
+    Assert.IsTrue(Pos('deprecated', FProgressMessages.Text) > 0,
+      'scanTree from config must be reported as deprecated');
+  finally
+    LJson.Free;
+  end;
+end;
 initialization
   TDUnitX.RegisterTestFixture(TEngineTests);
 

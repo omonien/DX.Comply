@@ -70,7 +70,9 @@ type
     scoExcludePatterns,
     scoMapFileDir,
     scoIncludeCompositionEvidence,
-    scoReport
+    scoReport,
+    scoScanDirs,
+    scoScanTree
   );
   /// <summary>Set of TSbomConfig fields that were set explicitly.</summary>
   TSbomConfigOverrides = set of TSbomConfigOverride;
@@ -129,6 +131,17 @@ type
     /// is still a default and may be replaced by .dxcomply.json.
     /// </summary>
     ExplicitOverrides: TSbomConfigOverrides;
+    /// <summary>
+    /// Extra directories or globs to scan for binaries (CLI --scan-dir,
+    /// config scanDirs). Each entry is non-recursive unless it contains **.
+    /// Relative entries are resolved from the project directory.
+    /// </summary>
+    ScanDirs: TArray<string>;
+    /// <summary>
+    /// When True, recursively scan the project output directory the way older
+    /// versions did. Deprecated and kept for one release. Default is False.
+    /// </summary>
+    ScanTree: Boolean;
     /// <summary>Creates a new TSbomConfig with default values.</summary>
     class function Default: TSbomConfig; static;
     /// <summary>
@@ -200,6 +213,19 @@ type
       const AProjectInfo: TProjectInfo;
       const ACompositionEvidence: TCompositionEvidence;
       const AArtefacts: TArtefactList);
+    /// <summary>
+    /// Lists the named project output, binaries in its directory, and any
+    /// extra scan directories. ScanTree restores the old recursive walk.
+    /// </summary>
+    function CollectBuildArtefacts(const AProjectInfo: TProjectInfo): TArtefactList;
+    /// <summary>
+    /// Appends artefacts whose full path is not already in the target list.
+    /// </summary>
+    procedure MergeArtefacts(const ATarget, ASource: TArtefactList);
+    /// <summary>
+    /// Copies include/exclude warnings from the most recent file scan.
+    /// </summary>
+    procedure RememberPatternWarnings(const AWarnings: TList<string>);
   public
     /// <summary>
     /// Scans the supplied .pas files for external DLL references. String
@@ -299,7 +325,10 @@ begin
   Result.IncludePlatformInOutput := False;
   Result.ExplicitOverrides := [];
   Result.MapFileDir := '';
+  Result.ScanTree := False;
+  SetLength(Result.ScanDirs, 0);
 end;
+
 
 class function TSbomConfig.DecorateOutputFileName(const AOutputPath, APlatform,
   AConfiguration: string): string;
@@ -326,7 +355,9 @@ begin
   LSafePlatform := SanitizeSegment(APlatform);
   LSafeConfig := SanitizeSegment(AConfiguration);
   Result := LDir + LName + '.' + LSafePlatform + '.' + LSafeConfig + LExt;
+
 end;
+
 
 { TDxComplyGenerator }
 
@@ -1166,6 +1197,17 @@ begin
         if LJson.GetValue('includeCompositionEvidence') <> nil then
           Result.IncludeCompositionEvidence :=
             LJson.GetValue<Boolean>('includeCompositionEvidence');
+
+        if LJson.GetValue('scanDirs') is TJSONArray then
+        begin
+          LArray := LJson.GetValue('scanDirs') as TJSONArray;
+          SetLength(Result.ScanDirs, LArray.Count);
+          for I := 0 to LArray.Count - 1 do
+            Result.ScanDirs[I] := LArray.Items[I].Value;
+        end;
+
+        if LJson.GetValue('scanTree') <> nil then
+          Result.ScanTree := LJson.GetValue<Boolean>('scanTree');
       end;
     finally
       LRoot.Free;
@@ -1326,6 +1368,136 @@ begin
   end;
 end;
 
+procedure TDxComplyGenerator.RememberPatternWarnings(const AWarnings: TList<string>);
+var
+  LScanner: TFileScanner;
+  LWarning: string;
+begin
+  if not Assigned(AWarnings) then
+    Exit;
+  if not ((FFileScanner as TObject) is TFileScanner) then
+    Exit;
+
+  LScanner := TFileScanner(FFileScanner as TObject);
+  for LWarning in LScanner.PatternWarnings do
+    if AWarnings.IndexOf(LWarning) < 0 then
+      AWarnings.Add(LWarning);
+end;
+
+procedure TDxComplyGenerator.MergeArtefacts(const ATarget, ASource: TArtefactList);
+var
+  LArtefact: TArtefactInfo;
+  LExisting: TArtefactInfo;
+  I: Integer;
+  LAlreadyListed: Boolean;
+begin
+  if not Assigned(ATarget) or not Assigned(ASource) then
+    Exit;
+
+  for LArtefact in ASource do
+  begin
+    LAlreadyListed := False;
+    if LArtefact.FilePath <> '' then
+      for I := 0 to ATarget.Count - 1 do
+      begin
+        LExisting := ATarget[I];
+        if SameText(LExisting.FilePath, LArtefact.FilePath) then
+        begin
+          LAlreadyListed := True;
+          Break;
+        end;
+      end;
+    if not LAlreadyListed then
+      ATarget.Add(LArtefact);
+  end;
+end;
+
+function TDxComplyGenerator.CollectBuildArtefacts(
+  const AProjectInfo: TProjectInfo): TArtefactList;
+var
+  LArtefact: TArtefactInfo;
+  LOutputFile: string;
+  LScanRoot: string;
+  LScanned: TArtefactList;
+  LScanDir: string;
+  LWarnings: TList<string>;
+  LWarning: string;
+begin
+  Result := TArtefactList.Create;
+  LWarnings := TList<string>.Create;
+  try
+    try
+      // The binary the .dproj names is always a candidate, including when the
+      // file has not been built yet. CollectFile hashes it when it is on disk.
+      // A later directory walk sees the same path; MergeArtefacts keeps one entry.
+      if AProjectInfo.OutputFilePath <> '' then
+      begin
+        LOutputFile := AProjectInfo.OutputFilePath;
+        try
+          LOutputFile := TPath.GetFullPath(LOutputFile);
+        except
+          on E: EInOutArgumentException do
+            LOutputFile := AProjectInfo.OutputFilePath;
+        end;
+        if FFileScanner.CollectFile(LOutputFile,
+          TPath.GetFileName(LOutputFile),
+          FConfig.IncludePatterns, FConfig.ExcludePatterns, LArtefact) then
+          Result.Add(LArtefact);
+        RememberPatternWarnings(LWarnings);
+      end;
+
+      if FConfig.ScanTree then
+      begin
+        // Previous releases walked OutputDir with soAllDirectories, which
+        // pulled in setup\, tools\, and old build folders whenever that
+        // directory fell back to the project root. Kept for one release.
+        DoProgress('Warning: scanTree is deprecated and will be removed in a ' +
+          'future release. The output directory is scanned recursively. ' +
+          'Use scanDirs to add binaries that are staged somewhere else.', 30);
+        LScanRoot := AProjectInfo.OutputDir;
+      end
+      else if AProjectInfo.ArtefactOutputDir <> '' then
+        LScanRoot := AProjectInfo.ArtefactOutputDir
+      else
+        LScanRoot := AProjectInfo.OutputDir;
+
+      if (LScanRoot <> '') and not TDirectory.Exists(LScanRoot) then
+        DoProgress('Warning: Output directory not found: ' + LScanRoot, 29);
+
+      LScanned := FFileScanner.Scan(LScanRoot, FConfig.IncludePatterns,
+        FConfig.ExcludePatterns, FConfig.ScanTree);
+      try
+        MergeArtefacts(Result, LScanned);
+      finally
+        LScanned.Free;
+      end;
+      RememberPatternWarnings(LWarnings);
+
+      for LScanDir in FConfig.ScanDirs do
+      begin
+        if Trim(LScanDir) = '' then
+          Continue;
+        LScanned := FFileScanner.ScanLocation(LScanDir, AProjectInfo.ProjectDir,
+          FConfig.IncludePatterns, FConfig.ExcludePatterns);
+        try
+          MergeArtefacts(Result, LScanned);
+        finally
+          LScanned.Free;
+        end;
+        RememberPatternWarnings(LWarnings);
+      end;
+
+      for LWarning in LWarnings do
+        DoProgress('Warning: ' + LWarning, 30);
+    except
+      Result.Free;
+      raise;
+    end;
+  finally
+    LWarnings.Free;
+  end;
+end;
+
 function TDxComplyGenerator.Generate(const AProjectPath, AOutputPath: string;
   AFormat: TSbomFormat): Boolean;
 var
@@ -1341,7 +1513,6 @@ var
   LReportedWarnings: TList<string>;
   LReportData: TComplianceReportData;
   LValidation: TValidationResult;
-  LPatternWarning: string;
 begin
   Result := False;
 
@@ -1444,16 +1615,7 @@ begin
 
     DoProgress('Scanning build output...', 30);
 
-    // Warn if output directory doesn't exist (artefacts not yet built)
-    if not TDirectory.Exists(LProjectInfo.OutputDir) then
-      DoProgress('Warning: Output directory not found: ' + LProjectInfo.OutputDir, 29);
-
-    // Scan artefacts
-    LArtefacts := FFileScanner.Scan(LProjectInfo.OutputDir,
-      FConfig.IncludePatterns, FConfig.ExcludePatterns);
-    if (FFileScanner as TObject) is TFileScanner then
-      for LPatternWarning in TFileScanner(FFileScanner as TObject).PatternWarnings do
-        DoProgress('Warning: ' + LPatternWarning, 30);
+    LArtefacts := CollectBuildArtefacts(LProjectInfo);
     try
       DoProgress(Format('Found %d artefacts', [LArtefacts.Count]), 50);
 
@@ -1584,6 +1746,10 @@ begin
     Result.HumanReadableReport.Enabled := ACaller.HumanReadableReport.Enabled;
     Result.HumanReadableReport.Format := ACaller.HumanReadableReport.Format;
   end;
+  if scoScanDirs in ACaller.ExplicitOverrides then
+    Result.ScanDirs := ACaller.ScanDirs;
+  if scoScanTree in ACaller.ExplicitOverrides then
+    Result.ScanTree := ACaller.ScanTree;
 
   Result.IncludePlatformInOutput := ACaller.IncludePlatformInOutput;
   Result.ExplicitOverrides := ACaller.ExplicitOverrides;

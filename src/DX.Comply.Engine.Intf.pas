@@ -108,6 +108,18 @@ type
     UsesDebugDCUs: Boolean;
     /// <summary>Output directory for build artefacts.</summary>
     OutputDir: string;
+    /// <summary>
+    /// Directory that contains the binary this project builds (exe, dll, or bpl).
+    /// Sibling binaries are scanned here. For a package this is the BPL output
+    /// directory when one is set, which can differ from OutputDir.
+    /// </summary>
+    ArtefactOutputDir: string;
+    /// <summary>
+    /// Full path of the exe, dll, or bpl the .dproj names for the active
+    /// configuration and platform, including DllSuffix. Empty when that name
+    /// cannot be resolved.
+    /// </summary>
+    OutputFilePath: string;
     /// <summary>Output directory for generated package binaries (.bpl).</summary>
     BplOutputDir: string;
     /// <summary>Output directory for generated package metadata (.dcp).</summary>
@@ -222,9 +234,30 @@ type
     /// <param name="ADirectory">Directory to scan.</param>
     /// <param name="AIncludePatterns">Glob patterns for files to include.</param>
     /// <param name="AExcludePatterns">Glob patterns for files to exclude.</param>
+    /// <param name="ARecursive">
+    /// When True, subdirectories are walked as well. The default is False:
+    /// only files directly in ADirectory are considered.
+    /// </param>
     /// <returns>TArtefactList with discovered files.</returns>
     function Scan(const ADirectory: string;
+      const AIncludePatterns, AExcludePatterns: TArray<string>;
+      ARecursive: Boolean = False): TArtefactList;
+    /// <summary>
+    /// Scans one extra location from --scan-dir or scanDirs.
+    /// A plain directory is not recursive. A value that contains ** walks
+    /// subdirectories. ABaseDir resolves a relative location.
+    /// </summary>
+    function ScanLocation(const ALocation, ABaseDir: string;
       const AIncludePatterns, AExcludePatterns: TArray<string>): TArtefactList;
+    /// <summary>
+    /// Builds an artefact for one file when it passes include/exclude.
+    /// A missing file is still returned so the named project output can be
+    /// listed before it has been built. Hash and size are set only when the
+    /// file exists.
+    /// </summary>
+    function CollectFile(const AFilePath, ARelativePath: string;
+      const AIncludePatterns, AExcludePatterns: TArray<string>;
+      out AArtefact: TArtefactInfo): Boolean;
     /// <summary>
     /// Determines the artefact type based on file extension.
     /// </summary>
