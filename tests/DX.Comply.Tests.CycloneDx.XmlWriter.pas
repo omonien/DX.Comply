@@ -330,8 +330,8 @@ end;
 
 procedure TCycloneDxXmlWriterTests.Write_MetadataElementOrder_MatchesSchema;
 var
-  LComponentAt, LContent, LMetadata, LPropertiesAt, LSupplierAt, LToolsAt: string;
-  LMetaEnd, LMetaStart, LPropertiesPos: Integer;
+  LComponent, LComponentAt, LContent, LMetadata, LNameAt, LPropertiesAt, LSupplierAt, LToolsAt: string;
+  LComponentEnd, LComponentStart, LMetaEnd, LMetaStart, LPropertiesPos: Integer;
 begin
   SetLength(FMetadata.Properties, 1);
   FMetadata.Properties[0] := TSbomProperty.Create('dx:profile', 'cra');
@@ -353,7 +353,6 @@ begin
   LComponentAt := IntToStr(Pos('<component ', LMetadata));
   LPropertiesPos := MetadataDirectChildPos(LMetadata, 'properties');
   LPropertiesAt := IntToStr(LPropertiesPos);
-  LSupplierAt := IntToStr(Pos('<supplier>', LMetadata));
   Assert.IsTrue(Pos('<tools>', LMetadata) < Pos('<component ', LMetadata),
     'metadata tools must precede metadata component. tools at ' + LToolsAt +
     ', component at ' + LComponentAt);
@@ -362,9 +361,23 @@ begin
     LPropertiesAt);
   Assert.IsTrue(Pos('</component>', LMetadata) < LPropertiesPos,
     'metadata properties must follow the metadata component. properties at ' + LPropertiesAt);
-  Assert.IsTrue(Pos('<supplier>', LMetadata) < Pos('<name>', LMetadata),
-    'component supplier must precede name. supplier at ' + LSupplierAt);
-  Assert.AreEqual(0, Length(CycloneDxXmlSequenceErrors(LContent)),
+
+  // <tools><tool><name> sits before the metadata component, so supplier and
+  // name must be compared inside that component. CycloneDX 1.5 places
+  // supplier before name there.
+  LComponentStart := Pos('<component ', LMetadata);
+  LComponentEnd := Pos('</component>', LMetadata);
+  Assert.IsTrue((LComponentStart > 0) and (LComponentEnd > LComponentStart),
+    'metadata must contain a component element');
+  LComponent := Copy(LMetadata, LComponentStart,
+    LComponentEnd - LComponentStart + Length('</component>'));
+  LSupplierAt := IntToStr(Pos('<supplier>', LComponent));
+  LNameAt := IntToStr(Pos('<name>', LComponent));
+  Assert.IsTrue((Pos('<supplier>', LComponent) > 0) and
+    (Pos('<supplier>', LComponent) < Pos('<name>', LComponent)),
+    'component supplier must precede name. supplier at ' + LSupplierAt +
+    ', name at ' + LNameAt);
+  Assert.AreEqual(NativeInt(0), NativeInt(Length(CycloneDxXmlSequenceErrors(LContent))),
     'The written document must satisfy the CycloneDX 1.5 element order');
 end;
 
