@@ -24,6 +24,7 @@ uses
   System.Classes,
   System.JSON,
   System.Generics.Collections,
+  System.RegularExpressions,
   DUnitX.TestFramework,
   DX.Comply.Spdx.Writer,
   DX.Comply.Engine.Intf;
@@ -40,6 +41,8 @@ type
     function LoadOutputJson: TJSONObject;
     function MakeArtefact(const ARelativePath, AArtefactType, AHash: string;
       AFileSize: Int64): TArtefactInfo;
+    function PackageAt(const AJson: TJSONObject; AIndex: Integer): TJSONObject;
+    function IsSpdxId(const AId: string): Boolean;
   public
     [Setup]
     procedure Setup;
@@ -96,6 +99,44 @@ type
 
     [Test]
     procedure Write_Package_SpdxIdStartsWithPrefix;
+
+    /// <summary>
+    /// Two artefacts with the same basename and different paths must get
+    /// distinct SPDX IDs, and relationships must point at those IDs (issue #39).
+    /// </summary>
+    [Test]
+    procedure Write_DuplicateBasename_SpdxIdsDiffer;
+
+    /// <summary>
+    /// The same relative path always yields the same ID, including when only
+    /// the directory separator changes (issue #39).
+    /// </summary>
+    [Test]
+    procedure Write_SpdxId_StableAcrossSeparators;
+
+    /// <summary>Characters outside the SPDX ID alphabet are sanitized (issue #39).</summary>
+    [Test]
+    procedure Write_SpdxId_SanitizesIllegalCharacters;
+
+    /// <summary>creationInfo.created matches YYYY-MM-DDThh:mm:ssZ (issue #40).</summary>
+    [Test]
+    procedure Write_Created_MatchesUtcPattern;
+
+    /// <summary>
+    /// Offset timestamps and fractional seconds are normalized to UTC Z (issue #40).
+    /// </summary>
+    [Test]
+    procedure Write_Created_NormalizesOffsetTimestamp;
+
+    /// <summary>No referenceLocator contains whitespace (issue #40).</summary>
+    [Test]
+    procedure Write_ReferenceLocator_ContainsNoWhitespace;
+
+    /// <summary>
+    /// Packages carry NOASSERTION licenses, and supplier follows metadata.
+    /// </summary>
+    [Test]
+    procedure Write_Package_LicenseAndSupplier;
   end;
 
 implementation
@@ -157,6 +198,19 @@ begin
   Result.ArtefactType := AArtefactType;
   Result.Hash := AHash;
   Result.FileSize := AFileSize;
+end;
+
+function TSpdxWriterTests.PackageAt(const AJson: TJSONObject; AIndex: Integer): TJSONObject;
+var
+  LPackages: TJSONArray;
+begin
+  LPackages := AJson.GetValue('packages') as TJSONArray;
+  Result := LPackages.Items[AIndex] as TJSONObject;
+end;
+
+function TSpdxWriterTests.IsSpdxId(const AId: string): Boolean;
+begin
+  Result := TRegEx.IsMatch(AId, '^SPDXRef-[a-zA-Z0-9.\-]+$');
 end;
 
 procedure TSpdxWriterTests.GetFormat_ReturnsSpdxJson;
@@ -379,6 +433,260 @@ begin
   try
     LPackage := (LJson.GetValue('packages') as TJSONArray).Items[0] as TJSONObject;
     Assert.IsTrue(LPackage.GetValue<string>('SPDXID').StartsWith('SPDXRef-'));
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TSpdxWriterTests.Write_DuplicateBasename_SpdxIdsDiffer;
+var
+  LJson: TJSONObject;
+  LFirstId, LSecondId: string;
+  LRelationships: TJSONArray;
+  LRel: TJSONObject;
+begin
+  FArtefacts.Add(MakeArtefact('setup\4dcompiler.exe', 'application', '', 1024));
+  FArtefacts.Add(MakeArtefact('tools\4dcompiler.exe', 'application', '', 2048));
+  Assert.IsTrue(FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+
+  LJson := LoadOutputJson;
+  try
+    LFirstId := PackageAt(LJson, 0).GetValue<string>('SPDXID');
+    LSecondId := PackageAt(LJson, 1).GetValue<string>('SPDXID');
+
+    Assert.AreNotEqual(LFirstId, LSecondId,
+      'Same basename in different folders must not share an SPDX ID');
+    Assert.AreNotEqual('SPDXRef-Package-4dcompiler.exe', LFirstId,
+      'SPDX ID must not be derived from the basename alone');
+    Assert.IsTrue(IsSpdxId(LFirstId), 'First SPDX ID must match SPDXRef-[A-Za-z0-9.-]+');
+    Assert.IsTrue(IsSpdxId(LSecondId), 'Second SPDX ID must match SPDXRef-[A-Za-z0-9.-]+');
+    Assert.IsTrue(LFirstId.Contains('setup-4dcompiler.exe'),
+      'ID should keep the sanitized relative path');
+    Assert.IsTrue(LSecondId.Contains('tools-4dcompiler.exe'),
+      'ID should keep the sanitized relative path');
+
+    LRelationships := LJson.GetValue('relationships') as TJSONArray;
+    Assert.AreEqual(NativeInt(2), NativeInt(LRelationships.Count));
+    LRel := LRelationships.Items[0] as TJSONObject;
+    Assert.AreEqual(LFirstId, LRel.GetValue<string>('relatedSpdxElement'),
+      'Relationship must point at the first package ID');
+    LRel := LRelationships.Items[1] as TJSONObject;
+    Assert.AreEqual(LSecondId, LRel.GetValue<string>('relatedSpdxElement'),
+      'Relationship must point at the second package ID');
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TSpdxWriterTests.Write_SpdxId_StableAcrossSeparators;
+var
+  LSlashId, LBackslashId, LAgain: string;
+  LJson: TJSONObject;
+begin
+  FArtefacts.Add(MakeArtefact('setup/4dcompiler.exe', 'application', '', 1024));
+  FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo);
+  LJson := LoadOutputJson;
+  try
+    LSlashId := PackageAt(LJson, 0).GetValue<string>('SPDXID');
+  finally
+    LJson.Free;
+  end;
+
+  FArtefacts.Clear;
+  FArtefacts.Add(MakeArtefact('setup\4dcompiler.exe', 'application', '', 1024));
+  FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo);
+  LJson := LoadOutputJson;
+  try
+    LBackslashId := PackageAt(LJson, 0).GetValue<string>('SPDXID');
+  finally
+    LJson.Free;
+  end;
+
+  FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo);
+  LJson := LoadOutputJson;
+  try
+    LAgain := PackageAt(LJson, 0).GetValue<string>('SPDXID');
+  finally
+    LJson.Free;
+  end;
+
+  Assert.AreEqual(LSlashId, LBackslashId,
+    'Forward and back slashes of the same path must produce one ID');
+  Assert.AreEqual(LBackslashId, LAgain,
+    'Writing the same artefact again must keep the same SPDX ID');
+  Assert.IsTrue(IsSpdxId(LSlashId));
+end;
+
+procedure TSpdxWriterTests.Write_SpdxId_SanitizesIllegalCharacters;
+var
+  LJson: TJSONObject;
+  LId: string;
+begin
+  FArtefacts.Add(MakeArtefact('my tools\foo_bar.dll', 'library', '', 64));
+  FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo);
+  LJson := LoadOutputJson;
+  try
+    LId := PackageAt(LJson, 0).GetValue<string>('SPDXID');
+    Assert.IsTrue(IsSpdxId(LId), 'Sanitized SPDX ID must match the SPDX pattern');
+    Assert.IsTrue(LId.Contains('my-tools-foo-bar.dll'),
+      'Spaces, slashes and underscores must become hyphens');
+    Assert.IsFalse(LId.Contains(' '), 'SPDX ID must not contain spaces');
+    Assert.IsFalse(LId.Contains('_'), 'SPDX ID must not contain underscores');
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TSpdxWriterTests.Write_Created_MatchesUtcPattern;
+var
+  LJson: TJSONObject;
+  LCreated: string;
+begin
+  FMetadata.Timestamp := '';
+  FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo);
+  LJson := LoadOutputJson;
+  try
+    LCreated := (LJson.GetValue('creationInfo') as TJSONObject).GetValue<string>('created');
+    Assert.IsTrue(TRegEx.IsMatch(LCreated, '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$'),
+      'created must be UTC YYYY-MM-DDThh:mm:ssZ, got ' + LCreated);
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TSpdxWriterTests.Write_Created_NormalizesOffsetTimestamp;
+var
+  LJson: TJSONObject;
+  LCreated: string;
+begin
+  // The value reported by tools.spdx.org in issue #40.
+  FMetadata.Timestamp := '2026-05-18T14:27:39.895+10:00';
+  FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo);
+  LJson := LoadOutputJson;
+  try
+    LCreated := (LJson.GetValue('creationInfo') as TJSONObject).GetValue<string>('created');
+    Assert.AreEqual('2026-05-18T04:27:39Z', LCreated,
+      'Fractional seconds are dropped and the offset is converted to UTC');
+  finally
+    LJson.Free;
+  end;
+
+  FMetadata.Timestamp := '2026-02-24T10:00:00.895Z';
+  FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo);
+  LJson := LoadOutputJson;
+  try
+    LCreated := (LJson.GetValue('creationInfo') as TJSONObject).GetValue<string>('created');
+    Assert.AreEqual('2026-02-24T10:00:00Z', LCreated);
+  finally
+    LJson.Free;
+  end;
+
+  FMetadata.Timestamp := '2026-02-24T10:00:00-05:00';
+  FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo);
+  LJson := LoadOutputJson;
+  try
+    LCreated := (LJson.GetValue('creationInfo') as TJSONObject).GetValue<string>('created');
+    Assert.AreEqual('2026-02-24T15:00:00Z', LCreated);
+  finally
+    LJson.Free;
+  end;
+
+  FMetadata.Timestamp := '2026-05-18T14:27:39+1000';
+  FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo);
+  LJson := LoadOutputJson;
+  try
+    LCreated := (LJson.GetValue('creationInfo') as TJSONObject).GetValue<string>('created');
+    Assert.AreEqual('2026-05-18T04:27:39Z', LCreated);
+  finally
+    LJson.Free;
+  end;
+
+  FMetadata.Timestamp := '2026-01-01T01:30:00+10:00';
+  FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo);
+  LJson := LoadOutputJson;
+  try
+    LCreated := (LJson.GetValue('creationInfo') as TJSONObject).GetValue<string>('created');
+    Assert.AreEqual('2025-12-31T15:30:00Z', LCreated,
+      'Offset conversion must cross the day boundary');
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TSpdxWriterTests.Write_ReferenceLocator_ContainsNoWhitespace;
+var
+  LJson: TJSONObject;
+  LPackages: TJSONArray;
+  LPackage, LRef: TJSONObject;
+  LRefs: TJSONArray;
+  LLocator: string;
+  I: Integer;
+begin
+  FArtefacts.Add(MakeArtefact('workshop4\helper tool.dll', 'library', '', 32));
+  FArtefacts.Add(MakeArtefact('tools\workshop4.exe', 'application', '', 64));
+  FArtefacts.Add(MakeArtefact('dist\foo@bar.dll', 'library', '', 8));
+  FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo);
+  LJson := LoadOutputJson;
+  try
+    LPackages := LJson.GetValue('packages') as TJSONArray;
+    for I := 0 to LPackages.Count - 1 do
+    begin
+      LPackage := LPackages.Items[I] as TJSONObject;
+      LRefs := LPackage.GetValue('externalRefs') as TJSONArray;
+      Assert.IsNotNull(LRefs, 'Package must carry an external reference');
+      LRef := LRefs.Items[0] as TJSONObject;
+      LLocator := LRef.GetValue<string>('referenceLocator');
+      Assert.IsFalse(LLocator.Contains(' '),
+        'referenceLocator must not contain spaces: ' + LLocator);
+      Assert.IsFalse(LLocator.Contains(#9), 'referenceLocator must not contain tabs');
+      Assert.IsFalse(LLocator.Contains('\'), 'referenceLocator must use URI separators');
+    end;
+
+    LLocator := ((PackageAt(LJson, 0).GetValue('externalRefs') as TJSONArray)
+      .Items[0] as TJSONObject).GetValue<string>('referenceLocator');
+    Assert.AreEqual('pkg:generic/workshop4/helper%20tool.dll', LLocator,
+      'Spaces in the path must be percent-encoded inside a generic PURL');
+    Assert.IsTrue(LLocator.StartsWith('pkg:generic/'),
+      'referenceLocator must be a Package URL');
+
+    LLocator := ((PackageAt(LJson, 1).GetValue('externalRefs') as TJSONArray)
+      .Items[0] as TJSONObject).GetValue<string>('referenceLocator');
+    Assert.AreEqual('pkg:generic/tools/workshop4.exe', LLocator);
+
+    LLocator := ((PackageAt(LJson, 2).GetValue('externalRefs') as TJSONArray)
+      .Items[0] as TJSONObject).GetValue<string>('referenceLocator');
+    Assert.AreEqual('pkg:generic/dist/foo%40bar.dll', LLocator,
+      '@ must be percent-encoded so it is not read as a purl version');
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TSpdxWriterTests.Write_Package_LicenseAndSupplier;
+var
+  LJson: TJSONObject;
+  LPackage: TJSONObject;
+begin
+  FArtefacts.Add(MakeArtefact('MyApp.exe', 'application', '', 1024));
+  FMetadata.Supplier := 'Test GmbH';
+  FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo);
+  LJson := LoadOutputJson;
+  try
+    LPackage := PackageAt(LJson, 0);
+    Assert.AreEqual('NOASSERTION', LPackage.GetValue<string>('licenseConcluded'));
+    Assert.AreEqual('NOASSERTION', LPackage.GetValue<string>('licenseDeclared'));
+    Assert.AreEqual('Organization: Test GmbH', LPackage.GetValue<string>('supplier'));
+  finally
+    LJson.Free;
+  end;
+
+  FMetadata.Supplier := '';
+  FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo);
+  LJson := LoadOutputJson;
+  try
+    LPackage := PackageAt(LJson, 0);
+    Assert.AreEqual('NOASSERTION', LPackage.GetValue<string>('supplier'),
+      'An empty supplier stays NOASSERTION');
   finally
     LJson.Free;
   end;

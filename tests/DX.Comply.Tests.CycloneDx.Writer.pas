@@ -358,6 +358,10 @@ begin
     Assert.IsNotNull(LMeta, 'metadata object must be present');
     Assert.IsNotNull(LMeta.GetValue('timestamp'),
       'metadata.timestamp must be present');
+    // CycloneDX keeps the supplied timestamp, including offset form.
+    // SPDX is the format that must be rewritten to UTC Z (issue #40).
+    Assert.AreEqual('2026-01-01T00:00:00', LMeta.GetValue<string>('timestamp'),
+      'CycloneDX must pass metadata.timestamp through unchanged');
   finally
     LJson.Free;
   end;
