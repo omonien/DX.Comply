@@ -25,6 +25,7 @@ uses
   DUnitX.TestFramework,
   DUnitX.Loggers.Console,
   DUnitX.Loggers.XML.NUnit,
+  DX.Comply.Tests.Paths in 'DX.Comply.Tests.Paths.pas',
   DX.Comply.Tests.BuildEvidence.Intf in 'DX.Comply.Tests.BuildEvidence.Intf.pas',
   DX.Comply.Tests.BuildEvidence.Reader in 'DX.Comply.Tests.BuildEvidence.Reader.pas',
   DX.Comply.Tests.BuildOrchestrator in 'DX.Comply.Tests.BuildOrchestrator.pas',
@@ -43,7 +44,8 @@ uses
   DX.Comply.Tests.IDE.ReadmeSupport in 'DX.Comply.Tests.IDE.ReadmeSupport.pas',
   DX.Comply.Tests.Engine in 'DX.Comply.Tests.Engine.pas',
   DX.Comply.Tests.CLI.Options in 'DX.Comply.Tests.CLI.Options.pas',
-  DX.Comply.Tests.UsesClauseParser in 'DX.Comply.Tests.UsesClauseParser.pas';
+  DX.Comply.Tests.UsesClauseParser in 'DX.Comply.Tests.UsesClauseParser.pas',
+  DX.Comply.Tests.VersionInfo in 'DX.Comply.Tests.VersionInfo.pas';
 
 var
   LRunner: ITestRunner;

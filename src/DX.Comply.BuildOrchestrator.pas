@@ -57,6 +57,16 @@ type
     ExpectedMapFilePath: string;
     AdditionalMSBuildProperties: TArray<string>;
     CommandLine: string;
+    /// <summary>
+    /// How ScriptPath was chosen: override, bundled, or module-parents.
+    /// Empty when no script was found.
+    /// </summary>
+    ScriptSource: string;
+    /// <summary>
+    /// Maximum time ExecutePlan waits for the build process, in milliseconds.
+    /// Zero uses the built-in default (30 minutes).
+    /// </summary>
+    TimeoutMs: Cardinal;
   end;
 
   /// <summary>
@@ -100,10 +110,11 @@ type
   private
     const
       cDetailedMapProperty = 'DCC_MapFile=3';
-    /// <summary>
-    /// Builds the expected repository root from the project metadata.
-    /// </summary>
-    function GetRepositoryRoot(const AProjectInfo: TProjectInfo): string;
+      cBuildScriptFileName = 'DelphiBuildDPROJ.ps1';
+      cScriptSourceOverride = 'override';
+      cScriptSourceBundled = 'bundled';
+      cScriptSourceModuleParents = 'module-parents';
+      cDefaultBuildTimeoutMs = 30 * 60 * 1000;
     /// <summary>
     /// Returns the directory of the currently loaded module.
     /// </summary>
@@ -113,18 +124,40 @@ type
     /// </summary>
     function FindBuildScriptFromDirectory(const AStartDirectory: string): string;
     /// <summary>
-    /// Resolves the effective build script path, honoring user overrides first.
+    /// Returns the script installed next to the DX.Comply binary, if present.
     /// </summary>
-    function ResolveBuildScriptPath(const AProjectInfo: TProjectInfo;
-      const ABuildScriptPathOverride: string): string;
+    function FindBundledBuildScript: string;
+    /// <summary>
+    /// Resolves the effective build script path, honoring user overrides first.
+    /// ASource receives override, bundled, or module-parents.
+    /// </summary>
+    function ResolveBuildScriptPath(const ABuildScriptPathOverride: string;
+      out ASource: string): string;
     /// <summary>
     /// Quotes one command-line argument.
     /// </summary>
     function QuoteArgument(const AValue: string): string;
     /// <summary>
+    /// True when AValue is one shell-safe token.
+    /// </summary>
+    function IsSafeBuildToken(const AValue: string): Boolean;
+    /// <summary>
+    /// Appends a quoted switch, or raises when a non-empty value is not a safe token.
+    /// </summary>
+    procedure AppendSafeTokenSwitch(var ACommandLine: string;
+      const AName, ASwitch, AValue: string);
+    /// <summary>
     /// Builds the PowerShell command line for the given plan.
     /// </summary>
     function BuildCommandLine(const APlan: TDeepEvidenceBuildPlan): string;
+    /// <summary>
+    /// Describes which script ExecutePlan is about to run.
+    /// </summary>
+    function ScriptExecutionNote(const APlan: TDeepEvidenceBuildPlan): string;
+    /// <summary>
+    /// Timeout used for one plan. Zero selects the default.
+    /// </summary>
+    function ResolveBuildTimeoutMs(const APlan: TDeepEvidenceBuildPlan): UInt64;
   public
     function CreatePlan(const AProjectInfo: TProjectInfo;
       const AOptions: TDeepEvidenceBuildOptions): TDeepEvidenceBuildPlan;
@@ -180,21 +213,34 @@ begin
   Result.BuildScriptPathOverride := '';
 end;
 
+procedure TBuildOrchestrator.AppendSafeTokenSwitch(var ACommandLine: string;
+  const AName, ASwitch, AValue: string);
+begin
+  if AValue = '' then
+    Exit;
+  if not IsSafeBuildToken(AValue) then
+    raise EArgumentException.Create(AName +
+      ' must be a single token of letters, digits, ".", "_", "+" or "-".');
+  ACommandLine := ACommandLine + ' ' + ASwitch + ' ' + QuoteArgument(AValue);
+end;
+
 function TBuildOrchestrator.BuildCommandLine(const APlan: TDeepEvidenceBuildPlan): string;
 var
   LMsBuildProperty: string;
 begin
+  // Names match DelphiBuildDPROJ.ps1. The script still accepts the previous
+  // names (-ProjectPath, -Configuration, -AdditionalMSBuildProperties) as aliases.
   Result := 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File ' +
     QuoteArgument(APlan.ScriptPath) +
-    ' -ProjectPath ' + QuoteArgument(APlan.ProjectPath) +
-    ' -Configuration ' + APlan.Configuration +
-    ' -Platform ' + APlan.Platform;
+    ' -ProjectFile ' + QuoteArgument(APlan.ProjectPath);
+  AppendSafeTokenSwitch(Result, 'Configuration', '-Config', APlan.Configuration);
+  AppendSafeTokenSwitch(Result, 'Platform', '-Platform', APlan.Platform);
 
   if APlan.DelphiVersion > 0 then
-    Result := Result + ' -DelphiVersion ' + IntToStr(APlan.DelphiVersion);
+    Result := Result + ' -DelphiVersion ' + QuoteArgument(IntToStr(APlan.DelphiVersion));
 
   for LMsBuildProperty in APlan.AdditionalMSBuildProperties do
-    Result := Result + ' -AdditionalMSBuildProperties ' + QuoteArgument(LMsBuildProperty);
+    Result := Result + ' -ExtraProperty ' + QuoteArgument(LMsBuildProperty);
 end;
 
 function TBuildOrchestrator.CreatePlan(const AProjectInfo: TProjectInfo;
@@ -208,13 +254,15 @@ begin
   if (LProjectDirectory = '') and (AProjectInfo.ProjectPath <> '') then
     LProjectDirectory := TPath.GetDirectoryName(AProjectInfo.ProjectPath);
   Result.WorkingDirectory := LProjectDirectory;
-  Result.ScriptPath := ResolveBuildScriptPath(AProjectInfo, AOptions.BuildScriptPathOverride);
+  Result.ScriptPath := ResolveBuildScriptPath(AOptions.BuildScriptPathOverride,
+    Result.ScriptSource);
   Result.ProjectPath := AProjectInfo.ProjectPath;
   Result.Platform := AProjectInfo.Platform;
   Result.Configuration := AProjectInfo.Configuration;
   Result.DelphiVersion := AOptions.DelphiVersion;
   Result.ExpectedMapFilePath := AProjectInfo.MapFilePath;
   Result.AdditionalMSBuildProperties := [cDetailedMapProperty];
+  Result.TimeoutMs := cDefaultBuildTimeoutMs;
 
   case AOptions.Mode of
     debAlways:
@@ -274,6 +322,7 @@ end;
 
 function TBuildOrchestrator.ExecutePlan(const APlan: TDeepEvidenceBuildPlan): TDeepEvidenceBuildResult;
 var
+  LAvailable: DWORD;
   LBytesRead: Cardinal;
   LBuffer: TBytes;
   LCommandLine: string;
@@ -281,8 +330,34 @@ var
   LOutputBuilder: TStringBuilder;
   LPipeRead, LPipeWrite: THandle;
   LProcessInfo: TProcessInformation;
+  LProcessStarted: Boolean;
   LSecurityAttributes: TSecurityAttributes;
+  LStartTick: UInt64;
   LStartupInfo: TStartupInfo;
+  LTimedOut: Boolean;
+  LTimeoutMs: UInt64;
+  LWorkDir: PChar;
+
+  procedure AppendPipeText;
+  begin
+    if LBytesRead > 0 then
+      LOutputBuilder.Append(TEncoding.UTF8.GetString(LBuffer, 0, LBytesRead));
+  end;
+
+  function DrainAvailableOutput: Boolean;
+  begin
+    Result := True;
+    LAvailable := 0;
+    while PeekNamedPipe(LPipeRead, nil, 0, nil, @LAvailable, nil) and (LAvailable > 0) do
+    begin
+      if not ReadFile(LPipeRead, LBuffer[0], Length(LBuffer), LBytesRead, nil) then
+        Exit(False);
+      AppendPipeText;
+      if LBytesRead = 0 then
+        Exit(False);
+    end;
+  end;
+
 begin
   Result := Default(TDeepEvidenceBuildResult);
   Result.Success := True;
@@ -304,6 +379,8 @@ begin
 
   LPipeRead := 0;
   LPipeWrite := 0;
+  LProcessStarted := False;
+  FillChar(LProcessInfo, SizeOf(LProcessInfo), 0);
   FillChar(LSecurityAttributes, SizeOf(LSecurityAttributes), 0);
   LSecurityAttributes.nLength := SizeOf(LSecurityAttributes);
   LSecurityAttributes.bInheritHandle := True;
@@ -324,73 +401,98 @@ begin
     LStartupInfo.wShowWindow := SW_HIDE;
     LStartupInfo.hStdOutput := LPipeWrite;
     LStartupInfo.hStdError := LPipeWrite;
-    FillChar(LProcessInfo, SizeOf(LProcessInfo), 0);
 
     LCommandLine := APlan.CommandLine;
     UniqueString(LCommandLine);
+    if APlan.WorkingDirectory <> '' then
+      LWorkDir := PChar(APlan.WorkingDirectory)
+    else
+      LWorkDir := nil;
 
     if not CreateProcess(nil, PChar(LCommandLine), nil, nil, True, CREATE_NO_WINDOW,
-      nil, PChar(APlan.WorkingDirectory), LStartupInfo, LProcessInfo) then
+      nil, LWorkDir, LStartupInfo, LProcessInfo) then
     begin
       Result.Success := False;
       Result.Message := 'Failed to start build process: ' + GetEnglishSystemError(GetLastError);
       Exit;
     end;
+    LProcessStarted := True;
 
     CloseHandle(LPipeWrite);
     LPipeWrite := 0;
 
     Result.Executed := True;
+    Result.Message := ScriptExecutionNote(APlan);
+    LTimedOut := False;
+    LTimeoutMs := ResolveBuildTimeoutMs(APlan);
+    LStartTick := GetTickCount64;
     LOutputBuilder := TStringBuilder.Create;
     try
       SetLength(LBuffer, 4096);
-      while ReadFile(LPipeRead, LBuffer[0], Length(LBuffer), LBytesRead, nil) and (LBytesRead > 0) do
-        LOutputBuilder.Append(TEncoding.UTF8.GetString(LBuffer, 0, LBytesRead));
+      while True do
+      begin
+        if (GetTickCount64 - LStartTick) >= LTimeoutMs then
+        begin
+          LTimedOut := True;
+          TerminateProcess(LProcessInfo.hProcess, 1);
+          WaitForSingleObject(LProcessInfo.hProcess, 5000);
+          Break;
+        end;
+
+        if not DrainAvailableOutput then
+          Break;
+
+        if WaitForSingleObject(LProcessInfo.hProcess, 200) = WAIT_OBJECT_0 then
+        begin
+          DrainAvailableOutput;
+          Break;
+        end;
+      end;
       Result.Output := Trim(LOutputBuilder.ToString);
     finally
       LOutputBuilder.Free;
     end;
 
-    WaitForSingleObject(LProcessInfo.hProcess, INFINITE);
     if not GetExitCodeProcess(LProcessInfo.hProcess, LExitCode) then
       LExitCode := Cardinal(-1);
     Result.ExitCode := Integer(LExitCode);
-    Result.Success := Result.ExitCode = 0;
 
-    if Result.Success and (APlan.ExpectedMapFilePath <> '') and
-       not TFile.Exists(APlan.ExpectedMapFilePath) then
+    if LTimedOut then
     begin
       Result.Success := False;
-      Result.Message := 'Build succeeded but the expected map file was not generated: ' +
-        APlan.ExpectedMapFilePath;
+      Result.Message := 'Deep-Evidence build timed out after ' +
+        IntToStr(LTimeoutMs div 1000) + ' seconds. ' + ScriptExecutionNote(APlan);
     end
-    else if Result.Success then
-      Result.Message := 'Deep-Evidence build completed successfully.'
     else
-      Result.Message := 'Deep-Evidence build failed with exit code ' + IntToStr(Result.ExitCode) + '.';
+    begin
+      Result.Success := Result.ExitCode = 0;
 
-    CloseHandle(LProcessInfo.hThread);
-    CloseHandle(LProcessInfo.hProcess);
+      if Result.Success and (APlan.ExpectedMapFilePath <> '') and
+         not TFile.Exists(APlan.ExpectedMapFilePath) then
+      begin
+        Result.Success := False;
+        Result.Message := 'Build succeeded but the expected map file was not generated: ' +
+          APlan.ExpectedMapFilePath + ' ' + ScriptExecutionNote(APlan);
+      end
+      else if Result.Success then
+        Result.Message := 'Deep-Evidence build completed successfully. ' + ScriptExecutionNote(APlan)
+      else
+        Result.Message := 'Deep-Evidence build failed with exit code ' +
+          IntToStr(Result.ExitCode) + '. ' + ScriptExecutionNote(APlan);
+    end;
   finally
+    if LProcessStarted then
+    begin
+      if LProcessInfo.hThread <> 0 then
+        CloseHandle(LProcessInfo.hThread);
+      if LProcessInfo.hProcess <> 0 then
+        CloseHandle(LProcessInfo.hProcess);
+    end;
     if LPipeRead <> 0 then
       CloseHandle(LPipeRead);
     if LPipeWrite <> 0 then
       CloseHandle(LPipeWrite);
   end;
-end;
-
-function TBuildOrchestrator.GetRepositoryRoot(const AProjectInfo: TProjectInfo): string;
-var
-  LProjectDir: string;
-begin
-  LProjectDir := AProjectInfo.ProjectDir;
-  if (LProjectDir = '') and (AProjectInfo.ProjectPath <> '') then
-    LProjectDir := TPath.GetDirectoryName(AProjectInfo.ProjectPath);
-
-  if LProjectDir = '' then
-    Exit('');
-
-  Result := TPath.GetFullPath(TPath.Combine(LProjectDir, '..'));
 end;
 
 function TBuildOrchestrator.GetModuleDirectory: string;
@@ -407,32 +509,91 @@ begin
     Result := TPath.GetDirectoryName(ParamStr(0));
 end;
 
+function TBuildOrchestrator.IsSafeBuildToken(const AValue: string): Boolean;
+var
+  I: Integer;
+  LChar: Char;
+begin
+  Result := AValue <> '';
+  if not Result then
+    Exit;
+  for I := 1 to Length(AValue) do
+  begin
+    LChar := AValue[I];
+    if not CharInSet(LChar, ['A'..'Z', 'a'..'z', '0'..'9', '.', '_', '+', '-']) then
+      Exit(False);
+  end;
+end;
+
 function TBuildOrchestrator.QuoteArgument(const AValue: string): string;
 begin
   Result := '"' + StringReplace(AValue, '"', '""', [rfReplaceAll]) + '"';
 end;
 
-function TBuildOrchestrator.ResolveBuildScriptPath(const AProjectInfo: TProjectInfo;
-  const ABuildScriptPathOverride: string): string;
-var
-  LProjectDirectory: string;
+function TBuildOrchestrator.ResolveBuildTimeoutMs(const APlan: TDeepEvidenceBuildPlan): UInt64;
 begin
+  if APlan.TimeoutMs = 0 then
+    Result := cDefaultBuildTimeoutMs
+  else
+    Result := APlan.TimeoutMs;
+end;
+
+function TBuildOrchestrator.ScriptExecutionNote(const APlan: TDeepEvidenceBuildPlan): string;
+begin
+  Result := 'Build script: ' + APlan.ScriptPath;
+  if APlan.ScriptSource = cScriptSourceOverride then
+    Result := Result + ' (configured override)'
+  else if APlan.ScriptSource = cScriptSourceBundled then
+    Result := Result + ' (shipped beside the DX.Comply binary)'
+  else if APlan.ScriptSource = cScriptSourceModuleParents then
+    Result := Result + ' (found by searching parent directories of the DX.Comply module)';
+end;
+
+function TBuildOrchestrator.FindBundledBuildScript: string;
+var
+  LModuleDir: string;
+  LCandidate: string;
+begin
+  Result := '';
+  LModuleDir := GetModuleDirectory;
+  if LModuleDir = '' then
+    Exit;
+
+  LCandidate := TPath.Combine(LModuleDir, cBuildScriptFileName);
+  if TFile.Exists(LCandidate) then
+    Exit(TPath.GetFullPath(LCandidate));
+
+  // IDE package: {app}\bpl\DX.Comply.IDE*.bpl, script installed in {app}\bin.
+  LCandidate := TPath.GetFullPath(TPath.Combine(LModuleDir, '..\bin\' + cBuildScriptFileName));
+  if TFile.Exists(LCandidate) then
+    Exit(LCandidate);
+end;
+
+function TBuildOrchestrator.ResolveBuildScriptPath(const ABuildScriptPathOverride: string;
+  out ASource: string): string;
+var
+  LBundled: string;
+begin
+  ASource := '';
   if Trim(ABuildScriptPathOverride) <> '' then
+  begin
+    ASource := cScriptSourceOverride;
     Exit(TPath.GetFullPath(ABuildScriptPathOverride));
+  end;
+
+  // Prefer the copy shipped next to the binary. Do not walk the project
+  // being scanned: that tree can supply a script which then runs with
+  // -ExecutionPolicy Bypass.
+  LBundled := FindBundledBuildScript;
+  if LBundled <> '' then
+  begin
+    ASource := cScriptSourceBundled;
+    Exit(LBundled);
+  end;
 
   Result := FindBuildScriptFromDirectory(GetModuleDirectory);
   if Result <> '' then
-    Exit;
-
-  LProjectDirectory := AProjectInfo.ProjectDir;
-  if (LProjectDirectory = '') and (AProjectInfo.ProjectPath <> '') then
-    LProjectDirectory := TPath.GetDirectoryName(AProjectInfo.ProjectPath);
-
-  Result := FindBuildScriptFromDirectory(LProjectDirectory);
-  if Result <> '' then
-    Exit;
-
-  Result := FindBuildScriptFromDirectory(GetRepositoryRoot(AProjectInfo));
+    ASource := cScriptSourceModuleParents;
 end;
 
 end.

@@ -7305,7 +7305,12 @@
     {
       "ref": "AlienInvasion",
       "dependsOn": [
-        "comp-0",
+        "comp-0"
+      ]
+    },
+    {
+      "ref": "comp-0",
+      "dependsOn": [
         "comp-1",
         "comp-2",
         "comp-3",

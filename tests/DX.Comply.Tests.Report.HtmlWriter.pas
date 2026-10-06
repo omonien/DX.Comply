@@ -51,6 +51,14 @@ type
 
     [Test]
     procedure Write_CreatesReadableHtmlReport;
+
+    /// <summary>
+    /// An external DLL recorded by the source scan has no file on disk
+    /// (size -1, empty hash) and must still appear in the Artefacts table.
+    /// Issue #45.
+    /// </summary>
+    [Test]
+    procedure Write_ExternalDllReference_AppearsInArtefactsTable;
   end;
 
 implementation
@@ -182,6 +190,35 @@ begin
   Assert.IsTrue(Pos('class="table-wrap"', LContent) > 0);
   Assert.IsTrue(Pos('overflow-wrap:anywhere', LContent) > 0);
   Assert.IsTrue(Pos('One third-party unit was resolved heuristically.', LContent) > 0);
+end;
+
+procedure THtmlReportWriterTests.Write_ExternalDllReference_AppearsInArtefactsTable;
+var
+  LArtefact: TArtefactInfo;
+  LConfig: THumanReadableReportConfig;
+  LContent: string;
+  LWriter: IHumanReadableReportWriter;
+begin
+  LArtefact := Default(TArtefactInfo);
+  LArtefact.RelativePath := 'uastack_64.dll';
+  LArtefact.ArtefactType := 'external-reference';
+  LArtefact.FileSize := -1;
+  LArtefact.Hash := '';
+  LArtefact.Evidence := 'DLL';
+  LArtefact.Confidence := 'Source-scan';
+  FArtefacts.Add(LArtefact);
+
+  LConfig := THumanReadableReportConfig.Default;
+  LWriter := THtmlReportWriter.Create;
+  Assert.IsTrue(LWriter.Write(FOutputPath, FData, LConfig));
+
+  LContent := TFile.ReadAllText(FOutputPath, TEncoding.UTF8);
+  Assert.IsTrue(Pos('uastack_64.dll', LContent) > 0,
+    'an external DLL with no file on disk must be listed in the HTML report');
+  Assert.IsTrue(Pos('external-reference', LContent) > 0,
+    'the external DLL must be labelled as an external-reference artefact');
+  Assert.IsTrue(Pos('>n/a<', LContent) > 0,
+    'a missing file size must be shown as n/a rather than omitting the row');
 end;
 
 initialization

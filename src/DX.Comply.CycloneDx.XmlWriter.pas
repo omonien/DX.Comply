@@ -7,7 +7,7 @@
 /// This unit provides TCycloneDxXmlWriter which generates CycloneDX 1.5 XML SBOMs:
 /// - Full metadata section with tool information
 /// - Component list with hashes (SHA-256)
-/// - Basic dependency graph
+/// - Dependency graph grouped by deliverable, runtime packages, external DLLs and linked units
 /// - Schema validation support
 ///
 /// The XML output conforms to the CycloneDX 1.5 XSD schema:
@@ -44,7 +44,6 @@ type
       cSpecVersion = '1.5';
       cNamespace = 'http://cyclonedx.org/schema/bom/1.5';
       cToolName = 'DX.Comply';
-      cToolVersion = '1.0.0';
       cIndent = '  ';
   private
     FLines: TStringList;
@@ -72,7 +71,9 @@ type
 implementation
 
 uses
-  System.RegularExpressions;
+  System.RegularExpressions,
+  DX.Comply.Schema.Validator,
+  DX.Comply.VersionInfo;
 
 { TCycloneDxXmlWriter }
 
@@ -162,21 +163,27 @@ begin
   else
     AddElement('timestamp', DateToISO8601(Now, False));
 
-  AddPropertyElements(AMetadata.Properties);
-
-  // CycloneDX 1.5 XML uses <tools><tool> (not <tools><components>)
+  // CycloneDX 1.5 metadata sequence: timestamp, lifecycles, tools, authors,
+  // component, manufacture, supplier, licenses, properties.
   OpenTag('tools');
   OpenTag('tool');
   AddElement('vendor', 'Olaf Monien');
   AddElement('name', cToolName);
-  AddElement('version', cToolVersion);
+  AddElement('version', ResolveDxComplyToolVersion(AMetadata.ToolVersion));
   CloseTag('tool');
   CloseTag('tools');
 
   // Component (the project being documented). Prefer metadata overrides
-  // (CLI --product / --version) over values from the .dproj — issue #26.
+  // (CLI --product / --version) over values from the .dproj. Issue #26.
+  // Component sequence places supplier before name and version.
   OpenTag('component', 'type="application" bom-ref="' +
     EscapeXml(AProjectInfo.ProjectName) + '"');
+  if AMetadata.Supplier <> '' then
+  begin
+    OpenTag('supplier');
+    AddElement('name', AMetadata.Supplier);
+    CloseTag('supplier');
+  end;
   if AMetadata.ProductName <> '' then
     AddElement('name', AMetadata.ProductName)
   else
@@ -185,14 +192,10 @@ begin
     AddElement('version', AMetadata.ProductVersion)
   else if AProjectInfo.Version <> '' then
     AddElement('version', AProjectInfo.Version);
-  if AMetadata.Supplier <> '' then
-  begin
-    OpenTag('supplier');
-    AddElement('name', AMetadata.Supplier);
-    CloseTag('supplier');
-  end;
   AddPropertyElements(AMetadata.ComponentProperties);
   CloseTag('component');
+
+  AddPropertyElements(AMetadata.Properties);
 
   CloseTag('metadata');
 end;
@@ -221,8 +224,7 @@ begin
   if AArtefact.Hash <> '' then
     AddElement('version', Copy(AArtefact.Hash, 1, 12));
 
-  AddElement('purl', 'file:' + AArtefact.RelativePath);
-
+  // Component sequence: name, version, then hashes, then purl, then properties.
   if AArtefact.Hash <> '' then
   begin
     OpenTag('hashes');
@@ -235,7 +237,14 @@ begin
     CloseTag('hashes');
   end;
 
-  if (AArtefact.FileSize >= 0) or (Trim(AArtefact.Origin) <> '') then
+  AddElement('purl', 'file:' + AArtefact.RelativePath);
+
+  // Evidence and confidence must be written for source-scanned DLLs, which
+  // have no file on disk (size -1) and an empty origin. Gating the whole
+  // block on size or origin dropped those properties. Issue #45.
+  if (AArtefact.FileSize >= 0) or (Trim(AArtefact.Origin) <> '') or
+     (Trim(AArtefact.Evidence) <> '') or (Trim(AArtefact.Confidence) <> '') or
+     AArtefact.Conditional then
   begin
     OpenTag('properties');
     if AArtefact.FileSize >= 0 then
@@ -266,6 +275,13 @@ begin
       FLines[FLines.Count - 1] := StringOfChar(' ', FIndentLevel * 2) +
         '<property name="net.developer-experts.dx-comply:confidence">' + EscapeXml(AArtefact.Confidence) + '</property>';
     end;
+    if AArtefact.Conditional then
+    begin
+      OpenTag('property', 'name="net.developer-experts.dx-comply:conditional"');
+      Dec(FIndentLevel);
+      FLines[FLines.Count - 1] := StringOfChar(' ', FIndentLevel * 2) +
+        '<property name="net.developer-experts.dx-comply:conditional">true</property>';
+    end;
     CloseTag('properties');
   end;
 
@@ -286,12 +302,33 @@ procedure TCycloneDxXmlWriter.BuildDependencies(const AArtefacts: TArtefactList;
   const AProjectBomRef: string);
 var
   I: Integer;
+  LGroup: Integer;
+  LTargetIndex: Integer;
 begin
+  // Same shape as the JSON writer: project -> deliverable, and the
+  // deliverable depends on runtime packages, external DLLs and linked units.
   OpenTag('dependencies');
+  LTargetIndex := FindDeliverableTargetIndex(AArtefacts, AProjectBomRef);
+
   OpenTag('dependency', 'ref="' + EscapeXml(AProjectBomRef) + '"');
-  for I := 0 to AArtefacts.Count - 1 do
-    AddLine('<dependency ref="comp-' + IntToStr(I) + '"/>');
+  if LTargetIndex >= 0 then
+    AddLine('<dependency ref="comp-' + IntToStr(LTargetIndex) + '"/>')
+  else if Assigned(AArtefacts) then
+    for I := 0 to AArtefacts.Count - 1 do
+      AddLine('<dependency ref="comp-' + IntToStr(I) + '"/>');
   CloseTag('dependency');
+
+  if (LTargetIndex >= 0) and Assigned(AArtefacts) and (AArtefacts.Count > 1) then
+  begin
+    OpenTag('dependency', 'ref="comp-' + IntToStr(LTargetIndex) + '"');
+    for LGroup := 0 to 3 do
+      for I := 0 to AArtefacts.Count - 1 do
+        if (I <> LTargetIndex) and
+           (ArtefactDependencyGroup(AArtefacts[I]) = LGroup) then
+          AddLine('<dependency ref="comp-' + IntToStr(I) + '"/>');
+    CloseTag('dependency');
+  end;
+
   CloseTag('dependencies');
 end;
 
@@ -372,6 +409,11 @@ begin
 
   // Check for metadata section
   if Pos('<metadata', AContent) = 0 then
+    Exit;
+
+  // Presence of the expected tags is not enough: metadata.properties before
+  // tools, or component.purl before hashes, is invalid against bom-1.5.xsd.
+  if Length(CycloneDxXmlSequenceErrors(AContent)) > 0 then
     Exit;
 
   Result := True;

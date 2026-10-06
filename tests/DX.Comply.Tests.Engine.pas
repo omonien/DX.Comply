@@ -8,8 +8,8 @@
 /// SBOM generation against the real engine .dproj, configuration defaults,
 /// and GenerateFromConfig fall-back behaviour when no config file exists.
 ///
-/// Integration tests (Generate_ValidProject_*) require DX.Comply.Engine.dproj
-/// to be reachable at build\Win32\Debug\..\..\..\src\.
+/// Integration tests (Generate_ValidProject_*) load DX.Comply.Engine.dproj
+/// through RepoRoot in DX.Comply.Tests.Paths.
 /// </remarks>
 ///
 /// <copyright>
@@ -31,7 +31,8 @@ uses
   DX.Comply.BuildOrchestrator,
   DX.Comply.Engine,
   DX.Comply.Engine.Intf,
-  DX.Comply.Report.Intf;
+  DX.Comply.Report.Intf,
+  DX.Comply.VersionInfo;
 
 type
   /// <summary>
@@ -45,7 +46,7 @@ type
     FProgressMessages: TStringList;
     FProgressValues: TList<Integer>;
     /// <summary>
-    /// Absolute path to DX.Comply.Engine.dproj resolved from the test binary location.
+    /// Absolute path to DX.Comply.Engine.dproj, resolved by RepoRoot.
     /// </summary>
     FEngineDprojPath: string;
     /// <summary>
@@ -96,11 +97,19 @@ type
     [Test]
     procedure Generate_OutputFileContainsValidJson;
 
+    /// <summary>The generated SBOM tool version must match the running module.</summary>
+    [Test]
+    procedure Generate_ToolVersion_MatchesModule;
+
     /// <summary>The generated SBOM must include DX.Comply Deep-Evidence metadata properties.</summary>
     [Test]
     procedure Generate_OutputFileContainsDxComplyMetadataProperties;
 
-    /// <summary>The generated SBOM must also persist consolidated per-unit evidence in formal metadata.</summary>
+    /// <summary>
+    /// Unit-evidence library components for resolved files must include hashes.
+    /// Runtime packages and source-scanned DLLs are also type library and carry
+    /// an empty hash on purpose, so they are not part of this check.
+    /// </summary>
     [Test]
     procedure Generate_OutputFileContainsUnitEvidenceProperties;
 
@@ -195,9 +204,79 @@ type
     /// </summary>
     [Test]
     procedure ScanPasFiles_ConstInOtherUnit_ResolvesViaGlobalFallback;
+
+    /// <summary>external 'kernel32.dll' must still be detected, and {$I+} must not be treated as an include.</summary>
+    [Test]
+    procedure ScanPasFiles_ExternalLiteral_DetectsDllName;
+
+    /// <summary>external DLLName must resolve a const in the same unit.</summary>
+    [Test]
+    procedure ScanPasFiles_ExternalIdentifier_ResolvesConst;
+
+    /// <summary>
+    /// The reported OPC UA stack pattern: the external declaration lives in
+    /// an include, and the DLL name const has two {$IFDEF} branches.
+    /// Both file names must be reported and marked conditional. Issue #45.
+    /// </summary>
+    [Test]
+    procedure ScanPasFiles_ExternalInInclude_IfdefConst_ResolvesBothNames;
+
+    /// <summary>
+    /// An include that is not next to the unit must still be found on the
+    /// search path. Issue #45.
+    /// </summary>
+    [Test]
+    procedure ScanPasFiles_IncludeOnSearchPath_ResolvesExternalDll;
+
+    /// <summary>LoadLibrary(CONST) inside an include must resolve a const declared in the including unit.</summary>
+    [Test]
+    procedure ScanPasFiles_LoadLibraryInInclude_ResolvesConst;
+
+    /// <summary>external NotADll must not be reported when the identifier is not a const.</summary>
+    [Test]
+    procedure ScanPasFiles_UnresolvedExternalIdent_IsIgnored;
+
+    // ---- .dxcomply.json loading (issue #50) --------------------------------
+
+    /// <summary>configName and platform keys are stored on the loaded config.</summary>
+    [Test]
+    procedure LoadConfig_ConfigNameAndPlatform;
+
+    /// <summary>A JSON array root must not raise and must keep defaults.</summary>
+    [Test]
+    procedure LoadConfig_NonObjectRoot_ReturnsDefaults;
+
+    /// <summary>
+    /// deepEvidence.build must not override deepEvidence.mode. The boolean
+    /// used to be dead code that always stored when-map-missing.
+    /// </summary>
+    [Test]
+    procedure LoadConfig_DeepEvidenceBuild_DoesNotOverrideMode;
+
+    /// <summary>
+    /// A file configName applies when the caller did not pass one explicitly.
+    /// </summary>
+    [Test]
+    procedure GenerateFromConfig_FileValues_ApplyWhenNotExplicit;
+
+    /// <summary>
+    /// Explicit caller fields win over the file. Omitted fields keep the file.
+    /// </summary>
+    [Test]
+    procedure GenerateFromConfig_ExplicitCaller_OverridesFile;
+
+    /// <summary>
+    /// --include-platform-in-output decorates the file output using the
+    /// merged platform and configuration, unless --output was explicit.
+    /// </summary>
+    [Test]
+    procedure GenerateFromConfig_IncludePlatformInOutput_DecoratesMergedOutput;
   end;
 
 implementation
+
+uses
+  DX.Comply.Tests.Paths;
 
 { TEngineTests }
 
@@ -214,13 +293,10 @@ begin
   FProgressMessages := TStringList.Create;
   FProgressValues   := TList<Integer>.Create;
 
-  // Resolve path to the engine dproj fixture.
-  // Test binary is placed in: build\<Platform>\<Config>\
-  // Engine dproj is at:       src\DX.Comply.Engine.dproj
-  FEngineDprojPath := TPath.GetFullPath(
-    TPath.Combine(TPath.GetDirectoryName(ParamStr(0)),
-      '..' + PathDelim + '..' + PathDelim + '..' + PathDelim +
-      'src' + PathDelim + 'DX.Comply.Engine.dproj'));
+  // Engine dproj is at <repo>\src\DX.Comply.Engine.dproj. RepoRoot finds the
+  // checkout when the executable is outside build\(platform)\(config)\.
+  FEngineDprojPath := TPath.Combine(RepoRoot,
+    'src' + PathDelim + 'DX.Comply.Engine.dproj');
 end;
 
 procedure TEngineTests.TearDown;
@@ -373,6 +449,33 @@ begin
   end;
 end;
 
+procedure TEngineTests.Generate_ToolVersion_MatchesModule;
+var
+  LComponents: TJSONArray;
+  LGen: TDxComplyGenerator;
+  LJson, LMetadata, LTool, LTools: TJSONObject;
+begin
+  LGen := TDxComplyGenerator.Create;
+  try
+    LGen.OnProgress := OnProgress;
+    Assert.IsTrue(LGen.Generate(FEngineDprojPath, FOutputFile),
+      'Generate must succeed before the tool version can be checked');
+    LJson := TJSONObject.ParseJSONValue(TFile.ReadAllText(FOutputFile, TEncoding.UTF8)) as TJSONObject;
+    try
+      LMetadata := LJson.GetValue('metadata') as TJSONObject;
+      LTools := LMetadata.GetValue('tools') as TJSONObject;
+      LComponents := LTools.GetValue('components') as TJSONArray;
+      LTool := LComponents.Items[0] as TJSONObject;
+      Assert.AreEqual(GetDxComplyToolVersion, LTool.GetValue<string>('version'),
+        'The generated SBOM tool version must match the running module');
+    finally
+      LJson.Free;
+    end;
+  finally
+    LGen.Free;
+  end;
+end;
+
 procedure TEngineTests.Generate_OutputFileContainsDxComplyMetadataProperties;
 var
   LBomProperties: TJSONArray;
@@ -436,16 +539,69 @@ begin
 end;
 
 procedure TEngineTests.Generate_OutputFileContainsUnitEvidenceProperties;
+const
+  cEvidenceProperty = 'net.developer-experts.dx-comply:evidence';
+  cConfidenceProperty = 'net.developer-experts.dx-comply:confidence';
+  cFileSizeProperty = 'file:size';
 var
   LComponents: TJSONArray;
   LComponentObj: TJSONObject;
   LConfig: TSbomConfig;
   LGen: TDxComplyGenerator;
   LContent: string;
+  LHashObj: TJSONObject;
+  LHashes: TJSONArray;
   LJson: TJSONObject;
-  LFoundLibrary: Boolean;
+  LName: string;
   LTestsDprojPath: string;
+  LUnitEvidenceCount: Integer;
   I: Integer;
+
+  function PropertyValue(const AComponent: TJSONObject; const AName: string): string;
+  var
+    J: Integer;
+    LProperties: TJSONArray;
+    LProperty: TJSONObject;
+  begin
+    Result := '';
+    LProperties := AComponent.GetValue('properties') as TJSONArray;
+    if not Assigned(LProperties) then
+      Exit;
+
+    for J := 0 to LProperties.Count - 1 do
+    begin
+      if not (LProperties.Items[J] is TJSONObject) then
+        Continue;
+      LProperty := TJSONObject(LProperties.Items[J]);
+      if SameText(LProperty.GetValue<string>('name', ''), AName) then
+        Exit(LProperty.GetValue<string>('value', ''));
+    end;
+  end;
+
+  function IsUnitEvidence(const AComponent: TJSONObject): Boolean;
+  var
+    LConfidence: string;
+    LEvidence: string;
+  begin
+    Result := False;
+    if not SameText(AComponent.GetValue<string>('type', ''), 'library') then
+      Exit;
+
+    LEvidence := PropertyValue(AComponent, cEvidenceProperty);
+    if LEvidence = '' then
+      Exit;
+
+    // Runtime packages are declared BPLs. Source-scanned DLLs use confidence
+    // Source-scan. Both are type library and have an empty hash on purpose.
+    LConfidence := PropertyValue(AComponent, cConfidenceProperty);
+    if SameText(LConfidence, 'Source-scan') then
+      Exit;
+    if SameText(LEvidence, 'BPL') and SameText(LConfidence, 'Declared') then
+      Exit;
+
+    Result := True;
+  end;
+
 begin
   LTestsDprojPath := TPath.Combine(
     TPath.GetDirectoryName(TPath.GetDirectoryName(FEngineDprojPath)),
@@ -473,21 +629,31 @@ begin
       Assert.IsTrue(LComponents.Count > 1,
         'SBOM must contain more than just the primary artefact');
 
-      LFoundLibrary := False;
+      LUnitEvidenceCount := 0;
       for I := 0 to LComponents.Count - 1 do
       begin
         LComponentObj := LComponents.Items[I] as TJSONObject;
-        if LComponentObj.GetValue<string>('type') = 'library' then
-        begin
-          LFoundLibrary := True;
-          Assert.IsTrue(LComponentObj.GetValue('hashes') <> nil,
-            'Library components must include hashes');
-          Break;
-        end;
+        if not IsUnitEvidence(LComponentObj) then
+          Continue;
+
+        Inc(LUnitEvidenceCount);
+        // file:size is written only when the resolved file was present on disk.
+        if PropertyValue(LComponentObj, cFileSizeProperty) = '' then
+          Continue;
+
+        LName := LComponentObj.GetValue<string>('name', '');
+        LHashes := LComponentObj.GetValue('hashes') as TJSONArray;
+        Assert.IsNotNull(LHashes,
+          'Unit-evidence component "' + LName + '" must include hashes');
+        Assert.IsTrue(LHashes.Count > 0,
+          'Unit-evidence component "' + LName + '" must include a hash value');
+        LHashObj := LHashes.Items[0] as TJSONObject;
+        Assert.IsTrue(Trim(LHashObj.GetValue<string>('content', '')) <> '',
+          'Unit-evidence component "' + LName + '" must include a non-empty hash');
       end;
 
-      Assert.IsTrue(LFoundLibrary,
-        'SBOM must contain library components for resolved unit evidence');
+      Assert.IsTrue(LUnitEvidenceCount > 0,
+        'SBOM must contain at least one unit-evidence library component');
     finally
       LJson.Free;
     end;
@@ -1012,6 +1178,365 @@ begin
   Assert.IsTrue(TArray.IndexOf<string>(LDllNames, 'libeay32.dll') >= 0,
     'libeay32.dll must be detected when LIBEAY_DLL_NAME is declared in one ' +
     'unit and GetModuleHandle is called in another');
+end;
+
+function TEngineTests_WriteConfig(const ADir, AJson: string): string;
+begin
+  Result := TPath.Combine(ADir, 'dxcomply.json');
+  TFile.WriteAllText(Result, AJson, TEncoding.UTF8);
+end;
+
+procedure TEngineTests.LoadConfig_ConfigNameAndPlatform;
+var
+  LGen: TDxComplyGenerator;
+  LConfig: TSbomConfig;
+  LPath: string;
+begin
+  LPath := TEngineTests_WriteConfig(FTempDir,
+    '{"configName":" Debug ","platform":" Win64 ","format":"spdx-json",' +
+    '"product":{"name":"FromFile","supplier":"File GmbH"},' +
+    '"report":{"enabled":true,"format":"html"}}');
+  LGen := TDxComplyGenerator.Create;
+  try
+    LConfig := LGen.LoadConfig(LPath);
+    Assert.AreEqual('Debug', LConfig.Configuration, 'configName must be trimmed and stored');
+    Assert.AreEqual('Win64', LConfig.Platform, 'platform must be trimmed and stored');
+    Assert.AreEqual(Ord(sfSpdxJson), Ord(LConfig.Format));
+    Assert.AreEqual('FromFile', LConfig.ProductName);
+    Assert.AreEqual('File GmbH', LConfig.Supplier);
+    Assert.IsTrue(LConfig.HumanReadableReport.Enabled);
+    Assert.AreEqual(Ord(hrfHtml), Ord(LConfig.HumanReadableReport.Format));
+  finally
+    LGen.Free;
+  end;
+end;
+
+procedure TEngineTests.LoadConfig_NonObjectRoot_ReturnsDefaults;
+var
+  LGen: TDxComplyGenerator;
+  LConfig: TSbomConfig;
+  LPath: string;
+begin
+  LConfig := TSbomConfig.Default;
+  LPath := TEngineTests_WriteConfig(FTempDir, '[1, 2, 3]');
+  LGen := TDxComplyGenerator.Create;
+  try
+    Assert.WillNotRaise(
+      procedure
+      begin
+        LConfig := LGen.LoadConfig(LPath);
+      end,
+      Exception,
+      'A JSON array root must not raise');
+    Assert.AreEqual('Release', LConfig.Configuration);
+    Assert.AreEqual('Win32', LConfig.Platform);
+    Assert.AreEqual('bom.json', LConfig.OutputPath);
+
+    LConfig := LGen.LoadConfig(TEngineTests_WriteConfig(FTempDir, '"not-an-object"'));
+    Assert.AreEqual('Release', LConfig.Configuration);
+  finally
+    LGen.Free;
+  end;
+end;
+
+procedure TEngineTests.LoadConfig_DeepEvidenceBuild_DoesNotOverrideMode;
+var
+  LGen: TDxComplyGenerator;
+  LConfig: TSbomConfig;
+begin
+  LGen := TDxComplyGenerator.Create;
+  try
+    LConfig := LGen.LoadConfig(TEngineTests_WriteConfig(FTempDir,
+      '{"deepEvidence":{"mode":"always","build":false}}'));
+    Assert.AreEqual(Ord(debAlways), Ord(LConfig.DeepEvidenceMode),
+      'deepEvidence.build must not overwrite mode always');
+
+    LConfig := LGen.LoadConfig(TEngineTests_WriteConfig(FTempDir,
+      '{"deepEvidence":{"build":false}}'));
+    Assert.AreEqual(Ord(debWhenMapMissing), Ord(LConfig.DeepEvidenceMode),
+      'build alone must leave the default mode');
+  finally
+    LGen.Free;
+  end;
+end;
+
+procedure TEngineTests.GenerateFromConfig_FileValues_ApplyWhenNotExplicit;
+var
+  LGen: TDxComplyGenerator;
+  LPath: string;
+begin
+  LPath := TEngineTests_WriteConfig(FTempDir,
+    '{"configName":"Debug","platform":"Win64","format":"spdx-json",' +
+    '"output":"from-file.json","product":{"name":"FileApp","supplier":"FileCo"}}');
+  LGen := TDxComplyGenerator.Create;
+  try
+    // Missing project: Generate fails, but the merge has already happened.
+    LGen.GenerateFromConfig('missing.dproj', LPath);
+    Assert.AreEqual('Debug', LGen.Config.Configuration);
+    Assert.AreEqual('Win64', LGen.Config.Platform);
+    Assert.AreEqual(Ord(sfSpdxJson), Ord(LGen.Config.Format));
+    Assert.AreEqual('from-file.json', LGen.Config.OutputPath);
+    Assert.AreEqual('FileApp', LGen.Config.ProductName);
+    Assert.AreEqual('FileCo', LGen.Config.Supplier);
+  finally
+    LGen.Free;
+  end;
+end;
+
+procedure TEngineTests.GenerateFromConfig_ExplicitCaller_OverridesFile;
+var
+  LCaller: TSbomConfig;
+  LGen: TDxComplyGenerator;
+  LPath: string;
+begin
+  LPath := TEngineTests_WriteConfig(FTempDir,
+    '{"configName":"Release","platform":"Win32","format":"spdx-json",' +
+    '"output":"from-file.json",' +
+    '"product":{"name":"FileApp","version":"9.9.9","supplier":"FileCo"},' +
+    '"report":{"enabled":true,"format":"html","output":"auditor-report"}}');
+  LCaller := TSbomConfig.Default;
+  LCaller.Configuration := 'Debug';
+  LCaller.Platform := 'Win64';
+  LCaller.Format := sfCycloneDxXml;
+  LCaller.OutputPath := 'cli.json';
+  LCaller.ProductName := 'CliApp';
+  LCaller.Supplier := 'CliCo';
+  LCaller.HumanReadableReport.Enabled := True;
+  LCaller.HumanReadableReport.Format := hrfMarkdown;
+  LCaller.ExplicitOverrides := [scoConfiguration, scoPlatform, scoFormat,
+    scoOutputPath, scoProductName, scoSupplier, scoReport];
+
+  LGen := TDxComplyGenerator.Create(LCaller);
+  try
+    LGen.GenerateFromConfig('missing.dproj', LPath);
+    Assert.AreEqual('Debug', LGen.Config.Configuration, 'explicit --config-name wins');
+    Assert.AreEqual('Win64', LGen.Config.Platform, 'explicit --platform wins');
+    Assert.AreEqual(Ord(sfCycloneDxXml), Ord(LGen.Config.Format), 'explicit --format wins');
+    Assert.AreEqual('cli.json', LGen.Config.OutputPath, 'explicit --output wins');
+    Assert.AreEqual('CliApp', LGen.Config.ProductName, 'explicit --product wins');
+    Assert.AreEqual('CliCo', LGen.Config.Supplier, 'explicit --supplier wins');
+    Assert.AreEqual('9.9.9', LGen.Config.ProductVersion,
+      'version was not passed, so the file value stays');
+    Assert.IsTrue(LGen.Config.HumanReadableReport.Enabled);
+    Assert.AreEqual(Ord(hrfMarkdown), Ord(LGen.Config.HumanReadableReport.Format),
+      'explicit --report wins over the file format');
+    Assert.AreEqual('auditor-report', LGen.Config.HumanReadableReport.OutputBasePath,
+      'report output path stays with the file');
+  finally
+    LGen.Free;
+  end;
+end;
+
+procedure TEngineTests.GenerateFromConfig_IncludePlatformInOutput_DecoratesMergedOutput;
+var
+  LCaller: TSbomConfig;
+  LGen: TDxComplyGenerator;
+  LPath: string;
+begin
+  LPath := TEngineTests_WriteConfig(FTempDir,
+    '{"output":"custom.json","platform":"Win64","configName":"Debug"}');
+  LCaller := TSbomConfig.Default;
+  LCaller.IncludePlatformInOutput := True;
+  LGen := TDxComplyGenerator.Create(LCaller);
+  try
+    LGen.GenerateFromConfig('missing.dproj', LPath);
+    Assert.AreEqual('custom.Win64.Debug.json', LGen.Config.OutputPath,
+      'decoration uses the merged platform and configuration');
+  finally
+    LGen.Free;
+  end;
+
+  LCaller := TSbomConfig.Default;
+  LCaller.IncludePlatformInOutput := True;
+  LCaller.OutputPath := 'given.json';
+  LCaller.ExplicitOverrides := [scoOutputPath];
+  LGen := TDxComplyGenerator.Create(LCaller);
+  try
+    LGen.GenerateFromConfig('missing.dproj', LPath);
+    Assert.AreEqual('given.json', LGen.Config.OutputPath,
+      'an explicit output path is not decorated');
+  finally
+    LGen.Free;
+  end;
+end;
+
+procedure TEngineTests.ScanPasFiles_ExternalLiteral_DetectsDllName;
+var
+  LPasFile: string;
+  LDllNames: TArray<string>;
+const
+  cSource =
+    'unit WinHook;'#13#10 +
+    'interface'#13#10 +
+    '{$I+}'#13#10 +
+    'function GetTickCount: Cardinal; stdcall; external ''kernel32.dll'';'#13#10 +
+    'implementation'#13#10 +
+    'end.';
+begin
+  LPasFile := TPath.Combine(FTempDir, 'WinHook.pas');
+  TFile.WriteAllText(LPasFile, cSource, TEncoding.UTF8);
+  LDllNames := TDxComplyGenerator.ScanPasFilesForDllReferences(
+    TArray<string>.Create(LPasFile));
+  Assert.IsTrue(TArray.IndexOf<string>(LDllNames, 'kernel32.dll') >= 0,
+    'a quoted external DLL name must be detected');
+end;
+
+procedure TEngineTests.ScanPasFiles_ExternalIdentifier_ResolvesConst;
+var
+  LPasFile: string;
+  LDllNames: TArray<string>;
+const
+  cSource =
+    'unit NetApi;'#13#10 +
+    'interface'#13#10 +
+    'const'#13#10 +
+    '  NETAPI = ''netapi32.dll'';'#13#10 +
+    'function NetWkstaGetInfo: Integer; stdcall; external NETAPI;'#13#10 +
+    'implementation'#13#10 +
+    'end.';
+begin
+  LPasFile := TPath.Combine(FTempDir, 'NetApi.pas');
+  TFile.WriteAllText(LPasFile, cSource, TEncoding.UTF8);
+  LDllNames := TDxComplyGenerator.ScanPasFilesForDllReferences(
+    TArray<string>.Create(LPasFile));
+  Assert.IsTrue(TArray.IndexOf<string>(LDllNames, 'netapi32.dll') >= 0,
+    'external NETAPI must resolve the const to netapi32.dll');
+end;
+
+procedure TEngineTests.ScanPasFiles_ExternalInInclude_IfdefConst_ResolvesBothNames;
+var
+  LPasFile: string;
+  LIncFile: string;
+  LDllNames: TArray<string>;
+  LConditional: TArray<Boolean>;
+  LSearchPaths: TArray<string>;
+
+  function IsConditional(const AName: string): Boolean;
+  var
+    LIndex: Integer;
+  begin
+    LIndex := TArray.IndexOf<string>(LDllNames, AName);
+    Assert.IsTrue(LIndex >= 0, AName + ' must be detected');
+    Result := LConditional[LIndex];
+  end;
+
+const
+  // Mirrors the project attached to issue #45: the import lives in an
+  // include, and DLLName is assigned in both {$IFDEF} branches.
+  cInc =
+    '  function OpcUa_P_Initialize; external DLLName ' +
+    '{$IFDEF UASTACK_32} name ''_OpcUa_P_Initialize@4'' {$ENDIF};'#13#10;
+  cPas =
+    'unit Unit2;'#13#10 +
+    'interface'#13#10 +
+    'implementation'#13#10 +
+    'const'#13#10 +
+    '{$IFDEF UASTACK_32}'#13#10 +
+    '  DLLName = ''uastack_32.dll'';'#13#10 +
+    '{$ELSE}'#13#10 +
+    '  DLLName = ''uastack_64.dll'';'#13#10 +
+    '{$ENDIF}'#13#10 +
+    '{$INCLUDE ''StackMethodsImpl.inc''}'#13#10 +
+    'end.'#13#10;
+begin
+  LPasFile := TPath.Combine(FTempDir, 'Unit2.pas');
+  LIncFile := TPath.Combine(FTempDir, 'StackMethodsImpl.inc');
+  TFile.WriteAllText(LIncFile, cInc, TEncoding.UTF8);
+  TFile.WriteAllText(LPasFile, cPas, TEncoding.UTF8);
+  SetLength(LSearchPaths, 0);
+  LDllNames := TDxComplyGenerator.ScanPasFilesForDllReferences(
+    TArray<string>.Create(LPasFile), LSearchPaths, LConditional);
+  Assert.IsTrue(IsConditional('uastack_32.dll'),
+    'uastack_32.dll from the {$IFDEF} branch must be detected and marked conditional');
+  Assert.IsTrue(IsConditional('uastack_64.dll'),
+    'uastack_64.dll from the {$ELSE} branch must be detected and marked conditional');
+end;
+
+procedure TEngineTests.ScanPasFiles_IncludeOnSearchPath_ResolvesExternalDll;
+var
+  LPasFile: string;
+  LIncDir: string;
+  LIncFile: string;
+  LDllNames: TArray<string>;
+  LConditional: TArray<Boolean>;
+  LSearchPaths: TArray<string>;
+const
+  cInc =
+    'function OpcUa_P_Initialize; external DLLName;'#13#10;
+  cPas =
+    'unit Unit2;'#13#10 +
+    'interface'#13#10 +
+    'implementation'#13#10 +
+    'const'#13#10 +
+    '  DLLName = ''uastack_64.dll'';'#13#10 +
+    '{$INCLUDE ''StackMethodsImpl.inc''}'#13#10 +
+    'end.'#13#10;
+begin
+  LIncDir := TPath.Combine(FTempDir, 'includes');
+  TDirectory.CreateDirectory(LIncDir);
+  LPasFile := TPath.Combine(FTempDir, 'Unit2.pas');
+  LIncFile := TPath.Combine(LIncDir, 'StackMethodsImpl.inc');
+  TFile.WriteAllText(LIncFile, cInc, TEncoding.UTF8);
+  TFile.WriteAllText(LPasFile, cPas, TEncoding.UTF8);
+
+  SetLength(LSearchPaths, 1);
+  LSearchPaths[0] := LIncDir;
+  LDllNames := TDxComplyGenerator.ScanPasFilesForDllReferences(
+    TArray<string>.Create(LPasFile), LSearchPaths, LConditional);
+  Assert.IsTrue(TArray.IndexOf<string>(LDllNames, 'uastack_64.dll') >= 0,
+    'an include on the search path must be expanded and the DLL reported');
+  Assert.IsFalse(LConditional[TArray.IndexOf<string>(LDllNames, 'uastack_64.dll')],
+    'a single const value is not conditional');
+end;
+
+procedure TEngineTests.ScanPasFiles_LoadLibraryInInclude_ResolvesConst;
+var
+  LPasFile: string;
+  LIncFile: string;
+  LDllNames: TArray<string>;
+const
+  cInc =
+    'procedure LoadIt;'#13#10 +
+    'begin'#13#10 +
+    '  LoadLibrary(IBASE_DLL);'#13#10 +
+    'end;'#13#10;
+  cPas =
+    'unit IbWrap;'#13#10 +
+    'interface'#13#10 +
+    'implementation'#13#10 +
+    'const'#13#10 +
+    '  IBASE_DLL = ''gds32.dll'';'#13#10 +
+    '{$I ''IbLoad.inc''}'#13#10 +
+    'end.';
+begin
+  LPasFile := TPath.Combine(FTempDir, 'IbWrap.pas');
+  LIncFile := TPath.Combine(FTempDir, 'IbLoad.inc');
+  TFile.WriteAllText(LIncFile, cInc, TEncoding.UTF8);
+  TFile.WriteAllText(LPasFile, cPas, TEncoding.UTF8);
+  LDllNames := TDxComplyGenerator.ScanPasFilesForDllReferences(
+    TArray<string>.Create(LPasFile));
+  Assert.IsTrue(TArray.IndexOf<string>(LDllNames, 'gds32.dll') >= 0,
+    'LoadLibrary(IBASE_DLL) inside an include must resolve gds32.dll');
+end;
+
+procedure TEngineTests.ScanPasFiles_UnresolvedExternalIdent_IsIgnored;
+var
+  LPasFile: string;
+  LDllNames: TArray<string>;
+const
+  cSource =
+    'unit Bare;'#13#10 +
+    'interface'#13#10 +
+    'function Foo: Integer; external NotADll;'#13#10 +
+    'implementation'#13#10 +
+    'end.';
+begin
+  LPasFile := TPath.Combine(FTempDir, 'Bare.pas');
+  TFile.WriteAllText(LPasFile, cSource, TEncoding.UTF8);
+  LDllNames := TDxComplyGenerator.ScanPasFilesForDllReferences(
+    TArray<string>.Create(LPasFile));
+  Assert.AreEqual(NativeInt(0), NativeInt(Length(LDllNames)),
+    'an unresolved external identifier must not be reported as a DLL name');
 end;
 
 initialization
