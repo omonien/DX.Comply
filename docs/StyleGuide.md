@@ -1,4 +1,4 @@
-# DX.Comply — Delphi Coding Style Guide
+# DX.Comply: Delphi Coding Style Guide
 
 ## Source
 Derived from the [omonien/DelphiStandards](https://github.com/omonien/DelphiStandards) style guide.
@@ -37,13 +37,13 @@ Derived from the [omonien/DelphiStandards](https://github.com/omonien/DelphiStan
 | String | `sc` | `scErrorMessage` |
 | Resource strings | `rs` | `rsWelcomeText` |
 
-### Parameters: prefix `A` — `AFilePath`, `AFormat`
-### Components: type as prefix — `ButtonLogin`, `EditUserName`
+### Parameters: prefix `A` (`AFilePath`, `AFormat`)
+### Components: type as prefix (`ButtonLogin`, `EditUserName`)
 
 ## Methods
 - PascalCase
-- Procedures: verb prefix — `SaveDocument`, `ValidateInput`
-- Functions: `Get`/`Is`/`Can` prefix — `GetUserName`, `IsValid`
+- Procedures: verb prefix (`SaveDocument`, `ValidateInput`)
+- Functions: `Get`/`Is`/`Can` prefix (`GetUserName`, `IsValid`)
 
 ## Comments & Docs
 - XML doc comments (`/// <summary>`) on all public types and methods
@@ -53,9 +53,9 @@ Derived from the [omonien/DelphiStandards](https://github.com/omonien/DelphiStan
 ## Unit Header
 Every unit must begin with an XML doc header:
 ```pascal
-/// <summary>Unit.Name — Short description</summary>
+/// <summary>Unit.Name: Short description</summary>
 /// <remarks>Detailed description</remarks>
-/// <copyright>Copyright © YYYY Olaf Monien — MIT License</copyright>
+/// <copyright>Copyright © YYYY Olaf Monien, MIT License</copyright>
 
 unit Unit.Name;
 ```

@@ -1,6 +1,6 @@
 /// <summary>
 /// DX.Comply.Schema.Validator
-/// Comprehensive SBOM schema validation for CycloneDX and SPDX formats.
+/// Structural check for CycloneDX and SPDX SBOM documents.
 /// </summary>
 ///
 /// <remarks>
@@ -52,7 +52,7 @@ type
   end;
 
   /// <summary>
-  /// Comprehensive SBOM schema validator for CycloneDX and SPDX formats.
+  /// Structural checker for CycloneDX and SPDX SBOM documents.
   /// </summary>
   TSbomValidator = class
   private
@@ -215,7 +215,7 @@ begin
   begin
     LSpecVersion := LValue.Value;
     if (LSpecVersion <> '1.4') and (LSpecVersion <> '1.5') and (LSpecVersion <> '1.6') then
-      AddWarning('specVersion "' + LSpecVersion + '" — expected 1.4, 1.5, or 1.6');
+      AddWarning('specVersion "' + LSpecVersion + '" is not 1.4, 1.5, or 1.6');
   end;
 
   // serialNumber (optional but recommended; must start with urn:uuid: if present)
@@ -288,7 +288,7 @@ begin
       AddWarning('metadata.timestamp may not be valid ISO 8601: ' + LTimestamp);
   end;
 
-  // component (required — describes the subject of the SBOM)
+  // component (required; describes the subject of the SBOM)
   LValue := AMetadata.GetValue('component');
   if LValue = nil then
     AddWarning('metadata: missing recommended field: component')

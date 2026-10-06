@@ -1,6 +1,6 @@
 /// <summary>
 /// DX.Comply.Report.Intf
-/// Contracts for human-readable compliance reports.
+/// Contracts for human-readable SBOM reports.
 /// </summary>
 ///
 /// <remarks>
@@ -26,7 +26,7 @@ uses
 
 type
   /// <summary>
-  /// Supported human-readable compliance report formats.
+  /// Supported human-readable SBOM report formats.
   /// </summary>
   THumanReadableReportFormat = (hrfMarkdown, hrfHtml, hrfBoth);
 
@@ -64,7 +64,7 @@ type
   end;
 
   /// <summary>
-  /// Writes a human-readable compliance report.
+  /// Writes a human-readable SBOM report.
   /// </summary>
   IHumanReadableReportWriter = interface
     ['{4FD4E8C2-E69C-40E2-AF0E-8E0D92E2148A}']

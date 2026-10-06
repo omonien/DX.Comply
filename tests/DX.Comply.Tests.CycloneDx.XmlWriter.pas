@@ -432,7 +432,7 @@ var
 begin
   SetLength(FMetadata.Properties, 2);
   FMetadata.Properties[0] := TSbomProperty.Create(
-    'net.developer-experts.dx-comply:document.profile', 'cra-compliance-assessment');
+    'net.developer-experts.dx-comply:document.profile', 'build-evidence');
   FMetadata.Properties[1] := TSbomProperty.Create(
     'net.developer-experts.dx-comply:assessment.warning-count', '0');
   SetLength(FMetadata.ComponentProperties, 1);
@@ -443,7 +443,7 @@ begin
   LContent := LoadOutputContent;
 
   Assert.IsTrue(Pos('<properties>', LContent) > 0);
-  Assert.IsTrue(Pos('<property name="net.developer-experts.dx-comply:document.profile">cra-compliance-assessment</property>', LContent) > 0);
+  Assert.IsTrue(Pos('<property name="net.developer-experts.dx-comply:document.profile">build-evidence</property>', LContent) > 0);
   Assert.IsTrue(Pos('<property name="net.developer-experts.dx-comply:assessment.warning-count">0</property>', LContent) > 0);
   Assert.IsTrue(Pos('<property name="net.developer-experts.dx-comply:build.configuration">Release</property>', LContent) > 0);
 end;

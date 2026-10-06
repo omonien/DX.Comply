@@ -1,6 +1,6 @@
 ﻿/// <summary>
 /// DX.Comply.Report.Support
-/// Shared formatting helpers for human-readable compliance reports.
+/// Shared formatting helpers for human-readable SBOM reports.
 /// </summary>
 ///
 /// <remarks>
@@ -122,13 +122,13 @@ end;
 
 function HumanReadableReportSubtitle: string;
 begin
-  Result := 'This DX.Comply Software Release Assessment summarizes the generated Software Bill of Materials (SBOM), build evidence and deliverable artefacts for the assessed release. ' +
-    'It serves as the human-readable companion to the formal SBOM output for review, audit and release approval activities.';
+  Result := 'This report lists the units, packages and DLL names DX.Comply could see in the build, with a hash where the file could be opened. ' +
+    'It sits beside the SBOM. The status below is an internal structural check.';
 end;
 
 function HumanReadableReportTitle: string;
 begin
-  Result := 'DX.Comply Software Release Assessment (SRA) and SBOM Compliance Report';
+  Result := 'DX.Comply SBOM Report';
 end;
 
 function HumanReadableReportFormatToString(AValue: THumanReadableReportFormat): string;
@@ -321,8 +321,8 @@ end;
 function ValidationStatusText(const AData: TComplianceReportData): string;
 begin
   if AData.ValidationResult.IsValid then
-    Exit('Passed');
-  Result := 'Failed';
+    Exit('Internal structural check passed');
+  Result := 'Internal structural check failed';
 end;
 
 end.

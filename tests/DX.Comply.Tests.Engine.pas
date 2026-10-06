@@ -50,7 +50,7 @@ type
     /// </summary>
     FEngineDprojPath: string;
     /// <summary>
-    /// Progress callback – captures messages and percentage values for assertion.
+    /// Progress callback. Captures messages and percentage values for assertion.
     /// </summary>
     procedure OnProgress(const AMessage: string; const AProgress: Integer);
     function CreateScopeProject(const AFolder: string; AWithOutputDir: Boolean): string;
@@ -78,7 +78,7 @@ type
     [Test]
     procedure ValidateProject_WrongExtension_ReturnsFalse;
 
-    // ---- Generate — failure path -------------------------------------------
+    // ---- Generate: failure path -------------------------------------------
 
     /// <summary>Generate with an invalid project path must return False.</summary>
     [Test]
@@ -88,7 +88,7 @@ type
     [Test]
     procedure Generate_InvalidProject_FiresNegativeProgress;
 
-    // ---- Generate — happy path (integration) --------------------------------
+    // ---- Generate: happy path (integration) --------------------------------
 
     /// <summary>Generate with the engine dproj must return True and write the output file.</summary>
     [Test]
@@ -423,7 +423,7 @@ begin
   end;
 end;
 
-// ---- Generate — failure path ------------------------------------------------
+// ---- Generate: failure path ------------------------------------------------
 
 procedure TEngineTests.Generate_InvalidProject_ReturnsFalse;
 var
@@ -455,7 +455,7 @@ begin
   end;
 end;
 
-// ---- Generate — happy path (integration) ------------------------------------
+// ---- Generate: happy path (integration) ------------------------------------
 
 procedure TEngineTests.Generate_ValidProject_WritesFile;
 var
@@ -589,9 +589,9 @@ begin
         'DX.Comply BOM metadata properties must be present on metadata.properties');
       Assert.IsNotNull(LComponentProperties,
         'DX.Comply component metadata properties must be present on metadata.component.properties');
-      Assert.IsTrue(FindPropertyValue(LBomProperties,
-        'net.developer-experts.dx-comply:document.profile') <> '',
-        'BOM must contain the document profile property');
+      Assert.AreEqual('build-evidence', FindPropertyValue(LBomProperties,
+        'net.developer-experts.dx-comply:document.profile'),
+        'BOM document profile must name the build evidence');
       Assert.AreEqual('Release', FindPropertyValue(LComponentProperties,
         'net.developer-experts.dx-comply:build.configuration'));
       Assert.AreEqual('Win32', FindPropertyValue(LComponentProperties,
@@ -1074,7 +1074,7 @@ begin
 
       // Note: This test may not find external DLL refs in the Engine package
       // itself since it's pure Delphi code. The assertion is intentionally
-      // soft — we verify the pipeline runs without error. A project with
+      // soft: we verify the pipeline runs without error. A project with
       // external declarations would produce components.
       Assert.WillNotRaise(
         procedure begin end,
