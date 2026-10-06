@@ -82,6 +82,16 @@ type
     procedure Write_ContainsDependencies;
 
     [Test]
+    procedure Write_Dependencies_GroupedUnderDeliverable;
+
+    /// <summary>
+    /// A source-scanned DLL has no file on disk. Evidence, confidence and
+    /// the conditional flag must still be written. Issue #45.
+    /// </summary>
+    [Test]
+    procedure Write_ExternalDll_MissingFile_KeepsEvidence;
+
+    [Test]
     procedure Validate_ValidXml_ReturnsTrue;
 
     [Test]
@@ -277,6 +287,58 @@ begin
   LContent := LoadOutputContent;
   Assert.IsTrue(Pos('<dependencies>', LContent) > 0);
   Assert.IsTrue(Pos('ref="TestProject"', LContent) > 0);
+end;
+
+procedure TCycloneDxXmlWriterTests.Write_Dependencies_GroupedUnderDeliverable;
+var
+  LContent: string;
+  LTargetOpen: Integer;
+begin
+  FArtefacts.Add(MakeArtefact('TestProject.exe', 'application', '', 1024));
+  FArtefacts.Add(MakeArtefact('rtl.bpl', 'runtime-package', '', -1));
+  FArtefacts.Add(MakeArtefact('vendor.dll', 'external-reference', '', -1));
+  FArtefacts.Add(MakeArtefact('System.dcu', 'unit-evidence', '', 100));
+
+  Assert.IsTrue(FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LContent := LoadOutputContent;
+
+  Assert.IsTrue(Pos('<dependency ref="comp-0"/>', LContent) > 0,
+    'the project must depend on the deliverable');
+  LTargetOpen := Pos('<dependency ref="comp-0">', LContent);
+  Assert.IsTrue(LTargetOpen > 0, 'the deliverable must have its own dependency entry');
+  Assert.IsTrue(Pos('<dependency ref="comp-1"/>', LContent) > LTargetOpen,
+    'the runtime package must be a dependency of the deliverable');
+  Assert.IsTrue(Pos('<dependency ref="comp-2"/>', LContent) > LTargetOpen,
+    'the external DLL must be a dependency of the deliverable');
+  Assert.IsTrue(Pos('<dependency ref="comp-3"/>', LContent) > LTargetOpen,
+    'the linked unit must be a dependency of the deliverable');
+end;
+
+procedure TCycloneDxXmlWriterTests.Write_ExternalDll_MissingFile_KeepsEvidence;
+var
+  LArtefact: TArtefactInfo;
+  LContent: string;
+begin
+  LArtefact := MakeArtefact('uastack_64.dll', 'external-reference', '', -1);
+  LArtefact.Origin := '';
+  LArtefact.Evidence := 'DLL';
+  LArtefact.Confidence := 'Source-scan';
+  LArtefact.Conditional := True;
+  FArtefacts.Add(LArtefact);
+
+  Assert.IsTrue(FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LContent := LoadOutputContent;
+
+  Assert.IsTrue(Pos('<name>uastack_64.dll</name>', LContent) > 0,
+    'the DLL must be a component even when the file is absent');
+  Assert.IsTrue(Pos('net.developer-experts.dx-comply:evidence">DLL</property>', LContent) > 0,
+    'evidence must be written when size is unknown and origin is empty');
+  Assert.IsTrue(Pos('net.developer-experts.dx-comply:confidence">Source-scan</property>', LContent) > 0,
+    'confidence must be written when size is unknown and origin is empty');
+  Assert.IsTrue(Pos('net.developer-experts.dx-comply:conditional">true</property>', LContent) > 0,
+    'a conditional DLL name must be marked in the XML properties');
+  Assert.AreEqual(0, Pos('file:size', LContent),
+    'an absent file must not invent a size');
 end;
 
 procedure TCycloneDxXmlWriterTests.Validate_ValidXml_ReturnsTrue;

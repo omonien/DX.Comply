@@ -44,6 +44,12 @@ type
     Evidence: string;
     /// <summary>Resolution confidence label for composition evidence (e.g. Strong).</summary>
     Confidence: string;
+    /// <summary>
+    /// True when the file name is one of several {$IFDEF} candidates and the
+    /// active compiler define was not applied. Writers emit this as
+    /// net.developer-experts.dx-comply:conditional.
+    /// </summary>
+    Conditional: Boolean;
   end;
 
   /// <summary>
@@ -271,6 +277,22 @@ type
     function Validate(const AContent: string): Boolean;
   end;
 
+/// <summary>
+/// Index of the built exe, dll or bpl inside AArtefacts, or -1 when the
+/// list has no deliverable. An exe is preferred over a dll or bpl, and a
+/// file whose name matches AProjectName is preferred over other files of
+/// the same kind. Runtime packages and source-scanned DLL references are
+/// not deliverables.
+/// </summary>
+function FindDeliverableTargetIndex(const AArtefacts: TArtefactList;
+  const AProjectName: string): Integer;
+
+/// <summary>
+/// Grouping order for a dependency edge: 0 runtime package, 1 external
+/// DLL reference, 2 linked unit, 3 any other artefact.
+/// </summary>
+function ArtefactDependencyGroup(const AArtefact: TArtefactInfo): Integer;
+
 implementation
 
 uses
@@ -356,6 +378,61 @@ begin
     Result := DllSuffix
   else
     Result := '';
+end;
+
+function TargetKindScore(const AArtefactType: string): Integer;
+begin
+  if SameText(AArtefactType, 'application') then
+    Result := 300
+  else if SameText(AArtefactType, 'package') then
+    Result := 200
+  else if SameText(AArtefactType, 'library') then
+    Result := 100
+  else
+    Result := -1;
+end;
+
+function FindDeliverableTargetIndex(const AArtefacts: TArtefactList;
+  const AProjectName: string): Integer;
+var
+  I: Integer;
+  LScore: Integer;
+  LBest: Integer;
+  LName: string;
+begin
+  Result := -1;
+  LBest := -1;
+  if not Assigned(AArtefacts) then
+    Exit;
+
+  for I := 0 to AArtefacts.Count - 1 do
+  begin
+    LScore := TargetKindScore(AArtefacts[I].ArtefactType);
+    if LScore < 0 then
+      Continue;
+
+    LName := TPath.GetFileNameWithoutExtension(AArtefacts[I].RelativePath);
+    if (AProjectName <> '') and SameText(LName, AProjectName) then
+      Inc(LScore, 10);
+
+    if LScore > LBest then
+    begin
+      LBest := LScore;
+      Result := I;
+    end;
+  end;
+end;
+
+function ArtefactDependencyGroup(const AArtefact: TArtefactInfo): Integer;
+begin
+  if SameText(AArtefact.ArtefactType, 'runtime-package') then
+    Result := 0
+  else if SameText(AArtefact.ArtefactType, 'external-reference') then
+    Result := 1
+  else if SameText(AArtefact.ArtefactType, 'unit-evidence') then
+    Result := 2
+  else
+    Result := 3;
 end;
 
 end.
