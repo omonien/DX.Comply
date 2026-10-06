@@ -235,6 +235,42 @@ type
     /// <summary>external NotADll must not be reported when the identifier is not a const.</summary>
     [Test]
     procedure ScanPasFiles_UnresolvedExternalIdent_IsIgnored;
+
+    // ---- .dxcomply.json loading (issue #50) --------------------------------
+
+    /// <summary>configName and platform keys are stored on the loaded config.</summary>
+    [Test]
+    procedure LoadConfig_ConfigNameAndPlatform;
+
+    /// <summary>A JSON array root must not raise and must keep defaults.</summary>
+    [Test]
+    procedure LoadConfig_NonObjectRoot_ReturnsDefaults;
+
+    /// <summary>
+    /// deepEvidence.build must not override deepEvidence.mode. The boolean
+    /// used to be dead code that always stored when-map-missing.
+    /// </summary>
+    [Test]
+    procedure LoadConfig_DeepEvidenceBuild_DoesNotOverrideMode;
+
+    /// <summary>
+    /// A file configName applies when the caller did not pass one explicitly.
+    /// </summary>
+    [Test]
+    procedure GenerateFromConfig_FileValues_ApplyWhenNotExplicit;
+
+    /// <summary>
+    /// Explicit caller fields win over the file. Omitted fields keep the file.
+    /// </summary>
+    [Test]
+    procedure GenerateFromConfig_ExplicitCaller_OverridesFile;
+
+    /// <summary>
+    /// --include-platform-in-output decorates the file output using the
+    /// merged platform and configuration, unless --output was explicit.
+    /// </summary>
+    [Test]
+    procedure GenerateFromConfig_IncludePlatformInOutput_DecoratesMergedOutput;
   end;
 
 implementation
@@ -1142,6 +1178,186 @@ begin
   Assert.IsTrue(TArray.IndexOf<string>(LDllNames, 'libeay32.dll') >= 0,
     'libeay32.dll must be detected when LIBEAY_DLL_NAME is declared in one ' +
     'unit and GetModuleHandle is called in another');
+end;
+
+function TEngineTests_WriteConfig(const ADir, AJson: string): string;
+begin
+  Result := TPath.Combine(ADir, 'dxcomply.json');
+  TFile.WriteAllText(Result, AJson, TEncoding.UTF8);
+end;
+
+procedure TEngineTests.LoadConfig_ConfigNameAndPlatform;
+var
+  LGen: TDxComplyGenerator;
+  LConfig: TSbomConfig;
+  LPath: string;
+begin
+  LPath := TEngineTests_WriteConfig(FTempDir,
+    '{"configName":" Debug ","platform":" Win64 ","format":"spdx-json",' +
+    '"product":{"name":"FromFile","supplier":"File GmbH"},' +
+    '"report":{"enabled":true,"format":"html"}}');
+  LGen := TDxComplyGenerator.Create;
+  try
+    LConfig := LGen.LoadConfig(LPath);
+    Assert.AreEqual('Debug', LConfig.Configuration, 'configName must be trimmed and stored');
+    Assert.AreEqual('Win64', LConfig.Platform, 'platform must be trimmed and stored');
+    Assert.AreEqual(Ord(sfSpdxJson), Ord(LConfig.Format));
+    Assert.AreEqual('FromFile', LConfig.ProductName);
+    Assert.AreEqual('File GmbH', LConfig.Supplier);
+    Assert.IsTrue(LConfig.HumanReadableReport.Enabled);
+    Assert.AreEqual(Ord(hrfHtml), Ord(LConfig.HumanReadableReport.Format));
+  finally
+    LGen.Free;
+  end;
+end;
+
+procedure TEngineTests.LoadConfig_NonObjectRoot_ReturnsDefaults;
+var
+  LGen: TDxComplyGenerator;
+  LConfig: TSbomConfig;
+  LPath: string;
+begin
+  LConfig := TSbomConfig.Default;
+  LPath := TEngineTests_WriteConfig(FTempDir, '[1, 2, 3]');
+  LGen := TDxComplyGenerator.Create;
+  try
+    Assert.WillNotRaise(
+      procedure
+      begin
+        LConfig := LGen.LoadConfig(LPath);
+      end,
+      Exception,
+      'A JSON array root must not raise');
+    Assert.AreEqual('Release', LConfig.Configuration);
+    Assert.AreEqual('Win32', LConfig.Platform);
+    Assert.AreEqual('bom.json', LConfig.OutputPath);
+
+    LConfig := LGen.LoadConfig(TEngineTests_WriteConfig(FTempDir, '"not-an-object"'));
+    Assert.AreEqual('Release', LConfig.Configuration);
+  finally
+    LGen.Free;
+  end;
+end;
+
+procedure TEngineTests.LoadConfig_DeepEvidenceBuild_DoesNotOverrideMode;
+var
+  LGen: TDxComplyGenerator;
+  LConfig: TSbomConfig;
+begin
+  LGen := TDxComplyGenerator.Create;
+  try
+    LConfig := LGen.LoadConfig(TEngineTests_WriteConfig(FTempDir,
+      '{"deepEvidence":{"mode":"always","build":false}}'));
+    Assert.AreEqual(Ord(debAlways), Ord(LConfig.DeepEvidenceMode),
+      'deepEvidence.build must not overwrite mode always');
+
+    LConfig := LGen.LoadConfig(TEngineTests_WriteConfig(FTempDir,
+      '{"deepEvidence":{"build":false}}'));
+    Assert.AreEqual(Ord(debWhenMapMissing), Ord(LConfig.DeepEvidenceMode),
+      'build alone must leave the default mode');
+  finally
+    LGen.Free;
+  end;
+end;
+
+procedure TEngineTests.GenerateFromConfig_FileValues_ApplyWhenNotExplicit;
+var
+  LGen: TDxComplyGenerator;
+  LPath: string;
+begin
+  LPath := TEngineTests_WriteConfig(FTempDir,
+    '{"configName":"Debug","platform":"Win64","format":"spdx-json",' +
+    '"output":"from-file.json","product":{"name":"FileApp","supplier":"FileCo"}}');
+  LGen := TDxComplyGenerator.Create;
+  try
+    // Missing project: Generate fails, but the merge has already happened.
+    LGen.GenerateFromConfig('missing.dproj', LPath);
+    Assert.AreEqual('Debug', LGen.Config.Configuration);
+    Assert.AreEqual('Win64', LGen.Config.Platform);
+    Assert.AreEqual(Ord(sfSpdxJson), Ord(LGen.Config.Format));
+    Assert.AreEqual('from-file.json', LGen.Config.OutputPath);
+    Assert.AreEqual('FileApp', LGen.Config.ProductName);
+    Assert.AreEqual('FileCo', LGen.Config.Supplier);
+  finally
+    LGen.Free;
+  end;
+end;
+
+procedure TEngineTests.GenerateFromConfig_ExplicitCaller_OverridesFile;
+var
+  LCaller: TSbomConfig;
+  LGen: TDxComplyGenerator;
+  LPath: string;
+begin
+  LPath := TEngineTests_WriteConfig(FTempDir,
+    '{"configName":"Release","platform":"Win32","format":"spdx-json",' +
+    '"output":"from-file.json",' +
+    '"product":{"name":"FileApp","version":"9.9.9","supplier":"FileCo"},' +
+    '"report":{"enabled":true,"format":"html","output":"auditor-report"}}');
+  LCaller := TSbomConfig.Default;
+  LCaller.Configuration := 'Debug';
+  LCaller.Platform := 'Win64';
+  LCaller.Format := sfCycloneDxXml;
+  LCaller.OutputPath := 'cli.json';
+  LCaller.ProductName := 'CliApp';
+  LCaller.Supplier := 'CliCo';
+  LCaller.HumanReadableReport.Enabled := True;
+  LCaller.HumanReadableReport.Format := hrfMarkdown;
+  LCaller.ExplicitOverrides := [scoConfiguration, scoPlatform, scoFormat,
+    scoOutputPath, scoProductName, scoSupplier, scoReport];
+
+  LGen := TDxComplyGenerator.Create(LCaller);
+  try
+    LGen.GenerateFromConfig('missing.dproj', LPath);
+    Assert.AreEqual('Debug', LGen.Config.Configuration, 'explicit --config-name wins');
+    Assert.AreEqual('Win64', LGen.Config.Platform, 'explicit --platform wins');
+    Assert.AreEqual(Ord(sfCycloneDxXml), Ord(LGen.Config.Format), 'explicit --format wins');
+    Assert.AreEqual('cli.json', LGen.Config.OutputPath, 'explicit --output wins');
+    Assert.AreEqual('CliApp', LGen.Config.ProductName, 'explicit --product wins');
+    Assert.AreEqual('CliCo', LGen.Config.Supplier, 'explicit --supplier wins');
+    Assert.AreEqual('9.9.9', LGen.Config.ProductVersion,
+      'version was not passed, so the file value stays');
+    Assert.IsTrue(LGen.Config.HumanReadableReport.Enabled);
+    Assert.AreEqual(Ord(hrfMarkdown), Ord(LGen.Config.HumanReadableReport.Format),
+      'explicit --report wins over the file format');
+    Assert.AreEqual('auditor-report', LGen.Config.HumanReadableReport.OutputBasePath,
+      'report output path stays with the file');
+  finally
+    LGen.Free;
+  end;
+end;
+
+procedure TEngineTests.GenerateFromConfig_IncludePlatformInOutput_DecoratesMergedOutput;
+var
+  LCaller: TSbomConfig;
+  LGen: TDxComplyGenerator;
+  LPath: string;
+begin
+  LPath := TEngineTests_WriteConfig(FTempDir,
+    '{"output":"custom.json","platform":"Win64","configName":"Debug"}');
+  LCaller := TSbomConfig.Default;
+  LCaller.IncludePlatformInOutput := True;
+  LGen := TDxComplyGenerator.Create(LCaller);
+  try
+    LGen.GenerateFromConfig('missing.dproj', LPath);
+    Assert.AreEqual('custom.Win64.Debug.json', LGen.Config.OutputPath,
+      'decoration uses the merged platform and configuration');
+  finally
+    LGen.Free;
+  end;
+
+  LCaller := TSbomConfig.Default;
+  LCaller.IncludePlatformInOutput := True;
+  LCaller.OutputPath := 'given.json';
+  LCaller.ExplicitOverrides := [scoOutputPath];
+  LGen := TDxComplyGenerator.Create(LCaller);
+  try
+    LGen.GenerateFromConfig('missing.dproj', LPath);
+    Assert.AreEqual('given.json', LGen.Config.OutputPath,
+      'an explicit output path is not decorated');
+  finally
+    LGen.Free;
+  end;
 end;
 
 procedure TEngineTests.ScanPasFiles_ExternalLiteral_DetectsDllName;

@@ -194,12 +194,14 @@ All generated SBOMs are validated against the official schema before being writt
 
 ## Configuration
 
-Add a `.dxcomply.json` to your project folder:
+Add a `.dxcomply.json` to your project folder and pass `--ci` so the CLI loads it:
 
 ```json
 {
   "output": "bom.json",
   "format": "cyclonedx-json",
+  "platform": "Win32",
+  "configName": "Release",
   "include": ["build/**"],
   "exclude": ["build/**/Debug/**", "**/*.dcu"],
   "product": {
@@ -213,6 +215,22 @@ Add a `.dxcomply.json` to your project folder:
   }
 }
 ```
+
+`configName` is the build configuration (the same value as `--config-name`). `platform` matches `--platform`. Use these when the project is not built as `Release|Win32`.
+
+When `--ci` is set and the file exists, values are merged in this order:
+
+1. Built-in defaults (`Release`, `Win32`, `cyclonedx-json`, `bom.json`).
+2. Keys present in `.dxcomply.json`.
+3. Command-line options you actually pass. Those win over the file.
+
+An option you leave off the command line does not override the file, even though that option has a default. `dxcomply --ci --config-name=Debug` uses Debug even when the file says `"configName": "Release"`. `dxcomply --ci` with no `--config-name` uses the file's `configName`, or `Release` when the key is absent. The same rule applies to `--platform`, `--format`, `--output`, `--product`, `--version`, `--supplier`, `--report`, `--include`, `--exclude`, `--map-dir`, and `--no-composition-evidence`.
+
+If you pass `--include` or `--exclude`, that list replaces the file's list. `--report` overrides the file's enabled flag and format, and leaves the file's report output path as it is.
+
+Without `--ci`, the file is not read. `--config=<path>` only chooses which file `--ci` loads (the default path is `.dxcomply.json`).
+
+`deepEvidence.mode` may be `always` or `when-missing`. The old `deepEvidence.build` boolean is ignored.
 
 ---
 
