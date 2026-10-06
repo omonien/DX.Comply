@@ -101,6 +101,10 @@ type
     /// <summary>ToSbomConfig copies scan directories and the scanTree flag.</summary>
     [Test]
     procedure ToSbomConfig_CopiesScanOptions;
+
+    /// <summary>--delphi7-root is copied into the engine configuration.</summary>
+    [Test]
+    procedure Parse_Delphi7Root_CopiesToConfig;
   end;
 
 implementation
@@ -307,6 +311,25 @@ begin
     Assert.AreEqual(NativeInt(1), NativeInt(Length(LConfig.ScanDirs)),
       'ToSbomConfig must copy scan directories');
     Assert.AreEqual('redist', LConfig.ScanDirs[0]);
+  finally
+    LOptions.Free;
+  end;
+end;
+
+procedure TCliOptionsTests.Parse_Delphi7Root_CopiesToConfig;
+var
+  LConfig: TSbomConfig;
+  LOptions: TCliOptions;
+begin
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsTrue(LOptions.Parse(TArray<string>.Create(
+      '--project=App.dpr', '--delphi7-root=C:\Delphi7')),
+      '--delphi7-root must parse');
+    Assert.AreEqual('C:\Delphi7', LOptions.Delphi7Root);
+    LConfig := LOptions.ToSbomConfig;
+    Assert.AreEqual('C:\Delphi7', LConfig.Delphi7Root,
+      'ToSbomConfig must copy the Delphi 7 root');
   finally
     LOptions.Free;
   end;

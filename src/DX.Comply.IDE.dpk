@@ -44,6 +44,7 @@ contains
   DX.Comply.MapFile.Reader in 'DX.Comply.MapFile.Reader.pas',
   DX.Comply.UsesClauseParser in 'DX.Comply.UsesClauseParser.pas',
   DX.Comply.UnitResolver in 'DX.Comply.UnitResolver.pas',
+  DX.Comply.LegacyProject in 'DX.Comply.LegacyProject.pas',
   DX.Comply.ProjectScanner in 'DX.Comply.ProjectScanner.pas',
   DX.Comply.FileScanner in 'DX.Comply.FileScanner.pas',
   DX.Comply.HashService in 'DX.Comply.HashService.pas',

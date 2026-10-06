@@ -106,6 +106,11 @@ type
     /// versions did. Deprecated and kept for one release. Default is False.
     /// </summary>
     ScanTree: Boolean;
+    /// <summary>
+    /// Optional Delphi 7 installation directory for legacy .dpr/.dpk/.bdsproj
+    /// scans. Empty uses the Borland registry key and the DELPHI variable.
+    /// </summary>
+    Delphi7Root: string;
     /// <summary>Creates a new TSbomConfig with default values.</summary>
     class function Default: TSbomConfig; static;
   end;
@@ -240,6 +245,7 @@ type
 implementation
 
 uses
+  DX.Comply.LegacyProject,
   DX.Comply.Report.Support,
   DX.Comply.VersionInfo;
 
@@ -265,6 +271,7 @@ begin
   Result.IncludeCompositionEvidence := True;
   Result.ScanTree := False;
   SetLength(Result.ScanDirs, 0);
+  Result.Delphi7Root := '';
 end;
 
 { TDxComplyGenerator }
@@ -868,6 +875,10 @@ begin
         if LJson.GetValue('mapDir') <> nil then
           Result.MapFileDir := LJson.GetValue<string>('mapDir');
 
+        // Delphi 7 install override for legacy .dpr/.dpk/.bdsproj scans.
+        if LJson.GetValue('delphi7Root') <> nil then
+          Result.Delphi7Root := LJson.GetValue<string>('delphi7Root');
+
         // Composition evidence inclusion
         if LJson.GetValue('includeCompositionEvidence') <> nil then
           Result.IncludeCompositionEvidence :=
@@ -982,6 +993,8 @@ begin
       IntToStr(ABuildEvidence.EvidenceItems.Count));
     AddComponentProperty(PropertyName('build', 'search-path-count'),
       IntToStr(ABuildEvidence.SearchPaths.Count));
+    AddComponentProperty(PropertyName('build', 'conditional-defines'),
+      AProjectInfo.ConditionalDefines);
     AddComponentProperty(PropertyName('composition', 'resolved-unit-count'),
       IntToStr(ACompositionEvidence.Units.Count));
     AddConsolidatedUnitEvidenceProperties;
@@ -1208,10 +1221,11 @@ begin
   LValidation := TValidationResult.CreateValid;
   LReportedWarnings := TList<string>.Create;
   try
+    FProjectScanner.SetDelphi7Root(FConfig.Delphi7Root);
     LProjectInfo := FProjectScanner.Scan(AProjectPath, FConfig.Platform, FConfig.Configuration);
 
-    // Apply MapFileDir override — allows legacy projects to specify where the
-    // MAP file is located when automatic detection from the .dproj fails.
+    // Apply MapFileDir override. Legacy projects look next to the output
+    // binary unless the caller points at another directory.
     if FConfig.MapFileDir <> '' then
       LProjectInfo.MapFilePath := TPath.Combine(FConfig.MapFileDir,
         LProjectInfo.ProjectName + LProjectInfo.EffectiveMapSuffix + '.map');
@@ -1227,7 +1241,26 @@ begin
   try
     ReportWarnings(LProjectInfo.Warnings, LReportedWarnings, 12);
 
+    // Legacy projects are not compiled here. The MAP file must already sit
+    // next to the output binary (or in --map-dir).
+    if LProjectInfo.IsLegacyProject and
+       ((Trim(LProjectInfo.MapFilePath) = '') or not TFile.Exists(LProjectInfo.MapFilePath)) then
+    begin
+      DoProgress('Error: ' + LegacyMapFileMissingMessage(LProjectInfo.MapFilePath), -1);
+      Exit(False);
+    end;
+
     DoProgress('Ensuring MAP file...', 15);
+    if LProjectInfo.IsLegacyProject then
+    begin
+      LDeepEvidenceBuildResult := Default(TDeepEvidenceBuildResult);
+      LDeepEvidenceBuildResult.Success := True;
+      LDeepEvidenceBuildResult.Executed := False;
+      LDeepEvidenceBuildResult.Message :=
+        'Legacy project: DX.Comply does not compile it. Using the MAP file from your build.';
+      DoProgress(LDeepEvidenceBuildResult.Message, 18);
+    end
+    else
     try
       LDeepEvidenceBuildResult := EnsureDeepEvidenceBuild(LProjectInfo);
     except
@@ -1329,6 +1362,8 @@ begin
         LMetadata.ProductName := LProjectInfo.ProjectName;
       if LMetadata.ProductVersion = '' then
         LMetadata.ProductVersion := LProjectInfo.Version;
+      if LMetadata.Supplier = '' then
+        LMetadata.Supplier := LProjectInfo.CompanyName;
 
       Result := FSbomWriter.Write(LOutputPath, LMetadata, LArtefacts, LProjectInfo);
 
@@ -1384,8 +1419,15 @@ begin
 end;
 
 function TDxComplyGenerator.GenerateFromConfig(const AProjectPath, AConfigPath: string): Boolean;
+var
+  LDelphi7Root: string;
 begin
+  // --delphi7-root on the command line still applies when the JSON file
+  // does not set delphi7Root.
+  LDelphi7Root := FConfig.Delphi7Root;
   FConfig := LoadConfig(AConfigPath);
+  if (FConfig.Delphi7Root = '') and (LDelphi7Root <> '') then
+    FConfig.Delphi7Root := LDelphi7Root;
   Result := Generate(AProjectPath);
 end;
 

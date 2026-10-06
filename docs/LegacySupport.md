@@ -40,12 +40,24 @@ Build the project as usual. The compiler produces a `.map` file alongside the ex
 ### 3. Run the CLI Tool
 
 ```bash
-dxcomply --project=MyApp.dproj --output=bom.json --no-pause
+dxcomply --project=MyApp.dpr --output=bom.json --no-pause
 ```
 
-The SBOM lists the program or package that was built, plus other binaries in that output directory. Installers and helper tools in subfolders are left out, so the document stays smaller. If the `.dproj` has no output directory, only binaries in the project directory itself are listed. Use `--scan-dir` for anything you stage on purpose. `--scan-tree` restores the old recursive listing and is deprecated.
+Delphi 2007 and later still use the `.dproj` (`dxcomply --project=MyApp.dproj`). Delphi 7 passes the `.dpr`, or the `.dpk` when a package has no `.dproj`. Delphi 2005 and 2006 can pass the `.bdsproj`. DX.Comply reads the main source name from a `.bdsproj` and then uses the sibling `.dof` and `.cfg`. It does not read build configurations stored inside the `.bdsproj`. If a `.dproj` is present, pass the `.dproj`.
 
-For very old projects that use `.dof` instead of `.dproj`, you can point `--project` at the `.dproj` if one exists, or at the `.dpr` file. DX.Comply will locate the MAP file based on the output directory conventions.
+The sibling `.dof` (INI) and `.cfg` (dcc32 response file) supply the output directory, search path, defines, runtime packages, and version info. When both files define a value, the `.dof` wins, including when the `.dof` value is empty. The `.cfg` is used only for settings the `.dof` does not define. `OutputDir` and `-E` are the exe/dll directory. `PackageDLLOutputDir` and `-LE` are the package directory. Runtime packages are listed only when the project is built with runtime packages: `UsePackages=1` uses `[Directories] Packages` (or `-LU` if that key is absent), `UsePackages=0` lists none, and a `.dof` that never mentions `UsePackages` uses `-LU`.
+
+Delphi 7, 2005, and 2006 projects have a single Win32 option set. `--platform` and `--config-name` are reported and not applied. The recorded platform is Win32 and the configuration is Default.
+
+The output name comes from the project file name. The extension comes from the first `program` (`.exe`), `library` (`.dll`), or `package` (`.bpl`) keyword in the source. `{$LIBSUFFIX '...'}` is appended to dll and bpl names. The MAP file DX.Comply reads is that binary's name with a `.map` extension, in the same directory. If it is missing, the CLI stops and tells you to set Project Options, Linker, Map file to Detailed, or to add `-GD` to the `.cfg`, then rebuild. `--map-dir` still overrides the directory.
+
+`FileVersion` from `[Version Info Keys]` becomes the root component version (otherwise `MajorVer.MinorVer.Release.Build`). `CompanyName` becomes the supplier when `--supplier` and `product.supplier` are both empty. The root component name stays the project name.
+
+Delphi 7 library units are looked up from `HKCU` or `HKLM\Software\Borland\Delphi\7.0` (`RootDir` and `Library\Search Path`), then from the `DELPHI` environment variable. The scan does not fail when Delphi 7 is not installed; those library units are simply not resolved from an install tree. Pass `--delphi7-root` or set `delphi7Root` in `.dxcomply.json` to point at a Delphi 7 tree. `$(DELPHI)` in the search path expands to that root.
+
+A blank `PackageDLLOutputDir` is treated as the project directory. The Delphi 7 IDE would use its global package output directory instead. Set the directory in the `.dof` or `.cfg` when the BPL is built somewhere else.
+
+The SBOM lists the program or package that was built, plus other binaries in that output directory. Installers and helper tools in subfolders are left out, so the document stays smaller. If the project has no output directory, only binaries in the project directory itself are listed. Use `--scan-dir` for anything you stage on purpose. `--scan-tree` restores the old recursive listing and is deprecated.
 
 ---
 

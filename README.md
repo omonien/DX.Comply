@@ -140,11 +140,13 @@ DX.Comply can generate SBOMs for projects built with any Delphi version — incl
 1. Open your project in the legacy Delphi IDE.
 2. Go to **Project > Options > Linker** and set **Map file** to **Detailed**.
 3. Build your project — this produces a `.map` file in the output directory.
-4. Run the CLI tool against the `.dproj` (or `.dof` for very old versions):
+4. Run the CLI against the project file. Delphi 7 projects are the `.dpr` (or the `.dpk` for a package that has no `.dproj`). Delphi 2005 and 2006 can be the `.bdsproj`. If the folder also contains a `.dproj`, pass that file instead.
 
 ```bash
-dxcomply --project=MyApp.dproj --output=bom.json --no-pause
+dxcomply --project=MyApp.dpr --output=bom.json --no-pause
 ```
+
+The CLI reads a sibling `.dof` and `.cfg`. When both files define a setting, the `.dof` value is used. These projects have one Win32 option set, so `--platform` and `--config-name` are not applied. The `.map` file must sit next to the output binary. Library units come from a Delphi 7 install when `Software\Borland\Delphi\7.0` is in the registry. The scan still succeeds when that install is missing. Set `--delphi7-root` or `delphi7Root` in `.dxcomply.json` to point at the tree yourself.
 
 > **Tip:** You can automate this with a **Post-Build Event** in a dedicated build configuration. Create a configuration named e.g. `SBOM` that enables detailed MAP output and runs `dxcomply` as a post-build step. This way, a single build generates both your application and its SBOM.
 
