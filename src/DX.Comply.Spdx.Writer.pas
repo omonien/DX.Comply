@@ -44,7 +44,6 @@ type
       cSpdxVersion = 'SPDX-2.3';
       cDataLicense = 'CC0-1.0';
       cToolName = 'DX.Comply';
-      cToolVersion = '1.0.0';
       cSpdxIdPrefix = 'SPDXRef-';
   private
     function GenerateUuid: string;
@@ -64,6 +63,9 @@ type
   end;
 
 implementation
+
+uses
+  DX.Comply.VersionInfo;
 
 { TSpdxJsonWriter }
 
@@ -110,7 +112,7 @@ begin
   LCreationInfo.AddPair('licenseListVersion', '3.19');
 
   LCreators := TJSONArray.Create;
-  LCreators.Add('Tool: ' + cToolName + '-' + cToolVersion);
+  LCreators.Add('Tool: ' + cToolName + '-' + ResolveDxComplyToolVersion(AMetadata.ToolVersion));
   if AMetadata.Supplier <> '' then
     LCreators.Add('Organization: ' + AMetadata.Supplier);
   LCreationInfo.AddPair('creators', LCreators);

@@ -12,10 +12,13 @@
 #   .\DelphiBuildDPROJ.ps1 -ProjectFile "MyProject.dproj" -Config Release -Platform Win64
 #   .\DelphiBuildDPROJ.ps1 -ProjectFile "MyProject.dproj" -DelphiVersion "23.0" -VerboseOutput
 #   .\DelphiBuildDPROJ.ps1 -ProjectFile "MyProject.dproj" -ExtraProperties @{ Foo = "bar" }
+#   .\DelphiBuildDPROJ.ps1 -ProjectFile "MyProject.dproj" -ExtraProperty "DCC_MapFile=3"
 #
 # PARAMETERS:
-#   -ProjectFile     : Path to the .dproj file to build (mandatory)
-#   -Config          : Build configuration (default: "Debug")
+#   -ProjectFile     : Path to the .dproj file to build (mandatory).
+#                      -ProjectPath is accepted as an alias.
+#   -Config          : Build configuration (default: "Debug").
+#                      -Configuration is accepted as an alias.
 #   -Platform        : Target platform (default: "Win32"; see $DefaultPlatform)
 #   -DelphiVersion   : Delphi version to use (default: auto-detect latest)
 #   -ExtraProperties : Hashtable of extra MSBuild /p:Key=Value properties to
@@ -24,6 +27,10 @@
 #                      splatting, which adds argv-level quoting on its own;
 #                      no embedded quotes here, so MSBuild conditions like
 #                      '$(Foo)'=='bar' match the way you'd expect.
+#   -ExtraProperty   : One or more "Key=Value" strings. powershell.exe -File
+#                      cannot pass a hashtable, so DX.Comply sends this form.
+#                      -AdditionalMSBuildProperties is accepted as an alias.
+#                      Entries are merged into -ExtraProperties.
 #   -VerboseOutput   : Enable verbose MSBuild output
 #
 # REQUIREMENTS:
@@ -38,12 +45,16 @@
 
 param(
     [Parameter(Mandatory=$true)]
+    [Alias('ProjectPath')]
     [string]$ProjectFile,
 
+    [Alias('Configuration')]
     [string]$Config = "",
     [string]$Platform = "",
     [string]$DelphiVersion = "",
     [hashtable]$ExtraProperties = @{},
+    [Alias('AdditionalMSBuildProperties')]
+    [string[]]$ExtraProperty = @(),
     [switch]$VerboseOutput,
     [switch]$LinuxMap
 )
@@ -64,6 +75,20 @@ $DefaultDelphiVersion = ""  # Empty = auto-detect latest installed version
 if ([string]::IsNullOrEmpty($Config)) { $Config = $DefaultConfig }
 if ([string]::IsNullOrEmpty($Platform)) { $Platform = $DefaultPlatform }
 if ([string]::IsNullOrEmpty($DelphiVersion)) { $DelphiVersion = $DefaultDelphiVersion }
+
+# Merge command-line Key=Value entries into the hashtable. -File callers
+# (DX.Comply) cannot pass -ExtraProperties as a hashtable.
+foreach ($Entry in $ExtraProperty) {
+    if ([string]::IsNullOrWhiteSpace($Entry)) { continue }
+    $SplitAt = $Entry.IndexOf("=")
+    if ($SplitAt -lt 1) {
+        Write-Warning "Ignoring extra MSBuild property without '=': $Entry"
+        continue
+    }
+    $Key = $Entry.Substring(0, $SplitAt)
+    $Value = $Entry.Substring($SplitAt + 1)
+    $ExtraProperties[$Key] = $Value
+}
 
 # -----------------------------------------------------------------------------
 # Helper Functions (Note: Write-Warn/Write-Err to avoid PowerShell cmdlet conflicts)

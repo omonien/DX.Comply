@@ -26,7 +26,8 @@ uses
   System.Generics.Collections,
   DUnitX.TestFramework,
   DX.Comply.Spdx.Writer,
-  DX.Comply.Engine.Intf;
+  DX.Comply.Engine.Intf,
+  DX.Comply.VersionInfo;
 
 type
   [TestFixture]
@@ -115,7 +116,7 @@ begin
   FMetadata.Supplier := 'Test GmbH';
   FMetadata.Timestamp := '2026-02-24T10:00:00+01:00';
   FMetadata.ToolName := 'DX.Comply';
-  FMetadata.ToolVersion := '1.0.0';
+  FMetadata.ToolVersion := '';
 
   FProjectInfo := TProjectInfo.Create;
   FProjectInfo.ProjectName := 'TestProject';
@@ -250,7 +251,8 @@ begin
     LCreationInfo := LJson.GetValue('creationInfo') as TJSONObject;
     LCreators := LCreationInfo.GetValue('creators') as TJSONArray;
     Assert.IsTrue(LCreators.Count > 0);
-    Assert.IsTrue(LCreators.Items[0].Value.StartsWith('Tool: DX.Comply'));
+    Assert.AreEqual('Tool: DX.Comply-' + GetDxComplyToolVersion, LCreators.Items[0].Value,
+      'The SPDX creator tool token must use the running module version');
   finally
     LJson.Free;
   end;

@@ -31,7 +31,8 @@ uses
   DX.Comply.BuildOrchestrator,
   DX.Comply.Engine,
   DX.Comply.Engine.Intf,
-  DX.Comply.Report.Intf;
+  DX.Comply.Report.Intf,
+  DX.Comply.VersionInfo;
 
 type
   /// <summary>
@@ -95,6 +96,10 @@ type
     /// <summary>The generated file must contain valid CycloneDX JSON.</summary>
     [Test]
     procedure Generate_OutputFileContainsValidJson;
+
+    /// <summary>The generated SBOM tool version must match the running module.</summary>
+    [Test]
+    procedure Generate_ToolVersion_MatchesModule;
 
     /// <summary>The generated SBOM must include DX.Comply Deep-Evidence metadata properties.</summary>
     [Test]
@@ -365,6 +370,33 @@ begin
       Assert.IsNotNull(LJson, 'Output file must contain valid parseable JSON');
       Assert.AreEqual('CycloneDX', LJson.GetValue<string>('bomFormat'),
         'bomFormat must be CycloneDX');
+    finally
+      LJson.Free;
+    end;
+  finally
+    LGen.Free;
+  end;
+end;
+
+procedure TEngineTests.Generate_ToolVersion_MatchesModule;
+var
+  LComponents: TJSONArray;
+  LGen: TDxComplyGenerator;
+  LJson, LMetadata, LTool, LTools: TJSONObject;
+begin
+  LGen := TDxComplyGenerator.Create;
+  try
+    LGen.OnProgress := OnProgress;
+    Assert.IsTrue(LGen.Generate(FEngineDprojPath, FOutputFile),
+      'Generate must succeed before the tool version can be checked');
+    LJson := TJSONObject.ParseJSONValue(TFile.ReadAllText(FOutputFile, TEncoding.UTF8)) as TJSONObject;
+    try
+      LMetadata := LJson.GetValue('metadata') as TJSONObject;
+      LTools := LMetadata.GetValue('tools') as TJSONObject;
+      LComponents := LTools.GetValue('components') as TJSONArray;
+      LTool := LComponents.Items[0] as TJSONObject;
+      Assert.AreEqual(GetDxComplyToolVersion, LTool.GetValue<string>('version'),
+        'The generated SBOM tool version must match the running module');
     finally
       LJson.Free;
     end;

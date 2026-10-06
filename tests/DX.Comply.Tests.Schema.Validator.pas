@@ -78,6 +78,15 @@ type
     [Test]
     procedure CycloneDxXml_EmptyString_ReportsError;
 
+    [Test]
+    procedure CycloneDxXml_PropertiesBeforeTools_ReportsError;
+
+    [Test]
+    procedure CycloneDxXml_PurlBeforeHashes_ReportsError;
+
+    [Test]
+    procedure CycloneDxXml_SchemaOrder_PassesValidation;
+
     // SPDX JSON
     [Test]
     procedure SpdxJson_ValidDocument_PassesValidation;
@@ -327,6 +336,91 @@ var
 begin
   LResult := FValidator.ValidateCycloneDxXml('');
   Assert.IsFalse(LResult.IsValid);
+end;
+
+procedure TSchemaValidatorTests.CycloneDxXml_PropertiesBeforeTools_ReportsError;
+const
+  cXml =
+    '<?xml version="1.0" encoding="UTF-8"?>' +
+    '<bom xmlns="http://cyclonedx.org/schema/bom/1.5" version="1" ' +
+    'serialNumber="urn:uuid:12345678-1234-1234-1234-123456789012">' +
+    '<metadata>' +
+    '<timestamp>2026-02-24T10:00:00+01:00</timestamp>' +
+    '<properties><property name="dx:profile">cra</property></properties>' +
+    '<tools><tool><name>DX.Comply</name><version>1.3.0.0</version></tool></tools>' +
+    '</metadata>' +
+    '<components></components>' +
+    '</bom>';
+var
+  LResult: TValidationResult;
+  LError: string;
+  LFound: Boolean;
+begin
+  LResult := FValidator.ValidateCycloneDxXml(cXml);
+  Assert.IsFalse(LResult.IsValid, 'properties before tools must fail validation');
+  LFound := False;
+  for LError in LResult.Errors do
+    if Pos('sequence order', LError) > 0 then
+      LFound := True;
+  Assert.IsTrue(LFound, 'The error list must mention the sequence order');
+end;
+
+procedure TSchemaValidatorTests.CycloneDxXml_PurlBeforeHashes_ReportsError;
+const
+  cXml =
+    '<?xml version="1.0" encoding="UTF-8"?>' +
+    '<bom xmlns="http://cyclonedx.org/schema/bom/1.5" version="1" ' +
+    'serialNumber="urn:uuid:12345678-1234-1234-1234-123456789012">' +
+    '<metadata><timestamp>2026-02-24T10:00:00+01:00</timestamp></metadata>' +
+    '<components><component type="file" bom-ref="comp-0">' +
+    '<name>App.exe</name><purl>file:App.exe</purl>' +
+    '<hashes><hash alg="SHA-256">' +
+    'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789' +
+    '</hash></hashes></component></components>' +
+    '</bom>';
+var
+  LResult: TValidationResult;
+begin
+  LResult := FValidator.ValidateCycloneDxXml(cXml);
+  Assert.IsFalse(LResult.IsValid, 'purl before hashes must fail validation');
+end;
+
+procedure TSchemaValidatorTests.CycloneDxXml_SchemaOrder_PassesValidation;
+const
+  cXml =
+    '<?xml version="1.0" encoding="UTF-8"?>' +
+    '<bom xmlns="http://cyclonedx.org/schema/bom/1.5" version="1" ' +
+    'serialNumber="urn:uuid:12345678-1234-1234-1234-123456789012">' +
+    '<metadata>' +
+    '<timestamp>2026-02-24T10:00:00+01:00</timestamp>' +
+    '<tools><tool><vendor>Olaf Monien</vendor><name>DX.Comply</name>' +
+    '<version>1.3.0.0</version></tool></tools>' +
+    '<component type="application" bom-ref="App">' +
+    '<supplier><name>Acme</name></supplier>' +
+    '<name>App</name><version>1.3.0.0</version>' +
+    '</component>' +
+    '<properties><property name="dx:profile">cra</property></properties>' +
+    '</metadata>' +
+    '<components><component type="application" bom-ref="comp-0">' +
+    '<name>App.exe</name><version>abcdef012345</version>' +
+    '<hashes><hash alg="SHA-256">' +
+    'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789' +
+    '</hash></hashes>' +
+    '<purl>file:App.exe</purl>' +
+    '<properties><property name="file:size">12</property></properties>' +
+    '</component></components>' +
+    '<dependencies><dependency ref="App">' +
+    '<dependency ref="comp-0"/>' +
+    '</dependency></dependencies>' +
+    '</bom>';
+var
+  LResult: TValidationResult;
+begin
+  LResult := FValidator.ValidateCycloneDxXml(cXml);
+  Assert.IsTrue(LResult.IsValid, 'A document in XSD order must pass. ' +
+    string.Join('; ', LResult.Errors));
+  Assert.AreEqual(0, Length(CycloneDxXmlSequenceErrors(cXml)),
+    'The sequence check must accept XSD order');
 end;
 
 // --- SPDX JSON Tests ---

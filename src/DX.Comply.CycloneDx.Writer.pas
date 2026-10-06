@@ -42,8 +42,6 @@ type
       cSpecVersion = '1.5';
       /// <summary>Tool name.</summary>
       cToolName = 'DX.Comply';
-      /// <summary>Tool version.</summary>
-      cToolVersion = '1.0.0';
   private
     function GenerateUuid: string;
     function BuildMetadata(const AMetadata: TSbomMetadata; const AProjectInfo: TProjectInfo): TJSONObject;
@@ -61,6 +59,9 @@ type
   end;
 
 implementation
+
+uses
+  DX.Comply.VersionInfo;
 
 { TCycloneDxJsonWriter }
 
@@ -142,7 +143,7 @@ begin
   LTool.AddPair('type', 'application');
   LTool.AddPair('author', 'Olaf Monien');
   LTool.AddPair('name', cToolName);
-  LTool.AddPair('version', cToolVersion);
+  LTool.AddPair('version', ResolveDxComplyToolVersion(AMetadata.ToolVersion));
 
   LToolArray := TJSONArray.Create;
   LToolArray.Add(LTool);

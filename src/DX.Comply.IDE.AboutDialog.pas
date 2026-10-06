@@ -69,7 +69,8 @@ uses
   Winapi.ShellAPI,
   Winapi.Windows,
   DX.Comply.IDE.Logger,
-  DX.Comply.IDE.PathSupport;
+  DX.Comply.IDE.PathSupport,
+  DX.Comply.VersionInfo;
 
 type
   /// <summary>
@@ -78,14 +79,6 @@ type
   TPackageVersionInfo = record
     CompanyName: string;
     ProductVersion: string;
-  end;
-
-  /// <summary>
-  /// Language/code-page translation entry from a Windows version resource.
-  /// </summary>
-  TTranslationInfo = packed record
-    Language: Word;
-    CodePage: Word;
   end;
 
 const
@@ -109,92 +102,14 @@ begin
     SW_SHOWNORMAL)) > 32;
 end;
 
-function QueryVersionString(const AVersionData: TBytes; const AName: string): string;
-const
-  cFallbackTranslations: array [0 .. 2] of string = ('040704E4', '040904E4', '040904B0');
-var
-  I: Integer;
-  LQueryPath: string;
-  LTextLength: UINT;
-  LTextPointer: PChar;
-  LTranslation: ^TTranslationInfo;
-  LTranslationId: string;
-  LTranslationLength: UINT;
-
-  function TryQueryString(const ATranslationId: string): Boolean;
-  begin
-    LQueryPath := Format('\StringFileInfo\%s\%s', [ATranslationId, AName]);
-    Result := VerQueryValue(@AVersionData[0], PChar(LQueryPath), Pointer(LTextPointer),
-      LTextLength) and (LTextLength > 0);
-    if Result then
-      Result := Trim(string(LTextPointer)) <> '';
-  end;
-
-begin
-  Result := '';
-  if Length(AVersionData) = 0 then
-    Exit;
-
-  if VerQueryValue(@AVersionData[0], '\VarFileInfo\Translation', Pointer(LTranslation),
-    LTranslationLength) and (LTranslationLength >= SizeOf(TTranslationInfo)) then
-  begin
-    LTranslationId := Format('%.4x%.4x', [LTranslation^.Language, LTranslation^.CodePage]);
-    if TryQueryString(LTranslationId) then
-      Exit(Trim(string(LTextPointer)));
-  end;
-
-  for I := Low(cFallbackTranslations) to High(cFallbackTranslations) do
-    if TryQueryString(cFallbackTranslations[I]) then
-      Exit(Trim(string(LTextPointer)));
-end;
-
-function QueryFixedProductVersion(const AVersionData: TBytes): string;
-var
-  LVersionInfo: PVSFixedFileInfo;
-  LVersionLength: UINT;
-begin
-  Result := '';
-  if (Length(AVersionData) = 0) or
-    not VerQueryValue(@AVersionData[0], '\', Pointer(LVersionInfo), LVersionLength) or
-    (LVersionLength < SizeOf(VS_FIXEDFILEINFO)) then
-    Exit;
-
-  Result := Format('%d.%d.%d.%d', [
-    HiWord(LVersionInfo^.dwProductVersionMS),
-    LoWord(LVersionInfo^.dwProductVersionMS),
-    HiWord(LVersionInfo^.dwProductVersionLS),
-    LoWord(LVersionInfo^.dwProductVersionLS)]);
-end;
-
 function ReadCurrentPackageVersionInfo: TPackageVersionInfo;
-var
-  LDummyHandle: DWORD;
-  LModuleFilePath: string;
-  LVersionData: TBytes;
-  LVersionDataSize: DWORD;
 begin
-  Result.CompanyName := 'Olaf Monien';
-  Result.ProductVersion := '1.0.0.0';
-
-  LModuleFilePath := GetDXComplyModuleFilePath;
-  if LModuleFilePath = '' then
-    Exit;
-
-  LVersionDataSize := GetFileVersionInfoSize(PChar(LModuleFilePath), LDummyHandle);
-  if LVersionDataSize = 0 then
-    Exit;
-
-  SetLength(LVersionData, LVersionDataSize);
-  if not GetFileVersionInfo(PChar(LModuleFilePath), 0, LVersionDataSize, @LVersionData[0]) then
-    Exit;
-
-  Result.CompanyName := QueryVersionString(LVersionData, 'CompanyName');
+  // HInstance is the IDE BPL when this unit is linked into the design package.
+  Result.CompanyName := GetModuleVersionString(HInstance, 'CompanyName');
   if Result.CompanyName = '' then
     Result.CompanyName := 'Olaf Monien';
 
-  Result.ProductVersion := QueryVersionString(LVersionData, 'ProductVersion');
-  if Result.ProductVersion = '' then
-    Result.ProductVersion := QueryFixedProductVersion(LVersionData);
+  Result.ProductVersion := GetModuleProductVersion(HInstance);
   if Result.ProductVersion = '' then
     Result.ProductVersion := '1.0.0.0';
 end;

@@ -25,7 +25,9 @@ uses
   System.Generics.Collections,
   DUnitX.TestFramework,
   DX.Comply.CycloneDx.XmlWriter,
-  DX.Comply.Engine.Intf;
+  DX.Comply.Engine.Intf,
+  DX.Comply.Schema.Validator,
+  DX.Comply.VersionInfo;
 
 type
   [TestFixture]
@@ -92,6 +94,18 @@ type
 
     [Test]
     procedure Write_SpecialChars_AreEscaped;
+
+    /// <summary>Metadata children must follow the CycloneDX 1.5 sequence.</summary>
+    [Test]
+    procedure Write_MetadataElementOrder_MatchesSchema;
+
+    /// <summary>Component hashes must precede purl.</summary>
+    [Test]
+    procedure Write_ComponentElementOrder_HashesBeforePurl;
+
+    /// <summary>A document with the old element order must fail validation.</summary>
+    [Test]
+    procedure Validate_OutOfOrderElements_ReturnsFalse;
   end;
 
 implementation
@@ -111,7 +125,7 @@ begin
   FMetadata.Supplier := 'Test GmbH';
   FMetadata.Timestamp := '2026-02-24T10:00:00+01:00';
   FMetadata.ToolName := 'DX.Comply';
-  FMetadata.ToolVersion := '1.0.0';
+  FMetadata.ToolVersion := '';
 
   FProjectInfo := TProjectInfo.Create;
   FProjectInfo.ProjectName := 'TestProject';
@@ -220,6 +234,84 @@ begin
   LContent := LoadOutputContent;
   Assert.IsTrue(Pos('<name>DX.Comply</name>', LContent) > 0);
   Assert.IsTrue(Pos('<vendor>Olaf Monien</vendor>', LContent) > 0);
+  Assert.IsTrue(Pos('<version>' + GetDxComplyToolVersion + '</version>', LContent) > 0,
+    'The tool version must come from the running module');
+end;
+
+procedure TCycloneDxXmlWriterTests.Write_MetadataElementOrder_MatchesSchema;
+var
+  LComponentAt, LContent, LMetadata, LPropertiesAt, LSupplierAt, LToolsAt: string;
+  LMetaStart, LMetaEnd: Integer;
+begin
+  SetLength(FMetadata.Properties, 1);
+  FMetadata.Properties[0] := TSbomProperty.Create('dx:profile', 'cra');
+  FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo);
+  LContent := LoadOutputContent;
+
+  LMetaStart := Pos('<metadata>', LContent);
+  LMetaEnd := Pos('</metadata>', LContent);
+  Assert.IsTrue((LMetaStart > 0) and (LMetaEnd > LMetaStart),
+    'The document must contain a metadata element');
+  LMetadata := Copy(LContent, LMetaStart, LMetaEnd - LMetaStart);
+
+  LToolsAt := IntToStr(Pos('<tools>', LMetadata));
+  LComponentAt := IntToStr(Pos('<component ', LMetadata));
+  LPropertiesAt := IntToStr(Pos('<properties>', LMetadata));
+  LSupplierAt := IntToStr(Pos('<supplier>', LMetadata));
+  Assert.IsTrue(Pos('<tools>', LMetadata) < Pos('<component ', LMetadata),
+    'metadata tools must precede metadata component. tools at ' + LToolsAt +
+    ', component at ' + LComponentAt);
+  Assert.IsTrue(Pos('</component>', LMetadata) < Pos('<properties>', LMetadata),
+    'metadata properties must follow the metadata component. properties at ' + LPropertiesAt);
+  Assert.IsTrue(Pos('<supplier>', LMetadata) < Pos('<name>', LMetadata),
+    'component supplier must precede name. supplier at ' + LSupplierAt);
+  Assert.AreEqual(0, Length(CycloneDxXmlSequenceErrors(LContent)),
+    'The written document must satisfy the CycloneDX 1.5 element order');
+end;
+
+procedure TCycloneDxXmlWriterTests.Write_ComponentElementOrder_HashesBeforePurl;
+var
+  LComponents: string;
+  LContent: string;
+  LEnd, LStart: Integer;
+begin
+  FArtefacts.Add(MakeArtefact('MyApp.exe', 'application',
+    'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789', 102400));
+  FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo);
+  LContent := LoadOutputContent;
+  LStart := Pos('<components>', LContent);
+  LEnd := Pos('</components>', LContent);
+  LComponents := Copy(LContent, LStart, LEnd - LStart);
+  Assert.IsTrue(Pos('<hashes>', LComponents) < Pos('<purl>', LComponents),
+    'component hashes must precede purl');
+  Assert.IsTrue(Pos('<purl>', LComponents) < Pos('<properties>', LComponents),
+    'component purl must precede properties');
+end;
+
+procedure TCycloneDxXmlWriterTests.Validate_OutOfOrderElements_ReturnsFalse;
+const
+  cOutOfOrder =
+    '<?xml version="1.0" encoding="UTF-8"?>' +
+    '<bom xmlns="http://cyclonedx.org/schema/bom/1.5" version="1" ' +
+    'serialNumber="urn:uuid:12345678-1234-1234-1234-123456789012">' +
+    '<metadata>' +
+    '<timestamp>2026-02-24T10:00:00+01:00</timestamp>' +
+    '<properties><property name="dx:profile">cra</property></properties>' +
+    '<tools><tool><vendor>Olaf Monien</vendor><name>DX.Comply</name>' +
+    '<version>1.3.0.0</version></tool></tools>' +
+    '<component type="application" bom-ref="App"><name>App</name></component>' +
+    '</metadata>' +
+    '<components><component type="application" bom-ref="comp-0">' +
+    '<name>App.exe</name><purl>file:App.exe</purl>' +
+    '<hashes><hash alg="SHA-256">' +
+    'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789' +
+    '</hash></hashes></component></components>' +
+    '</bom>';
+begin
+  Assert.IsFalse(FWriter.Validate(cOutOfOrder),
+    'Validation must reject metadata properties before tools and purl before hashes');
+  Assert.IsTrue(Length(CycloneDxXmlSequenceErrors(cOutOfOrder)) > 0,
+    'The sequence check must report the old element order');
 end;
 
 procedure TCycloneDxXmlWriterTests.Write_ContainsDxComplyProperties;
