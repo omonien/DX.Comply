@@ -19,7 +19,7 @@
         Top = 16
         Width = 520
         Height = 21
-        Caption = 'Prompt before starting the CRA compliance documentation build'
+        Caption = 'Prompt before starting the SBOM build'
         TabOrder = 0
       end
       object FSaveAllModifiedFilesCheckBox: TCheckBox

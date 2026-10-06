@@ -20,11 +20,13 @@ unit DX.Comply.Tests.CLI.Options;
 interface
 
 uses
+  System.SysUtils,
+  System.IOUtils,
   DUnitX.TestFramework,
   DX.Comply.Engine,
   DX.Comply.Engine.Intf,
-  DX.Comply.CLI.Options,
-  System.SysUtils;
+  DX.Comply.Report.Intf,
+  DX.Comply.CLI.Options;
 
 type
   /// <summary>
@@ -81,6 +83,23 @@ type
     /// <summary>Alphanumeric, hyphen and underscore must be preserved.</summary>
     [Test]
     procedure SanitizeForFilename_PreservesAllowedChars;
+
+    /// <summary>
+    /// --config-name, --platform, --product, --supplier and --report mark
+    /// those fields explicit so a config file cannot replace them (issue #50).
+    /// </summary>
+    [Test]
+    procedure Parse_ExplicitFlags_AreRecorded;
+
+    /// <summary>Defaults are not treated as explicit overrides.</summary>
+    [Test]
+    procedure Parse_OmittedFlags_AreNotExplicit;
+
+    /// <summary>
+    /// Explicit CLI values win over .dxcomply.json. Omitted ones keep the file.
+    /// </summary>
+    [Test]
+    procedure Parse_ExplicitFlags_WinOverConfigFile;
 
     /// <summary>--scan-dir can be passed more than once.</summary>
     [Test]
@@ -234,6 +253,100 @@ procedure TCliOptionsTests.SanitizeForFilename_PreservesAllowedChars;
 begin
   Assert.AreEqual('Release-1_0', TCliOptions.SanitizeForFilename('Release-1_0'),
     'Alphanumeric, hyphen and underscore must be preserved');
+end;
+
+procedure TCliOptionsTests.Parse_ExplicitFlags_AreRecorded;
+var
+  LOptions: TCliOptions;
+  LConfig: TSbomConfig;
+begin
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsTrue(LOptions.Parse([
+      '--project=App.dproj',
+      '--config-name=Debug',
+      '--platform=Win64',
+      '--product=CliApp',
+      '--supplier=CliCo',
+      '--report=html']));
+    LConfig := LOptions.ToSbomConfig;
+    Assert.AreEqual('Debug', LConfig.Configuration);
+    Assert.AreEqual('Win64', LConfig.Platform);
+    Assert.AreEqual('CliApp', LConfig.ProductName);
+    Assert.AreEqual('CliCo', LConfig.Supplier);
+    Assert.IsTrue(LConfig.HumanReadableReport.Enabled);
+    Assert.AreEqual(Ord(hrfHtml), Ord(LConfig.HumanReadableReport.Format));
+    Assert.IsTrue(scoConfiguration in LConfig.ExplicitOverrides);
+    Assert.IsTrue(scoPlatform in LConfig.ExplicitOverrides);
+    Assert.IsTrue(scoProductName in LConfig.ExplicitOverrides);
+    Assert.IsTrue(scoSupplier in LConfig.ExplicitOverrides);
+    Assert.IsTrue(scoReport in LConfig.ExplicitOverrides);
+    Assert.IsFalse(scoFormat in LConfig.ExplicitOverrides,
+      '--format was not passed, so the file may still set the format');
+  finally
+    LOptions.Free;
+  end;
+end;
+
+procedure TCliOptionsTests.Parse_OmittedFlags_AreNotExplicit;
+var
+  LOptions: TCliOptions;
+  LConfig: TSbomConfig;
+begin
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsTrue(LOptions.Parse(['--project=App.dproj']));
+    LConfig := LOptions.ToSbomConfig;
+    Assert.AreEqual('Release', LConfig.Configuration);
+    Assert.AreEqual('Win32', LConfig.Platform);
+    Assert.IsFalse(scoConfiguration in LConfig.ExplicitOverrides);
+    Assert.IsFalse(scoPlatform in LConfig.ExplicitOverrides);
+    Assert.IsFalse(scoProductName in LConfig.ExplicitOverrides);
+    Assert.IsFalse(scoSupplier in LConfig.ExplicitOverrides);
+    Assert.IsFalse(scoReport in LConfig.ExplicitOverrides);
+  finally
+    LOptions.Free;
+  end;
+end;
+
+procedure TCliOptionsTests.Parse_ExplicitFlags_WinOverConfigFile;
+var
+  LOptions: TCliOptions;
+  LGen: TDxComplyGenerator;
+  LPath: string;
+begin
+  LPath := TPath.Combine(TPath.GetTempPath, 'dxcomply-cli-precedence.json');
+  TFile.WriteAllText(LPath,
+    '{"configName":"Release","platform":"Win32","format":"spdx-json",' +
+    '"product":{"name":"FileApp","supplier":"FileCo"},' +
+    '"report":{"enabled":true,"format":"html","output":"auditor-report"}}',
+    TEncoding.UTF8);
+  LOptions := TCliOptions.Create;
+  LGen := nil;
+  try
+    Assert.IsTrue(LOptions.Parse([
+      '--project=App.dproj',
+      '--config-name=Debug',
+      '--supplier=CliCo',
+      '--report=markdown']));
+    LGen := TDxComplyGenerator.Create(LOptions.ToSbomConfig);
+    LGen.GenerateFromConfig('missing.dproj', LPath);
+    Assert.AreEqual('Debug', LGen.Config.Configuration);
+    Assert.AreEqual('Win32', LGen.Config.Platform,
+      'platform was not passed, so the file value stays');
+    Assert.AreEqual(Ord(sfSpdxJson), Ord(LGen.Config.Format),
+      'format was not passed, so the file value stays');
+    Assert.AreEqual('FileApp', LGen.Config.ProductName);
+    Assert.AreEqual('CliCo', LGen.Config.Supplier);
+    Assert.IsTrue(LGen.Config.HumanReadableReport.Enabled);
+    Assert.AreEqual(Ord(hrfMarkdown), Ord(LGen.Config.HumanReadableReport.Format));
+    Assert.AreEqual('auditor-report', LGen.Config.HumanReadableReport.OutputBasePath);
+  finally
+    LGen.Free;
+    LOptions.Free;
+    if TFile.Exists(LPath) then
+      TFile.Delete(LPath);
+  end;
 end;
 
 procedure TCliOptionsTests.Parse_ScanDir_IsRepeatable;

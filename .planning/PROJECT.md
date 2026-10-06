@@ -2,72 +2,74 @@
 
 ## What This Is
 
-DX.Comply Pilot is a standalone FMX application that guides Delphi software companies through the full EU Cyber Resilience Act (CRA) compliance lifecycle. It transforms abstract EU regulations into concrete, trackable work steps — from product classification through SBOM generation, evidence collection, and report export. The primary user is a developer-who-is-also-compliance-officer, typical for smaller Delphi shops.
+DX.Comply Pilot is a concept for a later standalone FMX application. It would help a Delphi team collect more of the technical documentation for the EU Cyber Resilience Act (CRA). It is not a certification, and it does not make a product compliant.
+
+The current DX.Comply tool writes build evidence and a component list (an SBOM). That list is a starting point for the SBOM part of the technical documentation. Pilot, if built, would add further steps around that list: classification notes, evidence files, and draft reports. The primary user in this concept is a developer who also handles product documentation, which is common in smaller Delphi shops.
 
 ## Core Value
 
-One place to manage your entire CRA compliance — classification, SBOM, evidence, conformity declaration, reports — so nothing falls through the cracks before the December 2027 deadline.
+One place to keep the notes that sit next to the SBOM: classification, evidence, a draft conformity declaration, and reports. The December 2027 date is the date the CRA applies in full. The app would not complete that file by itself.
 
 ## Requirements
 
-### Validated
+### Already in DX.Comply
 
-- DX.Comply Engine v1.2.0 (SBOM generation, unit resolution, runtime packages, DLL scan) — existing
-- CycloneDX 1.5 / SPDX 2.3 output — existing
-- HTML and Markdown compliance reports — existing
+- DX.Comply Engine (SBOM generation, unit resolution, runtime packages, DLL scan)
+- CycloneDX 1.5 and SPDX 2.3 output
+- HTML and Markdown SBOM reports (an internal structural check, not an official schema validation)
 
-### Active
+### Active (concept only, not built)
 
-- [ ] FMX standalone application with dashboard + wizard navigation
-- [ ] Product classification wizard (Standard / Important Class I/II / Critical)
-- [ ] SBOM generation integrated via DX.Comply Engine package
-- [ ] Evidence collector for technical dossier (design decisions, security-by-design, test evidence, support commitments)
-- [ ] Support period tracking with 5-year rule validation
-- [ ] EU Declaration of Conformity with interactive guided editor
-- [ ] CE marking guidance
+- [ ] FMX standalone application with dashboard and wizard navigation
+- [ ] Product classification notes (Standard / Important Class I/II / Critical)
+- [ ] SBOM generation called from the DX.Comply Engine package
+- [ ] Evidence collector for a technical file (design decisions, security-by-design notes, test evidence, support commitments)
+- [ ] Support period tracking with a 5-year check
+- [ ] Draft EU Declaration of Conformity with a guided editor (a draft, not a certificate)
+- [ ] CE marking notes
 - [ ] User security guide template
-- [ ] Report generator: PDF, HTML, Markdown, ZIP archive (structured technical dossier)
+- [ ] Report generator: PDF, HTML, Markdown, ZIP archive (structured technical file)
 - [ ] Local JSON persistence in `.dxcomply-pilot/` (Git-friendly, portable)
-- [ ] Cross-platform: Windows + macOS
+- [ ] Cross-platform: Windows and macOS
 
 ### Out of Scope
 
-- Vulnerability Dashboard / CVE check against online databases — deferred to v2 (requires API integration)
-- ENISA incident reporting assistant — deferred to v2 (regulation details still evolving)
-- AI/KI assistance for code analysis — deferred to v2 (not core feature)
-- Cloud storage or server-side processing — deliberately excluded (data stays local)
-- VCL variant — FMX only for cross-platform support
+- Vulnerability dashboard / CVE check against online databases (deferred; would need an API)
+- ENISA incident reporting assistant (deferred)
+- AI assistance for code analysis (deferred; not a core feature)
+- Cloud storage or server-side processing (data stays local)
+- VCL variant (this concept is FMX)
 
 ## Context
 
-- DX.Comply Pilot lives in the same repository as DX.Comply (`src/Pilot/`)
-- The DX.Comply Engine package (`DX.Comply.Engine370.bpl`) is referenced, not duplicated
-- `TDxComplyGenerator` is called directly for SBOM generation as one step in the workflow
-- Target audience: Delphi developers at small-to-medium companies who handle compliance themselves
-- EU CRA full compliance deadline: December 2027
-- The app must feel like a practical guide, not a legal form — clear language, no unnecessary jargon
-- All persistence is local JSON in the project directory — no database, no cloud, fully Git-versionable
+- DX.Comply Pilot would live in the same repository as DX.Comply (`src/Pilot/`)
+- The DX.Comply Engine package would be referenced, not duplicated
+- `TDxComplyGenerator` would be called for SBOM generation as one step
+- Target audience: Delphi developers at small and medium companies who write their own product documentation
+- EU CRA applies in full in December 2027
+- The concept should read as a practical guide, in clear language
+- Persistence would be local JSON in the project directory (no database, no cloud, suitable for Git)
 
 ## Constraints
 
-- **Framework**: FMX (cross-platform requirement: Windows + macOS)
-- **Engine dependency**: Must use DX.Comply Engine as-is (package reference, no forking)
-- **Delphi version**: Delphi 13 (RAD Studio 37.0)
-- **Persistence**: Local JSON files only — no SQLite, no cloud
-- **Report formats**: PDF, HTML, Markdown, ZIP — all must work on both platforms
-- **Naming**: Unit naming follows DX.Comply conventions (dot-notation, `DX.Comply.Pilot.*`)
+- **Framework**: FMX (Windows and macOS)
+- **Engine dependency**: Use the DX.Comply Engine as it is (package reference, no fork)
+- **Delphi version**: Delphi 13 (RAD Studio 37.0) for this concept
+- **Persistence**: Local JSON files only (no SQLite, no cloud)
+- **Report formats**: PDF, HTML, Markdown, ZIP
+- **Naming**: Unit names follow DX.Comply conventions (dot notation, `DX.Comply.Pilot.*`)
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| FMX over VCL | Cross-platform (Windows + macOS) required | -- Pending |
-| Dashboard + Wizard navigation | User needs overview of compliance status AND step-by-step guidance | -- Pending |
-| Local JSON persistence | Git-friendly, no server dependency, portable between machines | -- Pending |
-| Interactive conformity editor over static template | Users need guidance filling each section, not just a blank form | -- Pending |
-| Same repo as DX.Comply | Engine as package reference, shared build infrastructure | -- Pending |
-| KI-Assistenz deferred to v2 | Focus v1 on the core compliance workflow | -- Pending |
-| Vulnerability Dashboard deferred to v2 | Requires online API integration, regulation details still evolving | -- Pending |
+| FMX over VCL | Windows and macOS | -- Pending |
+| Dashboard and wizard navigation | Overview of the file, plus step by step notes | -- Pending |
+| Local JSON persistence | Git-friendly, no server, portable between machines | -- Pending |
+| Guided conformity editor | Help filling each section of a draft, not a blank form | -- Pending |
+| Same repo as DX.Comply | Engine as a package reference, shared build | -- Pending |
+| AI assistance deferred | Keep the first version on the documentation steps | -- Pending |
+| Vulnerability dashboard deferred | Would need an online API | -- Pending |
 
 ---
-*Last updated: 2026-03-23 after initialization*
+*Last updated: 2026-10-06 to match the public wording: SBOM and build evidence, not a CRA certification.*

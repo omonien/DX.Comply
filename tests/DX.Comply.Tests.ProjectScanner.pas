@@ -7,8 +7,8 @@
 /// Uses DX.Comply.Engine.dproj as a real-file fixture to verify
 /// project-metadata extraction (name, platform, output directory,
 /// runtime packages) and path validation logic.
-/// The engine .dproj is located relative to the test executable which
-/// is placed in build\$(Platform)\$(Config) by the build system.
+/// The engine .dproj is located through RepoRoot in DX.Comply.Tests.Paths,
+/// so the executable does not have to sit in build\$(Platform)\$(Config).
 /// </remarks>
 ///
 /// <copyright>
@@ -37,8 +37,7 @@ type
   private
     FScanner: IProjectScanner;
     /// <summary>
-    /// Absolute path to DX.Comply.Engine.dproj, resolved from the test
-    /// executable location (build\Win32\Debug\ -> ..\..\..\src\).
+    /// Absolute path to DX.Comply.Engine.dproj, resolved by RepoRoot.
     /// </summary>
     FEngineDprojPath: string;
   public
@@ -208,20 +207,19 @@ type
 
 implementation
 
+uses
+  DX.Comply.Tests.Paths;
+
 { TProjectScannerTests }
 
 procedure TProjectScannerTests.Setup;
 begin
   FScanner := TProjectScanner.Create;
 
-  // Compute path to DX.Comply.Engine.dproj from the test binary location.
-  // Test binary lands in:  <repo>\build\<Platform>\<Config>\DX.Comply.Tests.exe
-  // Engine dproj is at:    <repo>\src\DX.Comply.Engine.dproj
-  // So we go up three levels then into src\.
-  FEngineDprojPath := TPath.GetFullPath(
-    TPath.Combine(TPath.GetDirectoryName(ParamStr(0)),
-      '..' + PathDelim + '..' + PathDelim + '..' + PathDelim +
-      'src' + PathDelim + 'DX.Comply.Engine.dproj'));
+  // Engine dproj is at <repo>\src\DX.Comply.Engine.dproj. RepoRoot finds the
+  // checkout when the executable is outside build\(platform)\(config)\.
+  FEngineDprojPath := TPath.Combine(RepoRoot,
+    'src' + PathDelim + 'DX.Comply.Engine.dproj');
 end;
 
 procedure TProjectScannerTests.TearDown;

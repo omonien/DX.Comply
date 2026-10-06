@@ -7,7 +7,7 @@
   Margins.Bottom = 6
   BorderIcons = [biSystemMenu]
   BorderStyle = bsDialog
-  Caption = 'DX.Comply CRA Compliance Generation'
+  Caption = 'DX.Comply SBOM'
   ClientHeight = 632
   ClientWidth = 1280
   Color = clBtnFace
@@ -33,7 +33,7 @@
     Margins.Top = 6
     Margins.Right = 6
     Margins.Bottom = 6
-    Caption = 'Generate CRA compliance documentation with DX.Comply'
+    Caption = 'Generate an SBOM with DX.Comply'
     Font.Charset = DEFAULT_CHARSET
     Font.Color = clWindowText
     Font.Height = -38
@@ -51,10 +51,9 @@
     Margins.Right = 6
     Margins.Bottom = 6
     AutoSize = False
-    Caption = 
-      'DX.Comply will run a dedicated Deep-Evidence build with detailed' +
-      ' MAP generation before creating the SBOM and the companion compl' +
-      'iance report.'
+    Caption =
+      'DX.Comply will run a Deep-Evidence build with a detailed MAP file, ' +
+      'then write the SBOM and any companion report you turned on.'
     WordWrap = True
   end
   object ProjectCaptionLabel: TLabel

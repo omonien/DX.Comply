@@ -115,8 +115,13 @@ begin
             OnProgress(AMessage, AProgress);
         end;
 
+      // With --ci, the file fills defaults and any flag the user actually
+      // passed (recorded on TSbomConfig.ExplicitOverrides) wins. Issue #50.
       if LOptions.CiMode and TFile.Exists(LOptions.ConfigFile) then
-        LSuccess := LGenerator.GenerateFromConfig(LOptions.Project, LOptions.ConfigFile)
+      begin
+        LSuccess := LGenerator.GenerateFromConfig(LOptions.Project, LOptions.ConfigFile);
+        LConfig := LGenerator.Config;
+      end
       else
         LSuccess := LGenerator.Generate(LOptions.Project, LConfig.OutputPath, LConfig.Format);
 

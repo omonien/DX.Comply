@@ -7,7 +7,7 @@
 /// This unit provides TCycloneDxJsonWriter which generates CycloneDX 1.5 JSON SBOMs:
 /// - Full metadata section with tool information
 /// - Component list with hashes (SHA-256)
-/// - Basic dependency graph
+/// - Dependency graph grouped by deliverable, runtime packages, external DLLs and linked units
 /// - Schema validation support
 ///
 /// CycloneDX 1.5 specification: https://cyclonedx.org/specification/overview/
@@ -233,6 +233,13 @@ begin
     LProp.AddPair('value', AArtefact.Confidence);
     LProperties.Add(LProp);
   end;
+  if AArtefact.Conditional then
+  begin
+    LProp := TJSONObject.Create;
+    LProp.AddPair('name', 'net.developer-experts.dx-comply:conditional');
+    LProp.AddPair('value', 'true');
+    LProperties.Add(LProp);
+  end;
 
   if LProperties.Count > 0 then
     LComponent.AddPair('properties', LProperties)
@@ -247,18 +254,48 @@ function TCycloneDxJsonWriter.BuildDependencies(const AArtefacts: TArtefactList;
 var
   LDependsOn: TJSONArray;
   LDep: TJSONObject;
+  LTargetIndex: Integer;
+  LGroup: Integer;
   I: Integer;
 begin
   Result := TJSONArray.Create;
 
-  // Root dependency (project depends on all components)
+  // Project -> deliverable (exe/dll/bpl). When the output has no deliverable,
+  // keep a single edge list so components are not dropped from the graph.
+  LTargetIndex := FindDeliverableTargetIndex(AArtefacts, AProjectBomRef);
+
   LDep := TJSONObject.Create;
   LDep.AddPair('ref', AProjectBomRef);
-
   LDependsOn := TJSONArray.Create;
-  for I := 0 to AArtefacts.Count - 1 do
-    LDependsOn.Add('comp-' + IntToStr(I));
+  if LTargetIndex >= 0 then
+    LDependsOn.Add('comp-' + IntToStr(LTargetIndex))
+  else if Assigned(AArtefacts) then
+    for I := 0 to AArtefacts.Count - 1 do
+      LDependsOn.Add('comp-' + IntToStr(I));
+  LDep.AddPair('dependsOn', LDependsOn);
+  Result.Add(LDep);
 
+  if (LTargetIndex < 0) or not Assigned(AArtefacts) then
+    Exit;
+
+  // Deliverable -> runtime packages, then external DLLs, then linked
+  // units, then any other output. Keeping each category together is the
+  // grouped graph from issue #42.
+  LDependsOn := TJSONArray.Create;
+  for LGroup := 0 to 3 do
+    for I := 0 to AArtefacts.Count - 1 do
+      if (I <> LTargetIndex) and
+         (ArtefactDependencyGroup(AArtefacts[I]) = LGroup) then
+        LDependsOn.Add('comp-' + IntToStr(I));
+
+  if LDependsOn.Count = 0 then
+  begin
+    LDependsOn.Free;
+    Exit;
+  end;
+
+  LDep := TJSONObject.Create;
+  LDep.AddPair('ref', 'comp-' + IntToStr(LTargetIndex));
   LDep.AddPair('dependsOn', LDependsOn);
   Result.Add(LDep);
 end;
