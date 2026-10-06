@@ -1249,7 +1249,7 @@ begin
   LBomProperties := TList<TSbomProperty>.Create;
   LComponentProperties := TList<TSbomProperty>.Create;
   try
-    AddBomProperty(PropertyName('document', 'profile'), 'cra-compliance-assessment');
+    AddBomProperty(PropertyName('document', 'profile'), 'build-evidence');
     AddBomProperty(PropertyName('assessment', 'warning-count'), IntToStr(AWarnings.Count));
 
     AddComponentProperty(PropertyName('build', 'map-file'), EffectiveMapFilePath);
@@ -1354,7 +1354,7 @@ begin
 
   DoProgress('Scanning project...', 10);
 
-  // Scan project — initialize record so the outer finally can safely call Free
+  // Scan project. Initialize the record so the outer finally can safely call Free.
   LProjectInfo := Default(TProjectInfo);
   LBuildEvidence := Default(TBuildEvidence);
   LCompositionEvidence := Default(TCompositionEvidence);
@@ -1364,7 +1364,7 @@ begin
   try
     LProjectInfo := FProjectScanner.Scan(AProjectPath, FConfig.Platform, FConfig.Configuration);
 
-    // Apply MapFileDir override — allows legacy projects to specify where the
+    // Apply MapFileDir override. This allows legacy projects to specify where the
     // MAP file is located when automatic detection from the .dproj fails.
     if FConfig.MapFileDir <> '' then
       LProjectInfo.MapFilePath := TPath.Combine(FConfig.MapFileDir,
@@ -1402,7 +1402,7 @@ begin
       // warning in that case and clarify that SBOM generation continues.
       if FConfig.ContinueOnDeepEvidenceBuildFailure then
       begin
-        DoProgress('Warning: Skipping optional Deep-Evidence rebuild — ' +
+        DoProgress('Warning: Skipping optional Deep-Evidence rebuild. ' +
           LDeepEvidenceBuildResult.Message, 18);
         if LDeepEvidenceBuildResult.CommandLine <> '' then
           DoProgress('Hint: Deep-Evidence command was: ' +
@@ -1497,7 +1497,7 @@ begin
 
       if Result then
       begin
-        DoProgress('Validating SBOM...', 90);
+        DoProgress('Running structural check...', 90);
         LValidation := ValidateSbom(LOutputPath);
 
         LReportData := BuildHumanReadableReportData(LOutputPath, LFormat, LMetadata,
@@ -1512,24 +1512,24 @@ begin
         if LValidation.IsValid then
         begin
           if Length(LGeneratedReportPaths) > 0 then
-            DoProgress(Format('SBOM and %d human-readable report(s) generated and validated: %s',
+            DoProgress(Format('SBOM and %d human-readable report(s) generated. Structural check passed: %s',
               [Length(LGeneratedReportPaths), LOutputPath]), 100)
           else
-            DoProgress(Format('SBOM generated and validated: %s', [LOutputPath]), 100);
+            DoProgress(Format('SBOM generated. Structural check passed: %s', [LOutputPath]), 100);
         end
         else
         begin
           if Length(LGeneratedReportPaths) > 0 then
-            DoProgress(Format('SBOM and human-readable report(s) generated: %s (with validation warnings)',
+            DoProgress(Format('SBOM and human-readable report(s) generated: %s (structural check did not pass)',
               [LOutputPath]), 95)
           else
-            DoProgress(Format('SBOM generated: %s (with validation warnings)', [LOutputPath]), 95);
+            DoProgress(Format('SBOM generated: %s (structural check did not pass)', [LOutputPath]), 95);
           var LErr: string;
           for LErr in LValidation.Errors do
-            DoProgress('Validation error: ' + LErr, -1);
+            DoProgress('Structural check error: ' + LErr, -1);
           var LWarn: string;
           for LWarn in LValidation.Warnings do
-            DoProgress('Validation warning: ' + LWarn, 95);
+            DoProgress('Structural check warning: ' + LWarn, 95);
         end;
       end
       else
