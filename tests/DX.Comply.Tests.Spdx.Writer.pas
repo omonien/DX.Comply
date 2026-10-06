@@ -86,6 +86,9 @@ type
     procedure Write_Relationship_IsDescribes;
 
     [Test]
+    procedure Write_Relationships_DeliverableDependsOnCategories;
+
+    [Test]
     procedure Validate_ValidSpdx_ReturnsTrue;
 
     [Test]
@@ -382,6 +385,93 @@ begin
   end;
 end;
 
+procedure TSpdxWriterTests.Write_Relationships_DeliverableDependsOnCategories;
+var
+  LJson: TJSONObject;
+  LRelationships: TJSONArray;
+  LRel: TJSONObject;
+  I: Integer;
+  LAppId, LRtlId, LDllId, LUnitId: string;
+
+  function HasRelationship(const AFrom, AType, ATo: string): Boolean;
+  var
+    J: Integer;
+    LItem: TJSONObject;
+  begin
+    Result := False;
+    for J := 0 to LRelationships.Count - 1 do
+    begin
+      LItem := LRelationships.Items[J] as TJSONObject;
+      if (LItem.GetValue<string>('spdxElementId') = AFrom) and
+         (LItem.GetValue<string>('relationshipType') = AType) and
+         (LItem.GetValue<string>('relatedSpdxElement') = ATo) then
+        Exit(True);
+    end;
+  end;
+
+  function PackageId(const AName: string): string;
+  var
+    LPackages: TJSONArray;
+    K: Integer;
+    LPackage: TJSONObject;
+  begin
+    Result := '';
+    LPackages := LJson.GetValue('packages') as TJSONArray;
+    for K := 0 to LPackages.Count - 1 do
+    begin
+      LPackage := LPackages.Items[K] as TJSONObject;
+      if SameText(LPackage.GetValue<string>('name'), AName) then
+        Exit(LPackage.GetValue<string>('SPDXID'));
+    end;
+    Assert.AreNotEqual('', Result, AName + ' must appear as a package');
+  end;
+
+  function IsFilenameOnlyId(const AId, AFileName: string): Boolean;
+  begin
+    Result := SameText(AId, 'SPDXRef-Package-' + AFileName);
+  end;
+
+begin
+  FArtefacts.Add(MakeArtefact('TestProject.exe', 'application', '', 1024));
+  FArtefacts.Add(MakeArtefact('rtl.bpl', 'runtime-package', '', -1));
+  FArtefacts.Add(MakeArtefact('vendor.dll', 'external-reference', '', -1));
+  FArtefacts.Add(MakeArtefact('System.dcu', 'unit-evidence', '', 10));
+
+  Assert.IsTrue(FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LJson := LoadOutputJson;
+  try
+    LRelationships := LJson.GetValue('relationships') as TJSONArray;
+    Assert.IsNotNull(LRelationships);
+    LRel := LRelationships.Items[0] as TJSONObject;
+    Assert.AreEqual('DESCRIBES', LRel.GetValue<string>('relationshipType'),
+      'DESCRIBES entries must stay ahead of the dependency edges');
+
+    LAppId := PackageId('TestProject.exe');
+    LRtlId := PackageId('rtl.bpl');
+    LDllId := PackageId('vendor.dll');
+    LUnitId := PackageId('System.dcu');
+    Assert.IsFalse(IsFilenameOnlyId(LAppId, 'TestProject.exe'),
+      'relationship IDs must use the path-based package SPDX ID');
+
+    Assert.IsTrue(HasRelationship(LAppId, 'DEPENDS_ON', LRtlId),
+      'the deliverable must DEPENDS_ON the runtime package');
+    Assert.IsTrue(HasRelationship(LAppId, 'DEPENDS_ON', LDllId),
+      'the deliverable must DEPENDS_ON the external DLL');
+    Assert.IsTrue(HasRelationship(LAppId, 'CONTAINS', LUnitId),
+      'the deliverable must CONTAIN the linked unit');
+
+    for I := 0 to LRelationships.Count - 1 do
+    begin
+      LRel := LRelationships.Items[I] as TJSONObject;
+      if LRel.GetValue<string>('relationshipType') = 'DESCRIBES' then
+        Assert.AreEqual('SPDXRef-DOCUMENT', LRel.GetValue<string>('spdxElementId'),
+          'DESCRIBES must still originate at the document');
+    end;
+  finally
+    LJson.Free;
+  end;
+end;
+
 procedure TSpdxWriterTests.Validate_ValidSpdx_ReturnsTrue;
 var
   LContent: TStringList;
@@ -466,13 +556,23 @@ begin
       'ID should keep the sanitized relative path');
 
     LRelationships := LJson.GetValue('relationships') as TJSONArray;
-    Assert.AreEqual(NativeInt(2), NativeInt(LRelationships.Count));
+    // Two DESCRIBES edges, plus DEPENDS_ON from the first application
+    // (same score, first match is the deliverable) to the second.
+    Assert.AreEqual(NativeInt(3), NativeInt(LRelationships.Count));
     LRel := LRelationships.Items[0] as TJSONObject;
+    Assert.AreEqual('DESCRIBES', LRel.GetValue<string>('relationshipType'));
     Assert.AreEqual(LFirstId, LRel.GetValue<string>('relatedSpdxElement'),
       'Relationship must point at the first package ID');
     LRel := LRelationships.Items[1] as TJSONObject;
+    Assert.AreEqual('DESCRIBES', LRel.GetValue<string>('relationshipType'));
     Assert.AreEqual(LSecondId, LRel.GetValue<string>('relatedSpdxElement'),
       'Relationship must point at the second package ID');
+    LRel := LRelationships.Items[2] as TJSONObject;
+    Assert.AreEqual('DEPENDS_ON', LRel.GetValue<string>('relationshipType'));
+    Assert.AreEqual(LFirstId, LRel.GetValue<string>('spdxElementId'),
+      'the first application is the deliverable');
+    Assert.AreEqual(LSecondId, LRel.GetValue<string>('relatedSpdxElement'),
+      'DEPENDS_ON must use the path-based package ID');
   finally
     LJson.Free;
   end;

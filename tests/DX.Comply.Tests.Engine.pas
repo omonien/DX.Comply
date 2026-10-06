@@ -8,8 +8,8 @@
 /// SBOM generation against the real engine .dproj, configuration defaults,
 /// and GenerateFromConfig fall-back behaviour when no config file exists.
 ///
-/// Integration tests (Generate_ValidProject_*) require DX.Comply.Engine.dproj
-/// to be reachable at build\Win32\Debug\..\..\..\src\.
+/// Integration tests (Generate_ValidProject_*) load DX.Comply.Engine.dproj
+/// through RepoRoot in DX.Comply.Tests.Paths.
 /// </remarks>
 ///
 /// <copyright>
@@ -45,7 +45,7 @@ type
     FProgressMessages: TStringList;
     FProgressValues: TList<Integer>;
     /// <summary>
-    /// Absolute path to DX.Comply.Engine.dproj resolved from the test binary location.
+    /// Absolute path to DX.Comply.Engine.dproj, resolved by RepoRoot.
     /// </summary>
     FEngineDprojPath: string;
     /// <summary>
@@ -100,7 +100,11 @@ type
     [Test]
     procedure Generate_OutputFileContainsDxComplyMetadataProperties;
 
-    /// <summary>The generated SBOM must also persist consolidated per-unit evidence in formal metadata.</summary>
+    /// <summary>
+    /// Unit-evidence library components for resolved files must include hashes.
+    /// Runtime packages and source-scanned DLLs are also type library and carry
+    /// an empty hash on purpose, so they are not part of this check.
+    /// </summary>
     [Test]
     procedure Generate_OutputFileContainsUnitEvidenceProperties;
 
@@ -196,6 +200,37 @@ type
     [Test]
     procedure ScanPasFiles_ConstInOtherUnit_ResolvesViaGlobalFallback;
 
+    /// <summary>external 'kernel32.dll' must still be detected, and {$I+} must not be treated as an include.</summary>
+    [Test]
+    procedure ScanPasFiles_ExternalLiteral_DetectsDllName;
+
+    /// <summary>external DLLName must resolve a const in the same unit.</summary>
+    [Test]
+    procedure ScanPasFiles_ExternalIdentifier_ResolvesConst;
+
+    /// <summary>
+    /// The reported OPC UA stack pattern: the external declaration lives in
+    /// an include, and the DLL name const has two {$IFDEF} branches.
+    /// Both file names must be reported and marked conditional. Issue #45.
+    /// </summary>
+    [Test]
+    procedure ScanPasFiles_ExternalInInclude_IfdefConst_ResolvesBothNames;
+
+    /// <summary>
+    /// An include that is not next to the unit must still be found on the
+    /// search path. Issue #45.
+    /// </summary>
+    [Test]
+    procedure ScanPasFiles_IncludeOnSearchPath_ResolvesExternalDll;
+
+    /// <summary>LoadLibrary(CONST) inside an include must resolve a const declared in the including unit.</summary>
+    [Test]
+    procedure ScanPasFiles_LoadLibraryInInclude_ResolvesConst;
+
+    /// <summary>external NotADll must not be reported when the identifier is not a const.</summary>
+    [Test]
+    procedure ScanPasFiles_UnresolvedExternalIdent_IsIgnored;
+
     // ---- .dxcomply.json loading (issue #50) --------------------------------
 
     /// <summary>configName and platform keys are stored on the loaded config.</summary>
@@ -235,6 +270,9 @@ type
 
 implementation
 
+uses
+  DX.Comply.Tests.Paths;
+
 { TEngineTests }
 
 procedure TEngineTests.Setup;
@@ -250,13 +288,10 @@ begin
   FProgressMessages := TStringList.Create;
   FProgressValues   := TList<Integer>.Create;
 
-  // Resolve path to the engine dproj fixture.
-  // Test binary is placed in: build\<Platform>\<Config>\
-  // Engine dproj is at:       src\DX.Comply.Engine.dproj
-  FEngineDprojPath := TPath.GetFullPath(
-    TPath.Combine(TPath.GetDirectoryName(ParamStr(0)),
-      '..' + PathDelim + '..' + PathDelim + '..' + PathDelim +
-      'src' + PathDelim + 'DX.Comply.Engine.dproj'));
+  // Engine dproj is at <repo>\src\DX.Comply.Engine.dproj. RepoRoot finds the
+  // checkout when the executable is outside build\(platform)\(config)\.
+  FEngineDprojPath := TPath.Combine(RepoRoot,
+    'src' + PathDelim + 'DX.Comply.Engine.dproj');
 end;
 
 procedure TEngineTests.TearDown;
@@ -472,16 +507,69 @@ begin
 end;
 
 procedure TEngineTests.Generate_OutputFileContainsUnitEvidenceProperties;
+const
+  cEvidenceProperty = 'net.developer-experts.dx-comply:evidence';
+  cConfidenceProperty = 'net.developer-experts.dx-comply:confidence';
+  cFileSizeProperty = 'file:size';
 var
   LComponents: TJSONArray;
   LComponentObj: TJSONObject;
   LConfig: TSbomConfig;
   LGen: TDxComplyGenerator;
   LContent: string;
+  LHashObj: TJSONObject;
+  LHashes: TJSONArray;
   LJson: TJSONObject;
-  LFoundLibrary: Boolean;
+  LName: string;
   LTestsDprojPath: string;
+  LUnitEvidenceCount: Integer;
   I: Integer;
+
+  function PropertyValue(const AComponent: TJSONObject; const AName: string): string;
+  var
+    J: Integer;
+    LProperties: TJSONArray;
+    LProperty: TJSONObject;
+  begin
+    Result := '';
+    LProperties := AComponent.GetValue('properties') as TJSONArray;
+    if not Assigned(LProperties) then
+      Exit;
+
+    for J := 0 to LProperties.Count - 1 do
+    begin
+      if not (LProperties.Items[J] is TJSONObject) then
+        Continue;
+      LProperty := TJSONObject(LProperties.Items[J]);
+      if SameText(LProperty.GetValue<string>('name', ''), AName) then
+        Exit(LProperty.GetValue<string>('value', ''));
+    end;
+  end;
+
+  function IsUnitEvidence(const AComponent: TJSONObject): Boolean;
+  var
+    LConfidence: string;
+    LEvidence: string;
+  begin
+    Result := False;
+    if not SameText(AComponent.GetValue<string>('type', ''), 'library') then
+      Exit;
+
+    LEvidence := PropertyValue(AComponent, cEvidenceProperty);
+    if LEvidence = '' then
+      Exit;
+
+    // Runtime packages are declared BPLs. Source-scanned DLLs use confidence
+    // Source-scan. Both are type library and have an empty hash on purpose.
+    LConfidence := PropertyValue(AComponent, cConfidenceProperty);
+    if SameText(LConfidence, 'Source-scan') then
+      Exit;
+    if SameText(LEvidence, 'BPL') and SameText(LConfidence, 'Declared') then
+      Exit;
+
+    Result := True;
+  end;
+
 begin
   LTestsDprojPath := TPath.Combine(
     TPath.GetDirectoryName(TPath.GetDirectoryName(FEngineDprojPath)),
@@ -509,21 +597,31 @@ begin
       Assert.IsTrue(LComponents.Count > 1,
         'SBOM must contain more than just the primary artefact');
 
-      LFoundLibrary := False;
+      LUnitEvidenceCount := 0;
       for I := 0 to LComponents.Count - 1 do
       begin
         LComponentObj := LComponents.Items[I] as TJSONObject;
-        if LComponentObj.GetValue<string>('type') = 'library' then
-        begin
-          LFoundLibrary := True;
-          Assert.IsTrue(LComponentObj.GetValue('hashes') <> nil,
-            'Library components must include hashes');
-          Break;
-        end;
+        if not IsUnitEvidence(LComponentObj) then
+          Continue;
+
+        Inc(LUnitEvidenceCount);
+        // file:size is written only when the resolved file was present on disk.
+        if PropertyValue(LComponentObj, cFileSizeProperty) = '' then
+          Continue;
+
+        LName := LComponentObj.GetValue<string>('name', '');
+        LHashes := LComponentObj.GetValue('hashes') as TJSONArray;
+        Assert.IsNotNull(LHashes,
+          'Unit-evidence component "' + LName + '" must include hashes');
+        Assert.IsTrue(LHashes.Count > 0,
+          'Unit-evidence component "' + LName + '" must include a hash value');
+        LHashObj := LHashes.Items[0] as TJSONObject;
+        Assert.IsTrue(Trim(LHashObj.GetValue<string>('content', '')) <> '',
+          'Unit-evidence component "' + LName + '" must include a non-empty hash');
       end;
 
-      Assert.IsTrue(LFoundLibrary,
-        'SBOM must contain library components for resolved unit evidence');
+      Assert.IsTrue(LUnitEvidenceCount > 0,
+        'SBOM must contain at least one unit-evidence library component');
     finally
       LJson.Free;
     end;
@@ -1228,6 +1326,185 @@ begin
   finally
     LGen.Free;
   end;
+end;
+
+procedure TEngineTests.ScanPasFiles_ExternalLiteral_DetectsDllName;
+var
+  LPasFile: string;
+  LDllNames: TArray<string>;
+const
+  cSource =
+    'unit WinHook;'#13#10 +
+    'interface'#13#10 +
+    '{$I+}'#13#10 +
+    'function GetTickCount: Cardinal; stdcall; external ''kernel32.dll'';'#13#10 +
+    'implementation'#13#10 +
+    'end.';
+begin
+  LPasFile := TPath.Combine(FTempDir, 'WinHook.pas');
+  TFile.WriteAllText(LPasFile, cSource, TEncoding.UTF8);
+  LDllNames := TDxComplyGenerator.ScanPasFilesForDllReferences(
+    TArray<string>.Create(LPasFile));
+  Assert.IsTrue(TArray.IndexOf<string>(LDllNames, 'kernel32.dll') >= 0,
+    'a quoted external DLL name must be detected');
+end;
+
+procedure TEngineTests.ScanPasFiles_ExternalIdentifier_ResolvesConst;
+var
+  LPasFile: string;
+  LDllNames: TArray<string>;
+const
+  cSource =
+    'unit NetApi;'#13#10 +
+    'interface'#13#10 +
+    'const'#13#10 +
+    '  NETAPI = ''netapi32.dll'';'#13#10 +
+    'function NetWkstaGetInfo: Integer; stdcall; external NETAPI;'#13#10 +
+    'implementation'#13#10 +
+    'end.';
+begin
+  LPasFile := TPath.Combine(FTempDir, 'NetApi.pas');
+  TFile.WriteAllText(LPasFile, cSource, TEncoding.UTF8);
+  LDllNames := TDxComplyGenerator.ScanPasFilesForDllReferences(
+    TArray<string>.Create(LPasFile));
+  Assert.IsTrue(TArray.IndexOf<string>(LDllNames, 'netapi32.dll') >= 0,
+    'external NETAPI must resolve the const to netapi32.dll');
+end;
+
+procedure TEngineTests.ScanPasFiles_ExternalInInclude_IfdefConst_ResolvesBothNames;
+var
+  LPasFile: string;
+  LIncFile: string;
+  LDllNames: TArray<string>;
+  LConditional: TArray<Boolean>;
+  LSearchPaths: TArray<string>;
+
+  function IsConditional(const AName: string): Boolean;
+  var
+    LIndex: Integer;
+  begin
+    LIndex := TArray.IndexOf<string>(LDllNames, AName);
+    Assert.IsTrue(LIndex >= 0, AName + ' must be detected');
+    Result := LConditional[LIndex];
+  end;
+
+const
+  // Mirrors the project attached to issue #45: the import lives in an
+  // include, and DLLName is assigned in both {$IFDEF} branches.
+  cInc =
+    '  function OpcUa_P_Initialize; external DLLName ' +
+    '{$IFDEF UASTACK_32} name ''_OpcUa_P_Initialize@4'' {$ENDIF};'#13#10;
+  cPas =
+    'unit Unit2;'#13#10 +
+    'interface'#13#10 +
+    'implementation'#13#10 +
+    'const'#13#10 +
+    '{$IFDEF UASTACK_32}'#13#10 +
+    '  DLLName = ''uastack_32.dll'';'#13#10 +
+    '{$ELSE}'#13#10 +
+    '  DLLName = ''uastack_64.dll'';'#13#10 +
+    '{$ENDIF}'#13#10 +
+    '{$INCLUDE ''StackMethodsImpl.inc''}'#13#10 +
+    'end.'#13#10;
+begin
+  LPasFile := TPath.Combine(FTempDir, 'Unit2.pas');
+  LIncFile := TPath.Combine(FTempDir, 'StackMethodsImpl.inc');
+  TFile.WriteAllText(LIncFile, cInc, TEncoding.UTF8);
+  TFile.WriteAllText(LPasFile, cPas, TEncoding.UTF8);
+  SetLength(LSearchPaths, 0);
+  LDllNames := TDxComplyGenerator.ScanPasFilesForDllReferences(
+    TArray<string>.Create(LPasFile), LSearchPaths, LConditional);
+  Assert.IsTrue(IsConditional('uastack_32.dll'),
+    'uastack_32.dll from the {$IFDEF} branch must be detected and marked conditional');
+  Assert.IsTrue(IsConditional('uastack_64.dll'),
+    'uastack_64.dll from the {$ELSE} branch must be detected and marked conditional');
+end;
+
+procedure TEngineTests.ScanPasFiles_IncludeOnSearchPath_ResolvesExternalDll;
+var
+  LPasFile: string;
+  LIncDir: string;
+  LIncFile: string;
+  LDllNames: TArray<string>;
+  LConditional: TArray<Boolean>;
+  LSearchPaths: TArray<string>;
+const
+  cInc =
+    'function OpcUa_P_Initialize; external DLLName;'#13#10;
+  cPas =
+    'unit Unit2;'#13#10 +
+    'interface'#13#10 +
+    'implementation'#13#10 +
+    'const'#13#10 +
+    '  DLLName = ''uastack_64.dll'';'#13#10 +
+    '{$INCLUDE ''StackMethodsImpl.inc''}'#13#10 +
+    'end.'#13#10;
+begin
+  LIncDir := TPath.Combine(FTempDir, 'includes');
+  TDirectory.CreateDirectory(LIncDir);
+  LPasFile := TPath.Combine(FTempDir, 'Unit2.pas');
+  LIncFile := TPath.Combine(LIncDir, 'StackMethodsImpl.inc');
+  TFile.WriteAllText(LIncFile, cInc, TEncoding.UTF8);
+  TFile.WriteAllText(LPasFile, cPas, TEncoding.UTF8);
+
+  SetLength(LSearchPaths, 1);
+  LSearchPaths[0] := LIncDir;
+  LDllNames := TDxComplyGenerator.ScanPasFilesForDllReferences(
+    TArray<string>.Create(LPasFile), LSearchPaths, LConditional);
+  Assert.IsTrue(TArray.IndexOf<string>(LDllNames, 'uastack_64.dll') >= 0,
+    'an include on the search path must be expanded and the DLL reported');
+  Assert.IsFalse(LConditional[TArray.IndexOf<string>(LDllNames, 'uastack_64.dll')],
+    'a single const value is not conditional');
+end;
+
+procedure TEngineTests.ScanPasFiles_LoadLibraryInInclude_ResolvesConst;
+var
+  LPasFile: string;
+  LIncFile: string;
+  LDllNames: TArray<string>;
+const
+  cInc =
+    'procedure LoadIt;'#13#10 +
+    'begin'#13#10 +
+    '  LoadLibrary(IBASE_DLL);'#13#10 +
+    'end;'#13#10;
+  cPas =
+    'unit IbWrap;'#13#10 +
+    'interface'#13#10 +
+    'implementation'#13#10 +
+    'const'#13#10 +
+    '  IBASE_DLL = ''gds32.dll'';'#13#10 +
+    '{$I ''IbLoad.inc''}'#13#10 +
+    'end.';
+begin
+  LPasFile := TPath.Combine(FTempDir, 'IbWrap.pas');
+  LIncFile := TPath.Combine(FTempDir, 'IbLoad.inc');
+  TFile.WriteAllText(LIncFile, cInc, TEncoding.UTF8);
+  TFile.WriteAllText(LPasFile, cPas, TEncoding.UTF8);
+  LDllNames := TDxComplyGenerator.ScanPasFilesForDllReferences(
+    TArray<string>.Create(LPasFile));
+  Assert.IsTrue(TArray.IndexOf<string>(LDllNames, 'gds32.dll') >= 0,
+    'LoadLibrary(IBASE_DLL) inside an include must resolve gds32.dll');
+end;
+
+procedure TEngineTests.ScanPasFiles_UnresolvedExternalIdent_IsIgnored;
+var
+  LPasFile: string;
+  LDllNames: TArray<string>;
+const
+  cSource =
+    'unit Bare;'#13#10 +
+    'interface'#13#10 +
+    'function Foo: Integer; external NotADll;'#13#10 +
+    'implementation'#13#10 +
+    'end.';
+begin
+  LPasFile := TPath.Combine(FTempDir, 'Bare.pas');
+  TFile.WriteAllText(LPasFile, cSource, TEncoding.UTF8);
+  LDllNames := TDxComplyGenerator.ScanPasFilesForDllReferences(
+    TArray<string>.Create(LPasFile));
+  Assert.AreEqual(NativeInt(0), NativeInt(Length(LDllNames)),
+    'an unresolved external identifier must not be reported as a DLL name');
 end;
 
 initialization

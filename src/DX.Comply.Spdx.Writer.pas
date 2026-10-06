@@ -1,4 +1,4 @@
-/// <summary>
+﻿/// <summary>
 /// DX.Comply.Spdx.Writer
 /// Generates SPDX 2.3 SBOM documents in JSON format.
 /// </summary>
@@ -7,7 +7,7 @@
 /// This unit provides TSpdxJsonWriter which generates SPDX 2.3 JSON SBOMs:
 /// - Document creation information (tool, timestamp, namespace)
 /// - Package list with checksums (SHA-256)
-/// - Relationship graph (DESCRIBES, CONTAINS)
+/// - Relationship graph (DESCRIBES, DEPENDS_ON, CONTAINS)
 /// - Extracted licensing information
 ///
 /// SPDX 2.3 specification: https://spdx.github.io/spdx-spec/v2.3/
@@ -66,8 +66,9 @@ type
     function BuildCreationInfo(const AMetadata: TSbomMetadata): TJSONObject;
     function BuildPackage(const AArtefact: TArtefactInfo; const ASpdxId,
       ASupplier: string): TJSONObject;
-    function BuildRelationships(const APackageIds: TArray<string>;
-      const ADocumentSpdxId: string): TJSONArray;
+    function BuildRelationships(const AArtefacts: TArtefactList;
+      const APackageIds: TArray<string>;
+      const ADocumentSpdxId, AProjectName: string): TJSONArray;
   public
     function Write(const AOutputPath: string;
       const AMetadata: TSbomMetadata;
@@ -376,7 +377,6 @@ begin
   LPackage := TJSONObject.Create;
 
   LFileName := TPath.GetFileName(AArtefact.RelativePath);
-
   LPackage.AddPair('SPDXID', ASpdxId);
   LPackage.AddPair('name', LFileName);
 
@@ -424,22 +424,50 @@ begin
   Result := LPackage;
 end;
 
-function TSpdxJsonWriter.BuildRelationships(const APackageIds: TArray<string>;
-  const ADocumentSpdxId: string): TJSONArray;
+function TSpdxJsonWriter.BuildRelationships(const AArtefacts: TArtefactList;
+  const APackageIds: TArray<string>;
+  const ADocumentSpdxId, AProjectName: string): TJSONArray;
 var
   LRelationships: TJSONArray;
   LRel: TJSONObject;
   I: Integer;
+  LTargetIndex: Integer;
+  LRelation: string;
 begin
   LRelationships := TJSONArray.Create;
+  if not Assigned(AArtefacts) then
+    Exit(LRelationships);
 
-  // DESCRIBES relationship from document to each package. The related ID
-  // must be the same value written on the package (issue #39).
-  for I := 0 to High(APackageIds) do
+  // DESCRIBES from the document to each package. The related ID must be the
+  // same value written on the package (issue #39).
+  for I := 0 to AArtefacts.Count - 1 do
   begin
     LRel := TJSONObject.Create;
     LRel.AddPair('spdxElementId', ADocumentSpdxId);
     LRel.AddPair('relationshipType', 'DESCRIBES');
+    LRel.AddPair('relatedSpdxElement', APackageIds[I]);
+    LRelationships.Add(LRel);
+  end;
+
+  // The deliverable contains linked units and depends on runtime packages
+  // and external DLLs. Same parent as the CycloneDX dependencies graph.
+  // Edges use the path-based package IDs, not the filename alone.
+  LTargetIndex := FindDeliverableTargetIndex(AArtefacts, AProjectName);
+  if LTargetIndex < 0 then
+    Exit(LRelationships);
+
+  for I := 0 to AArtefacts.Count - 1 do
+  begin
+    if I = LTargetIndex then
+      Continue;
+    if SameText(AArtefacts[I].ArtefactType, 'unit-evidence') then
+      LRelation := 'CONTAINS'
+    else
+      LRelation := 'DEPENDS_ON';
+
+    LRel := TJSONObject.Create;
+    LRel.AddPair('spdxElementId', APackageIds[LTargetIndex]);
+    LRel.AddPair('relationshipType', LRelation);
     LRel.AddPair('relatedSpdxElement', APackageIds[I]);
     LRelationships.Add(LRel);
   end;
@@ -495,7 +523,8 @@ begin
     LRoot.AddPair('packages', LPackages);
 
     // Relationships
-    LRoot.AddPair('relationships', BuildRelationships(LPackageIds, LDocumentSpdxId));
+    LRoot.AddPair('relationships', BuildRelationships(AArtefacts, LPackageIds,
+      LDocumentSpdxId, AProjectInfo.ProjectName));
 
     // Write to file
     LOutput := TStringList.Create;
