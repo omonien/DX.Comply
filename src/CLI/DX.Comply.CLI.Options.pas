@@ -38,7 +38,9 @@ type
     FFormat: TSbomFormat;
     FOutput: string;
     FPlatform: string;
+    FPlatformExplicit: Boolean;
     FConfiguration: string;
+    FConfigurationExplicit: Boolean;
     FProductName: string;
     FProductVersion: string;
     FSupplier: string;
@@ -330,9 +332,15 @@ begin
         FOutputExplicit := True;
       end
       else if LKey = 'platform' then
-        FPlatform := LValue
+      begin
+        FPlatform := LValue;
+        FPlatformExplicit := True;
+      end
       else if LKey = 'config-name' then
-        FConfiguration := LValue
+      begin
+        FConfiguration := LValue;
+        FConfigurationExplicit := True;
+      end
       else if LKey = 'product' then
         FProductName := LValue
       else if LKey = 'version' then
@@ -422,6 +430,8 @@ begin
   Writeln('  --config-name=<Debug|Release> Build configuration (default: Release)');
   Writeln('                                For .dpr, .dpk, and .bdsproj, --platform');
   Writeln('                                and --config-name are not applied.');
+  Writeln('                                The defaults are not reported. A value');
+  Writeln('                                you set is reported and ignored.');
   Writeln('  --product=<name>              Product name override');
   Writeln('  --version=<version>           Product version override');
   Writeln('  --supplier=<name>             Supplier/company name');
@@ -499,7 +509,9 @@ begin
   end;
   Result.Format          := FFormat;
   Result.Platform        := FPlatform;
+  Result.PlatformExplicit := FPlatformExplicit;
   Result.Configuration   := FConfiguration;
+  Result.ConfigurationExplicit := FConfigurationExplicit;
   Result.ProductName     := FProductName;
   Result.ProductVersion  := FProductVersion;
   Result.Supplier        := FSupplier;

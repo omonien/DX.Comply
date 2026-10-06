@@ -146,7 +146,7 @@ DX.Comply can generate SBOMs for projects built with any Delphi version — incl
 dxcomply --project=MyApp.dpr --output=bom.json --no-pause
 ```
 
-The CLI reads a sibling `.dof` and `.cfg`. When both files define a setting, the `.dof` value is used. These projects have one Win32 option set, so `--platform` and `--config-name` are not applied. The `.map` file must sit next to the output binary. Library units come from a Delphi 7 install when `Software\Borland\Delphi\7.0` is in the registry. The scan still succeeds when that install is missing. Set `--delphi7-root` or `delphi7Root` in `.dxcomply.json` to point at the tree yourself.
+The CLI reads a sibling `.dof` and `.cfg`. When both files define a setting, the `.dof` value is used. These projects have one Win32 option set, so `--platform` and `--config-name` are not applied. The built-in `Release` default is not reported. A platform or configuration you set on the command line or in `.dxcomply.json` is reported and ignored. A blank package output directory uses the registry value `Package DPL Output` when Delphi 7's `RootDir` was found, and the project directory otherwise. The `.map` file must sit next to the output binary. Library units come from a Delphi 7 install when `Software\Borland\Delphi\7.0` is in the registry. The scan still succeeds when that install is missing. Set `--delphi7-root` or `delphi7Root` in `.dxcomply.json` to point at the tree yourself.
 
 > **Tip:** You can automate this with a **Post-Build Event** in a dedicated build configuration. Create a configuration named e.g. `SBOM` that enables detailed MAP output and runs `dxcomply` as a post-build step. This way, a single build generates both your application and its SBOM.
 

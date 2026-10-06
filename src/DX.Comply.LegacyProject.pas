@@ -151,10 +151,22 @@ function DetectModuleKind(const ASourceText, AExtension: string): TLegacyModuleK
 function TryReadLibSuffix(const ASourceText: string; out ASuffix: string): Boolean;
 
 /// <summary>
-/// Explains that --platform and --config-name do not select a legacy option set.
+/// Warning text when the caller explicitly requested a platform or
+/// configuration that a legacy project cannot select. Empty when neither
+/// request was explicit, or when the explicit value is already Win32 / Default.
+/// The built-in Release default must not produce a warning.
 /// </summary>
 function LegacyTargetMessage(const ARequestedPlatform,
-  ARequestedConfiguration: string): string;
+  ARequestedConfiguration: string; APlatformExplicit,
+  AConfigurationExplicit: Boolean): string;
+
+/// <summary>
+/// BPL directory when PackageDLLOutputDir is blank. The registry package
+/// directory is used only when the Delphi 7 registry root was found and that
+/// value is non-empty. Otherwise the project directory is used.
+/// </summary>
+function ResolveBlankPackageOutputDir(const AProjectDir,
+  ARegistryPackageDir: string; ARegistryRootFound: Boolean): string;
 
 /// <summary>
 /// Error text used when the detailed MAP file is not next to the output binary.
@@ -165,11 +177,13 @@ function LegacyMapFileMissingMessage(const AMapFilePath: string): string;
 /// Resolves a Delphi 7 installation root and the IDE library search path.
 /// ARootOverride wins when that directory exists. Otherwise HKCU, then HKLM,
 /// Software\Borland\Delphi\7.0, then the DELPHI environment variable.
+/// ARegistryRoot is set only when that registry RootDir exists on disk.
+/// APackageDplOutput is the Library value "Package DPL Output" in that case.
 /// Returns False when no root directory exists. Never raises because Delphi 7
 /// is absent.
 /// </summary>
 function TryResolveDelphi7Install(const ARootOverride: string;
-  out ARootDir, ALibrarySearchPath: string;
+  out ARootDir, ALibrarySearchPath, ARegistryRoot, APackageDplOutput: string;
   const AWarnings: TList<string>): Boolean;
 
 implementation
@@ -821,14 +835,38 @@ begin
 end;
 
 function LegacyTargetMessage(const ARequestedPlatform,
-  ARequestedConfiguration: string): string;
+  ARequestedConfiguration: string; APlatformExplicit,
+  AConfigurationExplicit: Boolean): string;
+var
+  LIgnored: string;
 begin
-  Result := 'Legacy Delphi project: using the single Win32 option set from the sibling .dof and .cfg.';
-  if (Trim(ARequestedPlatform) <> '') and not SameText(ARequestedPlatform, 'Win32') then
-    Result := Result + ' Ignoring requested platform "' + ARequestedPlatform + '".';
-  if (Trim(ARequestedConfiguration) <> '') and
+  LIgnored := '';
+  if APlatformExplicit and (Trim(ARequestedPlatform) <> '') and
+     not SameText(ARequestedPlatform, 'Win32') then
+    LIgnored := 'Ignoring requested platform "' + ARequestedPlatform + '".';
+  if AConfigurationExplicit and (Trim(ARequestedConfiguration) <> '') and
      not SameText(ARequestedConfiguration, 'Default') then
-    Result := Result + ' Ignoring requested configuration "' + ARequestedConfiguration + '".';
+  begin
+    if LIgnored <> '' then
+      LIgnored := LIgnored + ' ';
+    LIgnored := LIgnored + 'Ignoring requested configuration "' +
+      ARequestedConfiguration + '".';
+  end;
+
+  if LIgnored = '' then
+    Exit('');
+
+  Result := 'Legacy Delphi project: using the single Win32 option set from ' +
+    'the sibling .dof and .cfg. ' + LIgnored;
+end;
+
+function ResolveBlankPackageOutputDir(const AProjectDir,
+  ARegistryPackageDir: string; ARegistryRootFound: Boolean): string;
+begin
+  if ARegistryRootFound and (Trim(ARegistryPackageDir) <> '') then
+    Result := Trim(ARegistryPackageDir)
+  else
+    Result := AProjectDir;
 end;
 
 function LegacyMapFileMissingMessage(const AMapFilePath: string): string;
@@ -905,13 +943,15 @@ begin
 end;
 
 function TryResolveDelphi7Install(const ARootOverride: string;
-  out ARootDir, ALibrarySearchPath: string;
+  out ARootDir, ALibrarySearchPath, ARegistryRoot, APackageDplOutput: string;
   const AWarnings: TList<string>): Boolean;
 var
   LFromRegistry: string;
 begin
   ARootDir := '';
   ALibrarySearchPath := '';
+  ARegistryRoot := '';
+  APackageDplOutput := '';
   Result := False;
 
   if Trim(ARootOverride) <> '' then
@@ -923,15 +963,19 @@ begin
   end;
 
   try
+    LFromRegistry := ReadDelphi7RegistryValue(cDelphi7Key, 'RootDir');
+    ARegistryRoot := NormalizeExistingRoot(LFromRegistry);
     if ARootDir = '' then
-    begin
-      LFromRegistry := ReadDelphi7RegistryValue(cDelphi7Key, 'RootDir');
-      ARootDir := NormalizeExistingRoot(LFromRegistry);
-    end;
+      ARootDir := ARegistryRoot;
 
     ALibrarySearchPath := ReadDelphi7RegistryValue(cDelphi7LibraryKey, 'Search Path');
     if ALibrarySearchPath = '' then
       ALibrarySearchPath := ReadDelphi7RegistryValue(cDelphi7LibraryKey, 'SearchPath');
+    // The global BPL directory is an IDE setting. Use it only when the
+    // registry install itself was found, not when the caller passed a root.
+    if ARegistryRoot <> '' then
+      APackageDplOutput := ReadDelphi7RegistryValue(cDelphi7LibraryKey,
+        'Package DPL Output');
   except
     on E: Exception do
       AddWarning(AWarnings, 'Could not read the Delphi 7 registry key: ' + E.Message);

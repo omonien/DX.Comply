@@ -105,6 +105,14 @@ type
     /// <summary>--delphi7-root is copied into the engine configuration.</summary>
     [Test]
     procedure Parse_Delphi7Root_CopiesToConfig;
+
+    /// <summary>The built-in Win32 and Release defaults are not explicit.</summary>
+    [Test]
+    procedure Parse_DefaultTarget_IsNotExplicit;
+
+    /// <summary>--platform and --config-name mark the target as explicitly set.</summary>
+    [Test]
+    procedure Parse_ConfigName_MarksTargetExplicit;
   end;
 
 implementation
@@ -330,6 +338,48 @@ begin
     LConfig := LOptions.ToSbomConfig;
     Assert.AreEqual('C:\Delphi7', LConfig.Delphi7Root,
       'ToSbomConfig must copy the Delphi 7 root');
+  finally
+    LOptions.Free;
+  end;
+end;
+
+procedure TCliOptionsTests.Parse_DefaultTarget_IsNotExplicit;
+var
+  LConfig: TSbomConfig;
+  LOptions: TCliOptions;
+begin
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsTrue(LOptions.Parse(TArray<string>.Create('--project=App.dpr')),
+      'A project-only command line must parse');
+    LConfig := LOptions.ToSbomConfig;
+    Assert.AreEqual('Win32', LConfig.Platform);
+    Assert.AreEqual('Release', LConfig.Configuration);
+    Assert.IsFalse(LConfig.PlatformExplicit,
+      'The built-in Win32 default must not count as --platform');
+    Assert.IsFalse(LConfig.ConfigurationExplicit,
+      'The built-in Release default must not count as --config-name');
+  finally
+    LOptions.Free;
+  end;
+end;
+
+procedure TCliOptionsTests.Parse_ConfigName_MarksTargetExplicit;
+var
+  LConfig: TSbomConfig;
+  LOptions: TCliOptions;
+begin
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsTrue(LOptions.Parse(TArray<string>.Create(
+      '--project=App.dpr', '--platform=Win64', '--config-name=Release')),
+      '--platform and --config-name must parse');
+    LConfig := LOptions.ToSbomConfig;
+    Assert.AreEqual('Win64', LConfig.Platform);
+    Assert.AreEqual('Release', LConfig.Configuration);
+    Assert.IsTrue(LConfig.PlatformExplicit);
+    Assert.IsTrue(LConfig.ConfigurationExplicit,
+      'An explicit Release must still count as set by the user');
   finally
     LOptions.Free;
   end;

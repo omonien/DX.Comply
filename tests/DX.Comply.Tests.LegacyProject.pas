@@ -109,9 +109,24 @@ type
     [Test]
     procedure Scan_Bdsproj_UsesMainSourceAndDof;
 
-    /// <summary>Win64 and Debug are ignored. The effective target is Win32/Default.</summary>
+    /// <summary>Win64 and Debug are ignored when the caller set them.</summary>
     [Test]
     procedure Scan_RequestedPlatformAndConfig_AreIgnored;
+
+    /// <summary>The built-in Release default must not warn on a Delphi 7 scan.</summary>
+    [Test]
+    procedure Scan_DefaultRelease_DoesNotWarn;
+
+    /// <summary>An explicit Release configuration is reported and ignored.</summary>
+    [Test]
+    procedure Scan_ExplicitRelease_Warns;
+
+    /// <summary>
+    /// A blank package output directory uses the registry value only when
+    /// the Delphi 7 registry root was found.
+    /// </summary>
+    [Test]
+    procedure ResolveBlankPackageOutputDir_UsesRegistryOnlyWhenRootFound;
 
     /// <summary>--delphi7-root expands $(DELPHI) and does not require a registry install.</summary>
     [Test]
@@ -132,6 +147,14 @@ type
     /// <summary>Generation stops when the MAP file is not next to the output binary.</summary>
     [Test]
     procedure Generate_MissingMap_ReturnsDelphi7Error;
+
+    /// <summary>An explicit configuration on the engine config is reported.</summary>
+    [Test]
+    procedure Generate_ExplicitRelease_Warns;
+
+    /// <summary>configuration in .dxcomply.json is treated as explicitly set.</summary>
+    [Test]
+    procedure Generate_ConfigFileConfiguration_Warns;
 
     /// <summary>A MAP file without unit entries explains how to enable Detailed.</summary>
     [Test]
@@ -395,8 +418,8 @@ begin
     Assert.IsFalse(ListHas(LProject.ProjectSearchPaths,
       TPath.GetFullPath(TPath.Combine(LProject.ProjectDir, '..\fromcfg'))),
       'The .cfg search path must not be added when the .dof defines one');
-    Assert.IsTrue(WarningsContain(LProject, 'Ignoring requested configuration "Release"'),
-      'Release is not a separate legacy option set');
+    Assert.IsFalse(WarningsContain(LProject, 'Ignoring requested configuration'),
+      'The built-in Release default must not warn');
     Assert.AreEqual(1, LProject.ExplicitUnitReferences.Count);
     Assert.AreEqual('Unit1', LProject.ExplicitUnitReferences[0].UnitName);
   finally
@@ -548,6 +571,7 @@ var
   LProject: TProjectInfo;
 begin
   WriteProjectFile(FTempDir, 'OneSet.dpr', 'program OneSet;' + sLineBreak);
+  FScanner.SetExplicitTargetRequest(True, True);
   LProject := FScanner.Scan(TPath.Combine(FTempDir, 'OneSet.dpr'), 'Win64', 'Debug');
   try
     Assert.AreEqual('Win32', LProject.Platform);
@@ -661,8 +685,107 @@ begin
   Assert.IsTrue(Pos('Map file to Detailed', LText) > 0, LText);
   Assert.IsTrue(Pos('-GD', LText) > 0, LText);
   Assert.IsTrue(Pos('-1', LText) > 0, 'The failure must be reported as an error');
+  Assert.IsFalse(Pos('Ignoring requested configuration', LText) > 0,
+    'The built-in Release default must not warn: ' + LText);
   Assert.IsFalse(TFile.Exists(TPath.Combine(FTempDir, 'bom.json')),
     'SBOM generation must stop before writing output');
+end;
+
+procedure TLegacyProjectTests.Scan_DefaultRelease_DoesNotWarn;
+var
+  LProject: TProjectInfo;
+begin
+  WriteProjectFile(FTempDir, 'Quiet.dpr', 'program Quiet;' + sLineBreak);
+  LProject := FScanner.Scan(TPath.Combine(FTempDir, 'Quiet.dpr'), 'Win32', 'Release');
+  try
+    Assert.AreEqual('Win32', LProject.Platform);
+    Assert.AreEqual('Default', LProject.Configuration);
+    Assert.IsFalse(WarningsContain(LProject, 'Ignoring requested configuration'),
+      'Release passed as the built-in default must not warn');
+    Assert.IsFalse(WarningsContain(LProject, 'Ignoring requested platform'),
+      'Win32 passed as the built-in default must not warn');
+    Assert.IsFalse(WarningsContain(LProject, 'Legacy Delphi project'),
+      'A default scan must not warn about the single option set');
+  finally
+    LProject.Free;
+  end;
+end;
+
+procedure TLegacyProjectTests.Scan_ExplicitRelease_Warns;
+var
+  LProject: TProjectInfo;
+begin
+  WriteProjectFile(FTempDir, 'Chosen.dpr', 'program Chosen;' + sLineBreak);
+  FScanner.SetExplicitTargetRequest(False, True);
+  LProject := FScanner.Scan(TPath.Combine(FTempDir, 'Chosen.dpr'), 'Win32', 'Release');
+  try
+    Assert.AreEqual('Default', LProject.Configuration);
+    Assert.IsTrue(WarningsContain(LProject, 'Ignoring requested configuration "Release"'),
+      'An explicit Release configuration must be reported');
+    Assert.IsFalse(WarningsContain(LProject, 'Ignoring requested platform'),
+      'Win32 must not be reported when the platform was not set');
+  finally
+    LProject.Free;
+  end;
+end;
+
+procedure TLegacyProjectTests.ResolveBlankPackageOutputDir_UsesRegistryOnlyWhenRootFound;
+begin
+  Assert.AreEqual('C:\Bpl',
+    ResolveBlankPackageOutputDir('C:\Proj', 'C:\Bpl', True),
+    'A found registry root must use Package DPL Output');
+  Assert.AreEqual('C:\Proj',
+    ResolveBlankPackageOutputDir('C:\Proj', 'C:\Bpl', False),
+    'Without a registry root the project directory is the fallback');
+  Assert.AreEqual('C:\Proj',
+    ResolveBlankPackageOutputDir('C:\Proj', '  ', True),
+    'An empty Package DPL Output value falls back to the project directory');
+end;
+
+procedure TLegacyProjectTests.Generate_ExplicitRelease_Warns;
+var
+  LConfig: TSbomConfig;
+  LGenerator: TDxComplyGenerator;
+  LText: string;
+begin
+  WriteProjectFile(FTempDir, 'Explicit.dpr', 'program Explicit;' + sLineBreak);
+  LGenerator := TDxComplyGenerator.Create;
+  try
+    LConfig := LGenerator.Config;
+    LConfig.Configuration := 'Release';
+    LConfig.ConfigurationExplicit := True;
+    LGenerator.Config := LConfig;
+    LGenerator.OnProgress := OnProgress;
+    Assert.IsFalse(LGenerator.Generate(TPath.Combine(FTempDir, 'Explicit.dpr')));
+  finally
+    LGenerator.Free;
+  end;
+
+  LText := FMessages.Text;
+  Assert.IsTrue(Pos('Ignoring requested configuration "Release"', LText) > 0, LText);
+end;
+
+procedure TLegacyProjectTests.Generate_ConfigFileConfiguration_Warns;
+var
+  LGenerator: TDxComplyGenerator;
+  LJsonPath: string;
+  LText: string;
+begin
+  WriteProjectFile(FTempDir, 'FromJson.dpr', 'program FromJson;' + sLineBreak);
+  WriteProjectFile(FTempDir, '.dxcomply.json', '{"configuration":"Debug"}' + sLineBreak);
+  LJsonPath := TPath.Combine(FTempDir, '.dxcomply.json');
+
+  LGenerator := TDxComplyGenerator.Create;
+  try
+    LGenerator.OnProgress := OnProgress;
+    Assert.IsFalse(LGenerator.GenerateFromConfig(
+      TPath.Combine(FTempDir, 'FromJson.dpr'), LJsonPath));
+  finally
+    LGenerator.Free;
+  end;
+
+  LText := FMessages.Text;
+  Assert.IsTrue(Pos('Ignoring requested configuration "Debug"', LText) > 0, LText);
 end;
 
 procedure TLegacyProjectTests.ReadEvidence_MapWithoutUnits_WarnsAboutDetailed;

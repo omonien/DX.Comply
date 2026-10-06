@@ -236,6 +236,13 @@ type
     /// variable. A missing install does not fail the scan.
     /// </summary>
     procedure SetDelphi7Root(const ARoot: string);
+    /// <summary>
+    /// Records whether the caller set --platform and --config-name (or the
+    /// matching .dxcomply.json keys). Legacy scans warn only when a flag is
+    /// True and the value is not the single Win32 / Default option set.
+    /// </summary>
+    procedure SetExplicitTargetRequest(APlatformExplicit,
+      AConfigurationExplicit: Boolean);
   end;
 
   /// <summary>

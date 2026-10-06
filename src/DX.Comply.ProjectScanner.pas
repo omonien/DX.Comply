@@ -67,6 +67,8 @@ type
     /// Optional Delphi 7 root passed in before Scan. Empty uses the registry.
     /// </summary>
     FDelphi7Root: string;
+    FPlatformExplicit: Boolean;
+    FConfigurationExplicit: Boolean;
     /// <summary>
     /// Detects the Cfg_N key that corresponds to the requested configuration
     /// name (e.g. Debug -> Cfg_1, Release -> Cfg_2) by inspecting
@@ -243,6 +245,8 @@ type
     function Scan(const AProjectPath, APlatform, AConfiguration: string): TProjectInfo;
     function Validate(const AProjectPath: string): Boolean;
     procedure SetDelphi7Root(const ARoot: string);
+    procedure SetExplicitTargetRequest(APlatformExplicit,
+      AConfigurationExplicit: Boolean);
   end;
 
 implementation
@@ -1362,6 +1366,13 @@ begin
   FDelphi7Root := Trim(ARoot);
 end;
 
+procedure TProjectScanner.SetExplicitTargetRequest(APlatformExplicit,
+  AConfigurationExplicit: Boolean);
+begin
+  FPlatformExplicit := APlatformExplicit;
+  FConfigurationExplicit := AConfigurationExplicit;
+end;
+
 function TProjectScanner.ResolveLegacyDirectory(const ARawPath, AProjectDir,
   AProjectName, ADelphiRoot: string; ARequired: Boolean): string;
 var
@@ -1428,10 +1439,14 @@ var
   LLibrarySearchPath: string;
   LOptions: TLegacyOptionSet;
   LOutputDir: string;
+  LPackageDplOutput: string;
   LPackageItem: string;
   LPackageList: string;
   LPackageName: string;
+  LRegistryPackageDir: string;
+  LRegistryRoot: string;
   LRoot: string;
+  LTargetMessage: string;
   LSearchPath: string;
   LSources: TLegacySources;
   LUsesPackages: Boolean;
@@ -1443,7 +1458,10 @@ begin
   AProjectInfo.Platform := 'Win32';
   AProjectInfo.Configuration := 'Default';
   AProjectInfo.UsesDebugDCUs := False;
-  FWarnings.Add(LegacyTargetMessage(APlatform, AConfiguration));
+  LTargetMessage := LegacyTargetMessage(APlatform, AConfiguration,
+    FPlatformExplicit, FConfigurationExplicit);
+  if LTargetMessage <> '' then
+    FWarnings.Add(LTargetMessage);
 
   LSources := ResolveLegacySources(AProjectInfo.ProjectPath);
   if LSources.ProjectName <> '' then
@@ -1478,7 +1496,8 @@ begin
 
   LOptions := MergeLegacyOptions(LDof, LCfg);
 
-  if not TryResolveDelphi7Install(FDelphi7Root, LRoot, LLibrarySearchPath, FWarnings) then
+  if not TryResolveDelphi7Install(FDelphi7Root, LRoot, LLibrarySearchPath,
+    LRegistryRoot, LPackageDplOutput, FWarnings) then
     LRoot := '';
 
   if LRoot <> '' then
@@ -1515,11 +1534,18 @@ begin
       AProjectInfo.ArtefactOutputDir := AProjectInfo.BplOutputDir
     else
     begin
-      AProjectInfo.ArtefactOutputDir := AProjectInfo.ProjectDir;
-      AProjectInfo.BplOutputDir := AProjectInfo.ProjectDir;
-      FWarnings.Add('No package output directory in the .dof or .cfg. ' +
-        'Using the project directory. Delphi 7 itself uses the IDE package output ' +
-        'directory when PackageDLLOutputDir is blank.');
+      // PackageDLLOutputDir / -LE was blank. Delphi 7 writes the BPL to the
+      // IDE's global directory when that registry install was found.
+      LRegistryPackageDir := '';
+      if LRegistryRoot <> '' then
+        LRegistryPackageDir := ResolveLegacyDirectory(LPackageDplOutput,
+          LRegistryRoot, AProjectInfo.ProjectName, LRegistryRoot, False);
+      AProjectInfo.BplOutputDir := ResolveBlankPackageOutputDir(
+        AProjectInfo.ProjectDir, LRegistryPackageDir, LRegistryRoot <> '');
+      AProjectInfo.ArtefactOutputDir := AProjectInfo.BplOutputDir;
+      if LRegistryPackageDir = '' then
+        FWarnings.Add('No package output directory in the .dof or .cfg, and no ' +
+          'Delphi 7 Package DPL Output value was found. Using the project directory.');
     end;
   end
   else if LOutputDir <> '' then

@@ -73,8 +73,18 @@ type
     Supplier: string;
     /// <summary>Target platform.</summary>
     Platform: string;
+    /// <summary>
+    /// True when the caller set the platform with --platform or with
+    /// platform in .dxcomply.json. The built-in Win32 default stays False.
+    /// </summary>
+    PlatformExplicit: Boolean;
     /// <summary>Build configuration.</summary>
     Configuration: string;
+    /// <summary>
+    /// True when the caller set the configuration with --config-name or with
+    /// configuration in .dxcomply.json. The built-in Release default stays False.
+    /// </summary>
+    ConfigurationExplicit: Boolean;
     /// <summary>Controls whether Deep-Evidence builds are disabled, conditional, or forced.</summary>
     DeepEvidenceMode: TDeepEvidenceBuildMode;
     /// <summary>Optional Delphi major version to use for the Deep-Evidence build.</summary>
@@ -256,7 +266,9 @@ begin
   Result.OutputPath := 'bom.json';
   Result.Format := sfCycloneDxJson;
   Result.Platform := 'Win32';
+  Result.PlatformExplicit := False;
   Result.Configuration := 'Release';
+  Result.ConfigurationExplicit := False;
   Result.DeepEvidenceMode := debWhenMapMissing;
   Result.DeepEvidenceDelphiVersion := 0;
   Result.DeepEvidenceBuildScriptPath := '';
@@ -776,6 +788,24 @@ begin
             Result.Format := sfSpdxJson;
         end;
 
+        // An explicit platform or configuration in the file is not the
+        // built-in Win32 / Release default. configName matches --config-name.
+        if LJson.GetValue('platform') <> nil then
+        begin
+          Result.Platform := LJson.GetValue<string>('platform');
+          Result.PlatformExplicit := True;
+        end;
+        if LJson.GetValue('configuration') <> nil then
+        begin
+          Result.Configuration := LJson.GetValue<string>('configuration');
+          Result.ConfigurationExplicit := True;
+        end
+        else if LJson.GetValue('configName') <> nil then
+        begin
+          Result.Configuration := LJson.GetValue<string>('configName');
+          Result.ConfigurationExplicit := True;
+        end;
+
         // Include patterns
         if LJson.GetValue('include') is TJSONArray then
         begin
@@ -1222,6 +1252,8 @@ begin
   LReportedWarnings := TList<string>.Create;
   try
     FProjectScanner.SetDelphi7Root(FConfig.Delphi7Root);
+    FProjectScanner.SetExplicitTargetRequest(FConfig.PlatformExplicit,
+      FConfig.ConfigurationExplicit);
     LProjectInfo := FProjectScanner.Scan(AProjectPath, FConfig.Platform, FConfig.Configuration);
 
     // Apply MapFileDir override. Legacy projects look next to the output
@@ -1420,14 +1452,23 @@ end;
 
 function TDxComplyGenerator.GenerateFromConfig(const AProjectPath, AConfigPath: string): Boolean;
 var
-  LDelphi7Root: string;
+  LCliConfig: TSbomConfig;
 begin
-  // --delphi7-root on the command line still applies when the JSON file
-  // does not set delphi7Root.
-  LDelphi7Root := FConfig.Delphi7Root;
+  // Command-line overrides still apply when the JSON file does not set them.
+  LCliConfig := FConfig;
   FConfig := LoadConfig(AConfigPath);
-  if (FConfig.Delphi7Root = '') and (LDelphi7Root <> '') then
-    FConfig.Delphi7Root := LDelphi7Root;
+  if (FConfig.Delphi7Root = '') and (LCliConfig.Delphi7Root <> '') then
+    FConfig.Delphi7Root := LCliConfig.Delphi7Root;
+  if LCliConfig.PlatformExplicit and not FConfig.PlatformExplicit then
+  begin
+    FConfig.Platform := LCliConfig.Platform;
+    FConfig.PlatformExplicit := True;
+  end;
+  if LCliConfig.ConfigurationExplicit and not FConfig.ConfigurationExplicit then
+  begin
+    FConfig.Configuration := LCliConfig.Configuration;
+    FConfig.ConfigurationExplicit := True;
+  end;
   Result := Generate(AProjectPath);
 end;
 
