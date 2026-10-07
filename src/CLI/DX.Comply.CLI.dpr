@@ -83,6 +83,12 @@ begin
       Exit;
     end;
 
+    if LOptions.ShowVersion then
+    begin
+      LOptions.PrintVersion;
+      Exit;
+    end;
+
     if LOptions.Project = '' then
     begin
       Writeln('Error: --project is required.');
