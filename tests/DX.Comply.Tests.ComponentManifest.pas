@@ -781,19 +781,32 @@ begin
     LSupplier := LLibrary.GetValue('supplier') as TJSONObject;
     Assert.AreEqual('Primo Gabrijelcic', LSupplier.GetValue<string>('name'));
     LLicences := LLibrary.GetValue('licenses') as TJSONArray;
+    Assert.AreEqual(NativeInt(2), NativeInt(LLicences.Count));
     LLicenceWrap := LLicences.Items[0] as TJSONObject;
     Assert.AreEqual('MIT', TJSONObject(LLicenceWrap.GetValue('license')).GetValue<string>('id'));
+    Assert.AreEqual('concluded',
+      TJSONObject(LLicenceWrap.GetValue('license')).GetValue<string>('acknowledgement'));
+    Assert.AreEqual('declared',
+      TJSONObject(TJSONObject(LLicences.Items[1] as TJSONObject).GetValue('license')).GetValue<string>('acknowledgement'));
 
     LLibrary := FindComponent(LComponents, 'SynEdit');
     LLicences := LLibrary.GetValue('licenses') as TJSONArray;
+    Assert.AreEqual(NativeInt(1), NativeInt(LLicences.Count));
     Assert.AreEqual('MPL-1.1 OR LGPL-2.1-or-later',
       TJSONObject(LLicences.Items[0]).GetValue<string>('expression'));
+    Assert.AreEqual('concluded',
+      TJSONObject(LLicences.Items[0]).GetValue<string>('acknowledgement'));
 
     LLibrary := FindComponent(LComponents, 'TMS VCL UI Pack');
     Assert.AreEqual('pkg:generic/tms-vcl@13', LLibrary.GetValue<string>('purl'));
     LLicences := LLibrary.GetValue('licenses') as TJSONArray;
+    Assert.AreEqual(NativeInt(2), NativeInt(LLicences.Count));
     Assert.AreEqual('Commercial',
       TJSONObject(TJSONObject(LLicences.Items[0]).GetValue('license')).GetValue<string>('name'));
+    Assert.AreEqual('concluded',
+      TJSONObject(TJSONObject(LLicences.Items[0]).GetValue('license')).GetValue<string>('acknowledgement'));
+    Assert.AreEqual('declared',
+      TJSONObject(TJSONObject(LLicences.Items[1]).GetValue('license')).GetValue<string>('acknowledgement'));
 
     Assert.IsNotNull(FindComponent(LComponents, 'MainForm.pas'),
       'Own-code units stay in the evidence');
@@ -864,7 +877,7 @@ begin
   Assert.IsTrue(Pos('<id>MIT</id>', LLibrary) > 0, LLibrary);
   Assert.IsTrue(Pos('pkg:delphi/OmniThreadLibrary@3.7.8', LLibrary) > 0, LLibrary);
 
-  Assert.IsTrue(Pos('<expression>MPL-1.1 OR LGPL-2.1-or-later</expression>', LContent) > 0);
+  Assert.IsTrue(Pos('<expression acknowledgement="concluded">MPL-1.1 OR LGPL-2.1-or-later</expression>', LContent) > 0);
   Assert.IsTrue(Pos('<name>Commercial</name>', LContent) > 0);
   Assert.IsTrue(Pos('pkg:generic/tms-vcl@13', LContent) > 0);
   Assert.IsTrue(Pos('<dependency ref="manifest-0">', LContent) > 0);

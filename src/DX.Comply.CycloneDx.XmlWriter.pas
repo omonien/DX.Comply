@@ -1,17 +1,17 @@
 ﻿/// <summary>
 /// DX.Comply.CycloneDx.XmlWriter
-/// Generates CycloneDX 1.5 SBOM documents in XML format.
+/// Generates CycloneDX 1.6 SBOM documents in XML format.
 /// </summary>
 ///
 /// <remarks>
-/// This unit provides TCycloneDxXmlWriter which generates CycloneDX 1.5 XML SBOMs:
+/// This unit provides TCycloneDxXmlWriter which generates CycloneDX 1.6 XML SBOMs:
 /// - Full metadata section with tool information
 /// - Component list with hashes (SHA-256 and SHA-512 when the file could be opened)
 /// - Dependency graph grouped by deliverable, runtime packages, external DLLs and linked units
 /// - Schema validation support
 ///
-/// The XML output conforms to the CycloneDX 1.5 XSD schema:
-/// https://cyclonedx.org/schema/bom-1.5.xsd
+/// The XML output conforms to the CycloneDX 1.6 XSD schema:
+/// https://cyclonedx.org/schema/bom-1.6.xsd
 ///
 /// Uses lightweight string-based XML generation to avoid MSXML/COM dependencies,
 /// ensuring the writer works in all environments (IDE, CLI, test runners).
@@ -41,8 +41,8 @@ type
   TCycloneDxXmlWriter = class(TInterfacedObject, ISbomWriter)
   private
     const
-      cSpecVersion = '1.5';
-      cNamespace = 'http://cyclonedx.org/schema/bom/1.5';
+      cSpecVersion = '1.6';
+      cNamespace = 'http://cyclonedx.org/schema/bom/1.6';
       cToolName = 'DX.Comply';
       cIndent = '  ';
   private
@@ -164,8 +164,9 @@ begin
   else
     AddElement('timestamp', DateToISO8601(Now, False));
 
-  // CycloneDX 1.5 metadata sequence: timestamp, lifecycles, tools, authors,
-  // component, manufacture, supplier, licenses, properties.
+  // CycloneDX 1.6 metadata sequence: timestamp, lifecycles, tools, authors,
+  // component, manufacturer, manufacture, supplier, licenses, properties.
+  // tools/tool is still accepted by bom-1.6.xsd and is marked deprecated there.
   OpenTag('tools');
   OpenTag('tool');
   AddElement('vendor', 'Olaf Monien');
@@ -204,20 +205,22 @@ begin
   AddPropertyElements(AMetadata.ComponentProperties);
   CloseTag('component');
 
-  // manufacture follows component in the CycloneDX 1.5 metadata sequence.
+  // manufacturer follows component in the CycloneDX 1.6 metadata sequence.
+  // It is one organizational entity. The deprecated manufacture element is
+  // not written.
   if BsiCreatorKind(AMetadata.SbomCreator) = 'email' then
   begin
-    OpenTag('manufacture');
+    OpenTag('manufacturer');
     OpenTag('contact');
     AddElement('email', Trim(AMetadata.SbomCreator));
     CloseTag('contact');
-    CloseTag('manufacture');
+    CloseTag('manufacturer');
   end
   else if BsiCreatorKind(AMetadata.SbomCreator) = 'url' then
   begin
-    OpenTag('manufacture');
+    OpenTag('manufacturer');
     AddElement('url', Trim(AMetadata.SbomCreator));
-    CloseTag('manufacture');
+    CloseTag('manufacturer');
   end;
 
   AddPropertyElements(AMetadata.Properties);
@@ -262,6 +265,23 @@ begin
   end;
 
   AddElement('purl', 'file:' + AArtefact.RelativePath);
+
+  // Component sequence places externalReferences after purl and before
+  // properties. The distribution url is the file: locator. bom-1.6 requires
+  // that url. The reference is written for a hashed executable or archive.
+  if (AArtefact.HashSha512 <> '') and
+     (IsBsiExecutableArtefact(AArtefact) or
+      IsBsiArchiveFileName(BsiComponentFileName(AArtefact.RelativePath))) then
+  begin
+    OpenTag('externalReferences');
+    OpenTag('reference', 'type="distribution"');
+    AddElement('url', 'file:' + AArtefact.RelativePath);
+    OpenTag('hashes');
+    AddLine('<hash alg="SHA-512">' + LowerCase(AArtefact.HashSha512) + '</hash>');
+    CloseTag('hashes');
+    CloseTag('reference');
+    CloseTag('externalReferences');
+  end;
 
   // Evidence and confidence must be written for source-scanned DLLs, which
   // have no file on disk (size -1) and an empty origin. Gating the whole
@@ -471,7 +491,7 @@ begin
     Exit;
 
   // Presence of the expected tags is not enough: metadata.properties before
-  // tools, or component.purl before hashes, is invalid against bom-1.5.xsd.
+  // tools, or component.purl before hashes, is invalid against bom-1.6.xsd.
   if Length(CycloneDxXmlSequenceErrors(AContent)) > 0 then
     Exit;
 

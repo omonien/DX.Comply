@@ -1,16 +1,16 @@
 ﻿/// <summary>
 /// DX.Comply.CycloneDx.Writer
-/// Generates CycloneDX 1.5 SBOM documents in JSON format.
+/// Generates CycloneDX 1.6 SBOM documents in JSON format.
 /// </summary>
 ///
 /// <remarks>
-/// This unit provides TCycloneDxJsonWriter which generates CycloneDX 1.5 JSON SBOMs:
+/// This unit provides TCycloneDxJsonWriter which generates CycloneDX 1.6 JSON SBOMs:
 /// - Full metadata section with tool information
 /// - Component list with hashes (SHA-256 and SHA-512 when the file could be opened)
 /// - Dependency graph grouped by deliverable, runtime packages, external DLLs and linked units
 /// - Schema validation support
 ///
-/// CycloneDX 1.5 specification: https://cyclonedx.org/specification/overview/
+/// CycloneDX 1.6 specification: https://cyclonedx.org/specification/overview/
 /// </remarks>
 ///
 /// <copyright>
@@ -39,7 +39,7 @@ type
   private
     const
       /// <summary>CycloneDX specification version.</summary>
-      cSpecVersion = '1.5';
+      cSpecVersion = '1.6';
       /// <summary>Tool name.</summary>
       cToolName = 'DX.Comply';
   private
@@ -151,8 +151,10 @@ begin
 
   LMetadata.AddPair('component', LComponent);
 
-  // CycloneDX 1.5 calls this manufacture. The contact is written only when
-  // the caller supplied an email or an http(s) URL.
+  // CycloneDX 1.6 names the SBOM creator metadata.manufacturer. It is one
+  // organizational entity, not an array. The contact is written only when
+  // the caller supplied an email or an http(s) URL. The deprecated
+  // manufacture element is not written.
   LKind := BsiCreatorKind(AMetadata.SbomCreator);
   if LKind <> '' then
   begin
@@ -171,13 +173,13 @@ begin
       LSupplierUrls.Add(Trim(AMetadata.SbomCreator));
       LManufacture.AddPair('url', LSupplierUrls);
     end;
-    LMetadata.AddPair('manufacture', LManufacture);
+    LMetadata.AddPair('manufacturer', LManufacture);
   end;
 
   if Length(AMetadata.Properties) > 0 then
     LMetadata.AddPair('properties', BuildProperties(AMetadata.Properties));
 
-  // Tool information (CycloneDX 1.5 tools.components format)
+  // Tool information (CycloneDX 1.6 tools.components format)
   LTool := TJSONObject.Create;
   LTool.AddPair('type', 'application');
   LTool.AddPair('author', 'Olaf Monien');
@@ -197,8 +199,8 @@ end;
 function TCycloneDxJsonWriter.BuildComponent(const AArtefact: TArtefactInfo;
   const AIndex: Integer): TJSONObject;
 var
-  LComponent, LHashes: TJSONObject;
-  LHashArray, LProperties: TJSONArray;
+  LComponent, LHashes, LRef, LRefHash: TJSONObject;
+  LHashArray, LProperties, LRefs, LRefHashes: TJSONArray;
   LProp: TJSONObject;
   LFileName: string;
 
@@ -259,6 +261,29 @@ begin
     end;
 
     LComponent.AddPair('hashes', LHashArray);
+  end;
+
+  // TR-03183-2 maps the deployable SHA-512 to externalReferences type
+  // distribution. bom-1.6 requires a url, and no download URL is known, so
+  // the url is the same file: locator already written as purl. The reference
+  // is written for a hashed executable or archive. Unit evidence is not a
+  // deployable file. The component hashes above stay as well.
+  if (AArtefact.HashSha512 <> '') and
+     (IsBsiExecutableArtefact(AArtefact) or
+      IsBsiArchiveFileName(BsiComponentFileName(AArtefact.RelativePath))) then
+  begin
+    LRefs := TJSONArray.Create;
+    LRef := TJSONObject.Create;
+    LRefHashes := TJSONArray.Create;
+    LRefHash := TJSONObject.Create;
+    LRef.AddPair('type', 'distribution');
+    LRef.AddPair('url', 'file:' + AArtefact.RelativePath);
+    LRefHash.AddPair('alg', 'SHA-512');
+    LRefHash.AddPair('content', LowerCase(AArtefact.HashSha512));
+    LRefHashes.Add(LRefHash);
+    LRef.AddPair('hashes', LRefHashes);
+    LRefs.Add(LRef);
+    LComponent.AddPair('externalReferences', LRefs);
   end;
 
   // Properties
@@ -393,7 +418,7 @@ begin
   LRoot := TJSONObject.Create;
   try
     // CycloneDX version
-    LRoot.AddPair('$schema', 'http://cyclonedx.org/schema/bom-1.5.schema.json');
+    LRoot.AddPair('$schema', 'http://cyclonedx.org/schema/bom-1.6.schema.json');
     LRoot.AddPair('bomFormat', 'CycloneDX');
     LRoot.AddPair('specVersion', cSpecVersion);
     LRoot.AddPair('serialNumber', 'urn:uuid:' + GenerateUuid);

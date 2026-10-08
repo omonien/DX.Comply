@@ -6,9 +6,9 @@ DX.Comply schreibt eine Komponentenliste (SBOM) und Build-Nachweise. Es listet d
 
 Lieferant, Version und Lizenz fuer Komponenten Dritter schreibt DX.Comply, wenn ein Komponenten-Manifest (components.json) sie enthaelt. Der Rest der technischen Dokumentation fehlt weiterhin: Verfahren zur Behandlung von Schwachstellen, Offenlegungspolitik, Auslieferung von Updates und Risikobewertung. Schwachstellenmanagement und Meldewesen liegen ausserhalb dieses Werkzeugs.
 
-Die Pruefung im Werkzeug ist eine strukturelle Pruefung. Das CycloneDX-JSON-Beispiel in diesem Repository besteht die offizielle CycloneDX-1.5-JSON-Schema-Pruefung mit check-jsonschema. SPDX und CycloneDX-XML werden im Werkzeug nicht gegen offizielle Schemas geprueft.
+Die Pruefung im Werkzeug ist eine strukturelle Pruefung. Das CycloneDX-JSON-Beispiel in diesem Repository ist ein aelteres CycloneDX-1.5-Dokument und wurde nicht als 1.6 neu erzeugt. SPDX und CycloneDX-XML werden im Werkzeug nicht gegen offizielle Schemas geprueft.
 
-Die BSI TR-03183-2 Version 2.1.0 verlangt CycloneDX 1.6 oder neuer und SPDX 3.0.1 oder neuer. DX.Comply bleibt bei CycloneDX 1.5 und SPDX 2.3. Es schreibt SHA-512 neben SHA-256, den Dateinamen und die Eigenschaften executable, archive und structured, wenn die Datei geoeffnet werden konnte. Den Ersteller der SBOM schreibt es nur, wenn eine E-Mail oder eine http(s)-URL angegeben wird. Lizenzen und Herstellerangaben kommen aus dem Komponenten-Manifest, wenn eines angegeben wird. Rekursive Abhaengigkeiten schreibt es nicht. Das ist keine Zertifizierung und keine volle Abdeckung der Richtlinie.
+Die BSI TR-03183-2 Version 2.1.0 verlangt CycloneDX 1.6 oder neuer und SPDX 3.0.1 oder neuer. DX.Comply schreibt CycloneDX 1.6. SPDX bleibt bei 2.3. SPDX 3.0.1 liegt ausserhalb des Umfangs. Es schreibt SHA-512 neben SHA-256 und fuer eine auslieferbare Datei denselben SHA-512 als externalReference vom Typ distribution. Den Dateinamen und die Eigenschaften executable, archive und structured schreibt es, wenn ein Dateiname vorliegt. Den Ersteller der SBOM schreibt es nur, wenn eine E-Mail oder eine http(s)-URL angegeben wird. Lizenzen und Herstellerangaben kommen aus dem Komponenten-Manifest, wenn eines angegeben wird. Rekursive Abhaengigkeiten schreibt es nicht. Das ist keine Zertifizierung und keine volle Abdeckung der Richtlinie.
 
 ## Vision
 
@@ -86,7 +86,7 @@ Integration der bestehenden DX.Comply Engine:
 - **Unit-Resolution** mit SHA-256 Hashes und Origin-Klassifizierung
 - **Runtime-Package-Erkennung** (BPL-Abhaengigkeiten aus .dproj)
 - **Externer DLL-Scan** (Source-Scan nach `external` und `LoadLibrary`)
-- **CycloneDX 1.5 / SPDX 2.3** Ausgabeformate
+- **CycloneDX 1.6 / SPDX 2.3** Ausgabeformate. SPDX 3.0.1 liegt ausserhalb des Umfangs.
 
 **Bereits implementiert in DX.Comply v1.2.0.** DX.Comply Pilot bindet die Engine als Package ein.
 

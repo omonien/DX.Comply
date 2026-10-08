@@ -494,7 +494,7 @@ begin
   Writeln('  --project=<path>              Project file (required): .dproj, .dpr,');
   Writeln('                                .dpk, .bdsproj, or .groupproj');
   Writeln('  --format=<format>             Output format (default: cyclonedx-json)');
-  Writeln('                                  cyclonedx-json | cyclonedx-xml | spdx-json');
+  Writeln('                                  cyclonedx-json (1.6) | cyclonedx-xml (1.6) | spdx-json (2.3)');
   Writeln('  --output=<path>               Output file path (default: bom.json)');
   Writeln('  --platform=<name>             Target platform (default: Win32)');
   Writeln('                                File key: platform');

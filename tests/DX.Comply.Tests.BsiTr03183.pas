@@ -1,6 +1,6 @@
 ﻿/// <summary>
 /// DX.Comply.Tests.BsiTr03183
-/// DUnitX tests for BSI TR-03183-2 fields on CycloneDX 1.5 and SPDX 2.3.
+/// DUnitX tests for BSI TR-03183-2 fields on CycloneDX 1.6 and SPDX 2.3.
 /// </summary>
 ///
 /// <remarks>
@@ -22,6 +22,7 @@ uses
   System.SysUtils,
   System.IOUtils,
   System.Classes,
+  System.Generics.Collections,
   System.JSON,
   DUnitX.TestFramework,
   DX.Comply.CLI.Options,
@@ -68,17 +69,17 @@ type
     [Test]
     procedure Json_MissingDll_OmitsHashes_KeepsTrProperties;
     [Test]
-    procedure Json_CreatorEmail_WritesManufactureAndIncomplete;
+    procedure Json_CreatorEmail_WritesManufacturerAndIncomplete;
     [Test]
-    procedure Json_CreatorUrl_WritesManufactureUrl;
+    procedure Json_CreatorUrl_WritesManufacturerUrl;
     [Test]
-    procedure Json_EmptyCreator_OmitsManufacture;
+    procedure Json_EmptyCreator_OmitsManufacturer;
     [Test]
     procedure Xml_FileComponent_HashAndPropertyOrder;
     [Test]
     procedure Xml_CreatorEmail_FollowsMetadataComponent;
     [Test]
-    procedure Xml_CreatorUrl_WritesManufactureUrl;
+    procedure Xml_CreatorUrl_WritesManufacturerUrl;
     [Test]
     procedure Spdx_FileComponent_HasSha512FileNameAndComment;
     [Test]
@@ -223,13 +224,15 @@ end;
 procedure TBsiTr03183Tests.Json_FileComponent_HasSha512AndTrProperties;
 var
   LWriter: ISbomWriter;
-  LJson, LComponent, LHash: TJSONObject;
-  LHashes, LProperties: TJSONArray;
+  LJson, LComponent, LHash, LRef: TJSONObject;
+  LHashes, LProperties, LRefs, LRefHashes: TJSONArray;
   LMetaComponent: TJSONObject;
 begin
   FArtefacts.Add(MakeArtefact('TestApp.exe', 'application', cSha256, cSha512, 100));
   FArtefacts.Add(MakeArtefact('notes.zip', 'unknown', '', '', 20));
   FArtefacts.Add(MakeArtefact('System.SysUtils.pas', 'unit-evidence', cSha256, cSha512, 30));
+  FArtefacts.Add(MakeArtefact('redist\pack.zip', 'unknown', cSha256, cSha512, 40));
+  FArtefacts.Add(MakeArtefact('MyPkg.dcp', 'unknown', cSha256, cSha512, 50));
 
   LWriter := TCycloneDxJsonWriter.Create;
   Assert.IsTrue(LWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
@@ -246,6 +249,16 @@ begin
     LHash := LHashes.Items[1] as TJSONObject;
     Assert.AreEqual('SHA-512', LHash.GetValue<string>('alg'));
     Assert.AreEqual(cSha512, LHash.GetValue<string>('content'));
+    LRefs := LComponent.GetValue('externalReferences') as TJSONArray;
+    Assert.AreEqual(NativeInt(1), NativeInt(LRefs.Count));
+    LRef := LRefs.Items[0] as TJSONObject;
+    Assert.AreEqual('distribution', LRef.GetValue<string>('type'));
+    Assert.AreEqual('file:TestApp.exe', LRef.GetValue<string>('url'));
+    LRefHashes := LRef.GetValue('hashes') as TJSONArray;
+    Assert.AreEqual(NativeInt(1), NativeInt(LRefHashes.Count));
+    LHash := LRefHashes.Items[0] as TJSONObject;
+    Assert.AreEqual('SHA-512', LHash.GetValue<string>('alg'));
+    Assert.AreEqual(cSha512, LHash.GetValue<string>('content'));
     LProperties := LComponent.GetValue('properties') as TJSONArray;
     Assert.AreEqual('TestApp.exe', PropertyValue(LProperties, 'bsi:component:filename'));
     Assert.AreEqual('executable', PropertyValue(LProperties, 'bsi:component:executable'));
@@ -256,6 +269,8 @@ begin
 
     LComponent := (LJson.GetValue('components') as TJSONArray).Items[1] as TJSONObject;
     Assert.IsNull(LComponent.GetValue('hashes'), 'A zip without a hash must not invent one');
+    Assert.IsNull(LComponent.GetValue('externalReferences'),
+      'A file without a SHA-512 has no distribution reference');
     LProperties := LComponent.GetValue('properties') as TJSONArray;
     Assert.AreEqual('notes.zip', PropertyValue(LProperties, 'bsi:component:filename'));
     Assert.AreEqual('non-executable', PropertyValue(LProperties, 'bsi:component:executable'));
@@ -265,10 +280,26 @@ begin
     LComponent := (LJson.GetValue('components') as TJSONArray).Items[2] as TJSONObject;
     LProperties := LComponent.GetValue('properties') as TJSONArray;
     Assert.AreEqual('non-executable', PropertyValue(LProperties, 'bsi:component:executable'));
+    Assert.IsNull(LComponent.GetValue('externalReferences'),
+      'Unit evidence is not a deployable file');
+
+    LComponent := (LJson.GetValue('components') as TJSONArray).Items[3] as TJSONObject;
+    LRefs := LComponent.GetValue('externalReferences') as TJSONArray;
+    Assert.AreEqual(NativeInt(1), NativeInt(LRefs.Count));
+    Assert.AreEqual('distribution', (LRefs.Items[0] as TJSONObject).GetValue<string>('type'));
+    Assert.AreEqual('file:redist\pack.zip', (LRefs.Items[0] as TJSONObject).GetValue<string>('url'));
+    LHashes := LComponent.GetValue('hashes') as TJSONArray;
+    Assert.AreEqual(NativeInt(2), NativeInt(LHashes.Count));
+
+    LComponent := (LJson.GetValue('components') as TJSONArray).Items[4] as TJSONObject;
+    Assert.IsNotNull(LComponent.GetValue('hashes'), 'A DCP still keeps component hashes');
+    Assert.IsNull(LComponent.GetValue('externalReferences'),
+      'A DCP is not the deployable file');
 
     LMetaComponent := (LJson.GetValue('metadata') as TJSONObject).GetValue('component') as TJSONObject;
     Assert.IsNull(LMetaComponent.GetValue('properties'),
       'The primary component is logical and has no file properties in this test');
+    Assert.IsNull((LJson.GetValue('metadata') as TJSONObject).GetValue('manufacturer'));
     Assert.IsNull((LJson.GetValue('metadata') as TJSONObject).GetValue('manufacture'));
   finally
     LJson.Free;
@@ -293,6 +324,7 @@ begin
   try
     LComponent := (LJson.GetValue('components') as TJSONArray).Items[0] as TJSONObject;
     Assert.IsNull(LComponent.GetValue('hashes'));
+    Assert.IsNull(LComponent.GetValue('externalReferences'));
     Assert.IsNull(LComponent.GetValue('version'));
     LProperties := LComponent.GetValue('properties') as TJSONArray;
     Assert.AreEqual('vendor.dll', PropertyValue(LProperties, 'bsi:component:filename'));
@@ -303,7 +335,7 @@ begin
   end;
 end;
 
-procedure TBsiTr03183Tests.Json_CreatorEmail_WritesManufactureAndIncomplete;
+procedure TBsiTr03183Tests.Json_CreatorEmail_WritesManufacturerAndIncomplete;
 var
   LWriter: ISbomWriter;
   LJson, LManufacture, LContact, LComposition: TJSONObject;
@@ -315,7 +347,9 @@ begin
   Assert.IsTrue(LWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
   LJson := LoadJson;
   try
-    LManufacture := (LJson.GetValue('metadata') as TJSONObject).GetValue('manufacture') as TJSONObject;
+    Assert.IsNull((LJson.GetValue('metadata') as TJSONObject).GetValue('manufacture'),
+      'The deprecated manufacture element is not written');
+    LManufacture := (LJson.GetValue('metadata') as TJSONObject).GetValue('manufacturer') as TJSONObject;
     Assert.IsNotNull(LManufacture);
     Assert.IsNull(LManufacture.GetValue('name'), 'An email contact must not invent a name');
     LContacts := LManufacture.GetValue('contact') as TJSONArray;
@@ -334,7 +368,7 @@ begin
   end;
 end;
 
-procedure TBsiTr03183Tests.Json_CreatorUrl_WritesManufactureUrl;
+procedure TBsiTr03183Tests.Json_CreatorUrl_WritesManufacturerUrl;
 var
   LWriter: ISbomWriter;
   LJson, LManufacture: TJSONObject;
@@ -345,7 +379,8 @@ begin
   Assert.IsTrue(LWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
   LJson := LoadJson;
   try
-    LManufacture := (LJson.GetValue('metadata') as TJSONObject).GetValue('manufacture') as TJSONObject;
+    Assert.IsNull((LJson.GetValue('metadata') as TJSONObject).GetValue('manufacture'));
+    LManufacture := (LJson.GetValue('metadata') as TJSONObject).GetValue('manufacturer') as TJSONObject;
     LUrls := LManufacture.GetValue('url') as TJSONArray;
     Assert.AreEqual(NativeInt(1), NativeInt(LUrls.Count));
     Assert.AreEqual('https://example.com/sbom', LUrls.Items[0].Value);
@@ -355,7 +390,7 @@ begin
   end;
 end;
 
-procedure TBsiTr03183Tests.Json_EmptyCreator_OmitsManufacture;
+procedure TBsiTr03183Tests.Json_EmptyCreator_OmitsManufacturer;
 var
   LWriter: ISbomWriter;
   LJson: TJSONObject;
@@ -364,6 +399,7 @@ begin
   Assert.IsTrue(LWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
   LJson := LoadJson;
   try
+    Assert.IsNull((LJson.GetValue('metadata') as TJSONObject).GetValue('manufacturer'));
     Assert.IsNull((LJson.GetValue('metadata') as TJSONObject).GetValue('manufacture'));
     Assert.IsNotNull(LJson.GetValue('compositions'));
   finally
@@ -374,8 +410,8 @@ end;
 procedure TBsiTr03183Tests.Xml_FileComponent_HashAndPropertyOrder;
 var
   LWriter: ISbomWriter;
-  LContent, LComponent: string;
-  LHash256, LHash512, LPurl, LFileName, LExecutable: Integer;
+  LContent, LComponent, LRefs: string;
+  LHash256, LHash512, LPurl, LFileName, LExecutable, LExt: Integer;
 begin
   FArtefacts.Add(MakeArtefact('TestApp.exe', 'application', cSha256, cSha512, 100));
   LWriter := TCycloneDxXmlWriter.Create;
@@ -385,12 +421,18 @@ begin
   LHash256 := Pos('<hash alg="SHA-256">' + cSha256 + '</hash>', LComponent);
   LHash512 := Pos('<hash alg="SHA-512">' + cSha512 + '</hash>', LComponent);
   LPurl := Pos('<purl>', LComponent);
+  LExt := Pos('<externalReferences>', LComponent);
   LFileName := Pos('<property name="bsi:component:filename">TestApp.exe</property>', LComponent);
   LExecutable := Pos('<property name="bsi:component:executable">executable</property>', LComponent);
   Assert.IsTrue(LHash256 > 0, LComponent);
   Assert.IsTrue(LHash256 < LHash512, LComponent);
   Assert.IsTrue(LHash512 < LPurl, LComponent);
-  Assert.IsTrue(LPurl < LFileName, LComponent);
+  Assert.IsTrue(LPurl < LExt, LComponent);
+  Assert.IsTrue(LExt < LFileName, LComponent);
+  LRefs := SliceBetween(LComponent, '<externalReferences>', '</externalReferences>');
+  Assert.IsTrue(Pos('<reference type="distribution">', LRefs) > 0, LRefs);
+  Assert.IsTrue(Pos('<url>file:TestApp.exe</url>', LRefs) <
+    Pos('<hash alg="SHA-512">' + cSha512 + '</hash>', LRefs), LRefs);
   Assert.IsTrue(LFileName < LExecutable, LComponent);
   Assert.IsTrue(LExecutable < Pos('<property name="bsi:component:archive">no archive</property>', LComponent),
     LComponent);
@@ -411,13 +453,14 @@ begin
   Assert.IsTrue(LWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
   LContent := ReadOutput;
   LMeta := SliceBetween(LContent, '<metadata>', '</metadata>');
-  Assert.IsTrue(Pos('</component>', LMeta) < Pos('<manufacture>', LMeta), LMeta);
-  LManufacture := SliceBetween(LMeta, '<manufacture>', '</manufacture>');
+  Assert.IsTrue(Pos('</component>', LMeta) < Pos('<manufacturer>', LMeta), LMeta);
+  Assert.AreEqual(0, Pos('<manufacture>', LMeta), LMeta);
+  LManufacture := SliceBetween(LMeta, '<manufacturer>', '</manufacturer>');
   Assert.IsTrue(Pos('<email>sbom@example.com</email>', LManufacture) > 0, LManufacture);
   Assert.AreEqual(0, Pos('<name>', LManufacture), LManufacture);
 end;
 
-procedure TBsiTr03183Tests.Xml_CreatorUrl_WritesManufactureUrl;
+procedure TBsiTr03183Tests.Xml_CreatorUrl_WritesManufacturerUrl;
 var
   LWriter: ISbomWriter;
   LMeta: string;
@@ -426,9 +469,10 @@ begin
   LWriter := TCycloneDxXmlWriter.Create;
   Assert.IsTrue(LWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
   LMeta := SliceBetween(ReadOutput, '<metadata>', '</metadata>');
-  Assert.IsTrue(Pos('<manufacture>', LMeta) > Pos('</component>', LMeta), LMeta);
+  Assert.IsTrue(Pos('<manufacturer>', LMeta) > Pos('</component>', LMeta), LMeta);
+  Assert.AreEqual(0, Pos('<manufacture>', LMeta), LMeta);
   Assert.IsTrue(Pos('<url>https://example.com/sbom</url>',
-    SliceBetween(LMeta, '<manufacture>', '</manufacture>')) > 0, LMeta);
+    SliceBetween(LMeta, '<manufacturer>', '</manufacturer>')) > 0, LMeta);
 end;
 
 procedure TBsiTr03183Tests.Spdx_FileComponent_HasSha512FileNameAndComment;
@@ -573,7 +617,7 @@ const
 var
   LJsonWriter, LXmlWriter, LSpdxWriter: ISbomWriter;
   LJson, LLibrary, LSupplier, LLicense, LPackage, LRef: TJSONObject;
-  LContacts, LRefs: TJSONArray;
+  LContacts, LRefs, LLicences: TJSONArray;
   LContent, LLibraryXml: string;
   I: Integer;
   LSawWebsite: Boolean;
@@ -597,15 +641,27 @@ begin
     LContacts := LSupplier.GetValue('contact') as TJSONArray;
     Assert.AreEqual('dev@example.com',
       (LContacts.Items[0] as TJSONObject).GetValue<string>('email'));
-    LLicense := ((LLibrary.GetValue('licenses') as TJSONArray).Items[0] as TJSONObject)
-      .GetValue('license') as TJSONObject;
+    LLicences := LLibrary.GetValue('licenses') as TJSONArray;
+    Assert.AreEqual(NativeInt(2), NativeInt(LLicences.Count));
+    LLicense := (LLicences.Items[0] as TJSONObject).GetValue('license') as TJSONObject;
     Assert.AreEqual('MIT', LLicense.GetValue<string>('id'));
+    Assert.AreEqual('concluded', LLicense.GetValue<string>('acknowledgement'));
+    LLicense := (LLicences.Items[1] as TJSONObject).GetValue('license') as TJSONObject;
+    Assert.AreEqual('MIT', LLicense.GetValue<string>('id'));
+    Assert.AreEqual('declared', LLicense.GetValue<string>('acknowledgement'));
+    Assert.IsNull(LLibrary.GetValue('hashes'));
+    LRefs := LLibrary.GetValue('externalReferences') as TJSONArray;
+    Assert.AreEqual('website', (LRefs.Items[0] as TJSONObject).GetValue<string>('type'));
 
     LLibrary := FindNamed(LJson.GetValue('components') as TJSONArray, 'PayLib');
-    LLicense := ((LLibrary.GetValue('licenses') as TJSONArray).Items[0] as TJSONObject)
-      .GetValue('license') as TJSONObject;
+    LLicences := LLibrary.GetValue('licenses') as TJSONArray;
+    Assert.AreEqual(NativeInt(2), NativeInt(LLicences.Count));
+    LLicense := (LLicences.Items[0] as TJSONObject).GetValue('license') as TJSONObject;
     Assert.AreEqual('Commercial', LLicense.GetValue<string>('name'));
+    Assert.AreEqual('concluded', LLicense.GetValue<string>('acknowledgement'));
     Assert.IsNull(LLicense.GetValue('id'));
+    LLicense := (LLicences.Items[1] as TJSONObject).GetValue('license') as TJSONObject;
+    Assert.AreEqual('declared', LLicense.GetValue<string>('acknowledgement'));
     Assert.IsNull((LLibrary.GetValue('supplier') as TJSONObject).GetValue('contact'));
   finally
     LJson.Free;
@@ -616,7 +672,11 @@ begin
   LContent := ReadOutput;
   LLibraryXml := SliceBetween(LContent, 'bom-ref="manifest-0"', '</component>');
   Assert.IsTrue(Pos('<version>1.2.3</version>', LLibraryXml) > 0, LLibraryXml);
-  Assert.IsTrue(Pos('<id>MIT</id>', LLibraryXml) > 0, LLibraryXml);
+  Assert.IsTrue(Pos('<license acknowledgement="concluded">', LLibraryXml) <
+    Pos('<id>MIT</id>', LLibraryXml), LLibraryXml);
+  Assert.IsTrue(Pos('<license acknowledgement="declared">', LLibraryXml) >
+    Pos('<license acknowledgement="concluded">', LLibraryXml), LLibraryXml);
+  Assert.AreEqual(0, Pos('type="distribution"', LLibraryXml), LLibraryXml);
   Assert.IsTrue(Pos('<email>dev@example.com</email>', LLibraryXml) >
     Pos('</name>', LLibraryXml), LLibraryXml);
   Assert.AreEqual(0, Pos('bsi:component:filename', LLibraryXml), LLibraryXml);

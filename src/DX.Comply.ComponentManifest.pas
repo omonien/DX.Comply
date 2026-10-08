@@ -237,7 +237,7 @@ procedure ApplyManifestCycloneDxJson(const AManifestJson: string;
   const AProjectBomRef: string);
 
 /// <summary>
-/// Appends CycloneDX 1.5 library elements. Child order follows bom-1.5.xsd.
+/// Appends CycloneDX 1.6 library elements. Child order follows bom-1.6.xsd.
 /// </summary>
 procedure AppendManifestLibrariesXml(ALines: TStrings; const AManifestJson: string;
   const AArtefacts: TArtefactList; AIndentLevel: Integer);
@@ -1144,6 +1144,23 @@ var
   LValue: string;
   LLicences: TJSONArray;
   LWrapper, LLicence: TJSONObject;
+
+  procedure AddNamed(const AAcknowledgement: string);
+  begin
+    LWrapper := TJSONObject.Create;
+    LLicences.Add(LWrapper);
+    LLicence := TJSONObject.Create;
+    LWrapper.AddPair('license', LLicence);
+    if LKind = lkSpdxId then
+      LLicence.AddPair('id', LValue)
+    else
+      LLicence.AddPair('name', LValue);
+    // acknowledgement sits on the license object in bom-1.6.schema.json.
+    LLicence.AddPair('acknowledgement', AAcknowledgement);
+    if AEntry.LicenceUrl <> '' then
+      LLicence.AddPair('url', AEntry.LicenceUrl);
+  end;
+
 begin
   LKind := ClassifyLicence(AEntry.Licence, LValue);
   if LKind = lkNone then
@@ -1151,21 +1168,23 @@ begin
 
   LLicences := TJSONArray.Create;
   AComponent.AddPair('licenses', LLicences);
-  LWrapper := TJSONObject.Create;
-  LLicences.Add(LWrapper);
 
   if LKind = lkExpression then
-    LWrapper.AddPair('expression', LValue)
+  begin
+    // licenseChoice allows one expression. That slot is the distribution
+    // licence we assert, so the acknowledgement is concluded. A second
+    // declared copy would not match the schema.
+    LWrapper := TJSONObject.Create;
+    LLicences.Add(LWrapper);
+    LWrapper.AddPair('expression', LValue);
+    LWrapper.AddPair('acknowledgement', 'concluded');
+  end
   else
   begin
-    LLicence := TJSONObject.Create;
-    LWrapper.AddPair('license', LLicence);
-    if LKind = lkSpdxId then
-      LLicence.AddPair('id', LValue)
-    else
-      LLicence.AddPair('name', LValue);
-    if AEntry.LicenceUrl <> '' then
-      LLicence.AddPair('url', AEntry.LicenceUrl);
+    // The manifest row declares the licence, and it is also the distribution
+    // licence we assert. Same id or name, once concluded and once declared.
+    AddNamed('concluded');
+    AddNamed('declared');
   end;
 end;
 
@@ -1381,10 +1400,19 @@ var
       Exit;
     AddLine(ALevel, '<licenses>');
     if LKind = lkExpression then
-      AddLine(ALevel + 1, '<expression>' + EscapeXml(LValue) + '</expression>')
+      AddLine(ALevel + 1, '<expression acknowledgement="concluded">' +
+        EscapeXml(LValue) + '</expression>')
     else
     begin
-      AddLine(ALevel + 1, '<license>');
+      AddLine(ALevel + 1, '<license acknowledgement="concluded">');
+      if LKind = lkSpdxId then
+        AddLine(ALevel + 2, '<id>' + EscapeXml(LValue) + '</id>')
+      else
+        AddLine(ALevel + 2, '<name>' + EscapeXml(LValue) + '</name>');
+      if AEntry.LicenceUrl <> '' then
+        AddLine(ALevel + 2, '<url>' + EscapeXml(AEntry.LicenceUrl) + '</url>');
+      AddLine(ALevel + 1, '</license>');
+      AddLine(ALevel + 1, '<license acknowledgement="declared">');
       if LKind = lkSpdxId then
         AddLine(ALevel + 2, '<id>' + EscapeXml(LValue) + '</id>')
       else
@@ -1400,7 +1428,7 @@ var
   var
     LPurl: string;
   begin
-    // bom-1.5.xsd component order: supplier, author, name, version,
+    // bom-1.6.xsd component order: supplier, author, name, version,
     // hashes, licenses, purl, externalReferences.
     AddLine(AIndentLevel, '<component type="' + EscapeXml(AEntry.ComponentType) +
       '" bom-ref="' + EscapeXml(ABomRef) + '">');
@@ -1430,8 +1458,7 @@ var
     if AEntry.VendorUrl <> '' then
     begin
       AddLine(AIndentLevel + 1, '<externalReferences>');
-      AddLine(AIndentLevel + 2, '<reference>');
-      AddLine(AIndentLevel + 3, '<type>website</type>');
+      AddLine(AIndentLevel + 2, '<reference type="website">');
       AddLine(AIndentLevel + 3, '<url>' + EscapeXml(AEntry.VendorUrl) + '</url>');
       AddLine(AIndentLevel + 2, '</reference>');
       AddLine(AIndentLevel + 1, '</externalReferences>');

@@ -2,7 +2,7 @@
 
 [![Delphi Supported Versions](https://img.shields.io/badge/Delphi-11%20|%2012%20|%2013-blue?logo=delphi)](https://www.embarcadero.com/products/delphi)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![CycloneDX](https://img.shields.io/badge/SBOM-CycloneDX%201.5-informational?logo=owasp)](https://cyclonedx.org/)
+[![CycloneDX](https://img.shields.io/badge/SBOM-CycloneDX%201.6-informational?logo=owasp)](https://cyclonedx.org/)
 [![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey?logo=windows)](https://www.microsoft.com/windows)
 [![EU CRA](https://img.shields.io/badge/EU%20CRA-2024%2F2847-orange)](https://eur-lex.europa.eu/eli/reg/2024/2847/oj/eng)
 
@@ -38,12 +38,12 @@ DX.Comply produces build evidence and that component list from a RAD Studio proj
 
 > **See it for yourself:** [Full example SBOM (JSON)](docs/examples/AlienInvasion.bom.json) and [full example HTML report](docs/examples/AlienInvasion.bom.report.html), generated from the Embarcadero *AlienInvasion* sample project.
 
-DX.Comply writes **CycloneDX 1.5** JSON by default. Each linked unit is a `library` component, with SHA-256 and SHA-512 hashes when the file could be opened, and with an origin classification:
+DX.Comply writes **CycloneDX 1.6** JSON by default. Each linked unit is a `library` component, with SHA-256 and SHA-512 hashes when the file could be opened, and with an origin classification:
 
 ```json
 {
   "bomFormat": "CycloneDX",
-  "specVersion": "1.5",
+  "specVersion": "1.6",
   "metadata": {
     "component": {
       "type": "application",
@@ -58,6 +58,15 @@ DX.Comply writes **CycloneDX 1.5** JSON by default. Each linked unit is a `libra
       "hashes": [
         { "alg": "SHA-256", "content": "d0be8d3ad469b93c...f6cee44" },
         { "alg": "SHA-512", "content": "9c1e...ab70" }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "file:AlienInvasion.exe",
+          "hashes": [
+            { "alg": "SHA-512", "content": "9c1e...ab70" }
+          ]
+        }
       ],
       "properties": [
         { "name": "bsi:component:filename", "value": "AlienInvasion.exe" },
@@ -186,9 +195,9 @@ DX.Comply produces **one machine-readable SBOM** and, if you ask for them, one o
 
 | Format | Version | Description |
 |---|---|---|
-| **CycloneDX JSON** | 1.5 | Default. A common SBOM format for tooling |
-| **CycloneDX XML** | 1.5 | XML variant for XML-based toolchains |
-| **SPDX JSON** | 2.3 | SPDX 2.3 JSON |
+| **CycloneDX JSON** | 1.6 | Default. A common SBOM format for tooling |
+| **CycloneDX XML** | 1.6 | XML variant for XML-based toolchains |
+| **SPDX JSON** | 2.3 | SPDX 2.3 JSON. SPDX 3.0.1 is out of scope |
 
 ### Human-readable companion reports (optional, opt-in via `--report=<format>`)
 
@@ -201,11 +210,11 @@ DX.Comply produces **one machine-readable SBOM** and, if you ask for them, one o
 
 After it writes a file, DX.Comply runs its own structural check of required fields and value shapes. That check is not a validation against an official schema.
 
-CycloneDX JSON from the example in this repository passes [`check-jsonschema`](https://github.com/python-jsonschema/check-jsonschema) against the [official CycloneDX 1.5 JSON schema](http://cyclonedx.org/schema/bom-1.5.schema.json). SPDX JSON and CycloneDX XML are not checked against official schemas inside the tool.
+The checked-in AlienInvasion example is a CycloneDX 1.5 document from an earlier run. It was not regenerated as 1.6, and this README does not claim that it passes the 1.6 schema. New CycloneDX output uses `specVersion` 1.6. The tool's own check is structural. It is not a validation against the official schema. SPDX JSON and CycloneDX XML are not checked against official schemas inside the tool.
 
 ### BSI TR-03183-2
 
-[BSI TR-03183-2](https://www.bsi.bund.de/dok/TR-03183-en) version 2.1.0 (20 August 2025) asks for CycloneDX 1.6 or later, or SPDX 3.0.1 or later. DX.Comply stays on CycloneDX 1.5 and SPDX 2.3. It writes the fields it can fill from the build or from values you set. That is not a certification, and it is not full coverage of the technical guideline. The field list is in [docs/BSI-TR-03183-2.md](docs/BSI-TR-03183-2.md).
+[BSI TR-03183-2](https://www.bsi.bund.de/dok/TR-03183-en) version 2.1.0 (20 August 2025) asks for CycloneDX 1.6 or later, or SPDX 3.0.1 or later. CycloneDX output is 1.6. SPDX stays at 2.3. SPDX 3.0.1 is out of scope. DX.Comply writes the fields it can fill from the build or from values you set. That is not a certification, and it is not full coverage of the technical guideline. The field list is in [docs/BSI-TR-03183-2.md](docs/BSI-TR-03183-2.md).
 
 Set the SBOM creator with `--sbom-creator=<email-or-url>` or with `sbomCreator` in `.dxcomply.json`. Use an email address or an http(s) URL. Leave it unset when you do not have one. A company name is rejected.
 
@@ -354,7 +363,7 @@ No internet connection is required. All processing is local.
 | [Architecture](docs/Architecture.md) | Engine pipeline, component overview, unit origin classification |
 | [CI Integration](docs/CI-Integration.md) | Command-line usage, GitHub Actions examples, CI configuration |
 | [Legacy Support](docs/LegacySupport.md) | MAP files from older Delphi versions, and which project files the CLI accepts |
-| [Example SBOM (JSON)](docs/examples/AlienInvasion.bom.json) | Full CycloneDX 1.5 SBOM generated from the AlienInvasion sample |
+| [Example SBOM (JSON)](docs/examples/AlienInvasion.bom.json) | Stored CycloneDX 1.5 sample from an earlier AlienInvasion run. Current output is 1.6 |
 | [Component manifest sample](docs/samples/components.sample.json) | Optional components.json (supplier, licence, version, type, package URL) |
 | [Example HTML Report](docs/examples/AlienInvasion.bom.report.html) | Human-readable SBOM report for the same project |
 

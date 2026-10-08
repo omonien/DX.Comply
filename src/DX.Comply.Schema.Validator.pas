@@ -5,8 +5,8 @@
 ///
 /// <remarks>
 /// Provides TSbomValidator with deep structural validation of generated SBOMs:
-/// - CycloneDX 1.5 JSON: validates required fields, component structure, hash format
-/// - CycloneDX 1.5 XML: validates namespace, element presence, attribute correctness
+/// - CycloneDX 1.6 JSON: validates required fields, component structure, hash format
+/// - CycloneDX 1.6 XML: validates namespace, element presence, attribute correctness
 /// - SPDX 2.3 JSON: validates document structure, package fields, relationships
 ///
 /// Validation errors are collected in a TValidationResult record which contains
@@ -14,9 +14,9 @@
 ///
 /// Since full JSON Schema / XSD validation would require heavy external dependencies,
 /// this validator performs structural checks for required fields and value
-/// constraints. CycloneDX XML checks also enforce the 1.5 child order of
+/// constraints. CycloneDX XML checks also enforce the 1.6 child order of
 /// metadata and component. That is still not a substitute for xmllint against
-/// bom-1.5.xsd.
+/// bom-1.6.xsd.
 /// </remarks>
 ///
 /// <copyright>
@@ -73,11 +73,11 @@ type
     constructor Create;
     destructor Destroy; override;
     /// <summary>
-    /// Validates a CycloneDX 1.5 JSON document.
+    /// Validates a CycloneDX 1.6 JSON document.
     /// </summary>
     function ValidateCycloneDxJson(const AContent: string): TValidationResult;
     /// <summary>
-    /// Validates a CycloneDX 1.5 XML document.
+    /// Validates a CycloneDX 1.6 XML document.
     /// </summary>
     function ValidateCycloneDxXml(const AContent: string): TValidationResult;
     /// <summary>
@@ -91,7 +91,7 @@ type
   end;
 
 /// <summary>
-/// Returns CycloneDX 1.5 sequence errors for metadata and component children.
+/// Returns CycloneDX 1.6 sequence errors for metadata and component children.
 /// An empty array means those elements are in an order the XSD accepts.
 /// This does not validate the rest of the document.
 /// </summary>
@@ -515,14 +515,15 @@ end;
 
 function CycloneDxXmlSequenceErrors(const AContent: string): TArray<string>;
 const
-  cMetadataOrder: array[0..8] of string = (
+  cMetadataOrder: array[0..9] of string = (
     'timestamp', 'lifecycles', 'tools', 'authors', 'component',
-    'manufacture', 'supplier', 'licenses', 'properties');
-  cComponentOrder: array[0..22] of string = (
-    'supplier', 'author', 'publisher', 'group', 'name', 'version',
-    'description', 'scope', 'hashes', 'licenses', 'copyright', 'cpe',
-    'purl', 'swid', 'modified', 'pedigree', 'externalReferences',
-    'properties', 'components', 'evidence', 'releaseNotes', 'modelCard', 'data');
+    'manufacturer', 'manufacture', 'supplier', 'licenses', 'properties');
+  cComponentOrder: array[0..28] of string = (
+    'supplier', 'manufacturer', 'authors', 'author', 'publisher', 'group',
+    'name', 'version', 'description', 'scope', 'hashes', 'licenses',
+    'copyright', 'cpe', 'purl', 'omniborId', 'swhid', 'swid', 'modified',
+    'pedigree', 'externalReferences', 'properties', 'components', 'evidence',
+    'releaseNotes', 'modelCard', 'data', 'cryptoProperties', 'tags');
 var
   LErrors: TList<string>;
   LPos: Integer;
@@ -551,7 +552,7 @@ var
         Continue;
       if LIndex < LLast then
         LErrors.Add('<' + AParent + '>: <' + ANames[I] +
-          '> is out of CycloneDX 1.5 sequence order');
+          '> is out of CycloneDX 1.6 sequence order');
       LLast := LIndex;
     end;
   end;

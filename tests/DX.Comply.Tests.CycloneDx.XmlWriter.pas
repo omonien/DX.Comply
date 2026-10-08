@@ -4,7 +4,7 @@
 /// </summary>
 ///
 /// <remarks>
-/// Verifies CycloneDX 1.5 XML output: namespace, required elements,
+/// Verifies CycloneDX 1.6 XML output: namespace, required elements,
 /// component entries, hash embedding, metadata, dependency section,
 /// serial-number uniqueness, validation logic, and XML escaping.
 /// </remarks>
@@ -106,7 +106,7 @@ type
     procedure Write_SpecialChars_AreEscaped;
 
     /// <summary>
-    /// Metadata children must follow the CycloneDX 1.5 sequence.
+    /// Metadata children must follow the CycloneDX 1.6 sequence.
     /// The metadata component may contain its own properties element, so the
     /// check uses the properties element that is a direct child of metadata.
     /// </summary>
@@ -212,7 +212,7 @@ var
 begin
   FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo);
   LContent := LoadOutputContent;
-  Assert.IsTrue(Pos('http://cyclonedx.org/schema/bom/1.5', LContent) > 0);
+  Assert.IsTrue(Pos('http://cyclonedx.org/schema/bom/1.6', LContent) > 0);
 end;
 
 procedure TCycloneDxXmlWriterTests.Write_ContainsSerialNumber;
@@ -363,7 +363,7 @@ begin
     'metadata properties must follow the metadata component. properties at ' + LPropertiesAt);
 
   // <tools><tool><name> sits before the metadata component, so supplier and
-  // name must be compared inside that component. CycloneDX 1.5 places
+  // name must be compared inside that component. CycloneDX 1.6 places
   // supplier before name there.
   LComponentStart := Pos('<component ', LMetadata);
   LComponentEnd := Pos('</component>', LMetadata);
@@ -378,7 +378,7 @@ begin
     'component supplier must precede name. supplier at ' + LSupplierAt +
     ', name at ' + LNameAt);
   Assert.AreEqual(NativeInt(0), NativeInt(Length(CycloneDxXmlSequenceErrors(LContent))),
-    'The written document must satisfy the CycloneDX 1.5 element order');
+    'The written document must satisfy the CycloneDX 1.6 element order');
 end;
 
 procedure TCycloneDxXmlWriterTests.Write_ComponentElementOrder_HashesBeforePurl;
@@ -404,7 +404,7 @@ procedure TCycloneDxXmlWriterTests.Validate_OutOfOrderElements_ReturnsFalse;
 const
   cOutOfOrder =
     '<?xml version="1.0" encoding="UTF-8"?>' +
-    '<bom xmlns="http://cyclonedx.org/schema/bom/1.5" version="1" ' +
+    '<bom xmlns="http://cyclonedx.org/schema/bom/1.6" version="1" ' +
     'serialNumber="urn:uuid:12345678-1234-1234-1234-123456789012">' +
     '<metadata>' +
     '<timestamp>2026-02-24T10:00:00+01:00</timestamp>' +
