@@ -6,9 +6,13 @@
 /// <remarks>
 /// GetIt and the installer do not ship the repository tree, so the info page
 /// cannot depend on finding README.md next to src\DX.Comply.Engine.dproj.
-/// The package links DX.Comply.IDE.Resources.rc. A development checkout can
-/// still fall back to the file when the resource is absent.
-/// HInstance is this module. Inside the design package that is the BPL.
+/// The unit links the committed file DX.Comply.IDE.Resources.res, the same
+/// pattern as the splash bitmap. Regenerate it with
+/// tools\build-ide-resources.py when README.md or the icon files change.
+/// EmbeddedReadme_MatchesRepositoryFile fails when the embedded README does
+/// not match README.md at the repository root.
+/// A development checkout can still fall back to the file when the resource
+/// is absent. HInstance is this module. Inside the design package that is the BPL.
 /// </remarks>
 ///
 /// <copyright>
@@ -21,6 +25,7 @@ unit DX.Comply.IDE.Resources;
 interface
 
 uses
+  System.SysUtils,
   Winapi.Windows;
 
 const
@@ -56,8 +61,9 @@ function TryLoadDXComplyResourceText(AModule: HMODULE; const AResourceName: stri
 implementation
 
 uses
-  System.Classes,
-  System.SysUtils;
+  System.Classes;
+
+{$R DX.Comply.IDE.Resources.res}
 
 function TryLoadDXComplyResourceBytes(AModule: HMODULE; const AResourceName: string;
   out ABytes: TBytes): Boolean;

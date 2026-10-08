@@ -1,7 +1,6 @@
 ﻿package DX.Comply.IDE;
 
 {$R *.res}
-{$R DX.Comply.IDE.Resources.res DX.Comply.IDE.Resources.rc}
 {$ALIGN 8}
 {$ASSERTIONS ON}
 {$BOOLEVAL OFF}

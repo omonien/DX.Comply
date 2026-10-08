@@ -19,7 +19,6 @@ program DX.Comply.Tests;
 {$APPTYPE CONSOLE}
 
 {$R *.res}
-{$R ..\src\DX.Comply.IDE.Resources.res ..\src\DX.Comply.IDE.Resources.rc}
 
 uses
   System.SysUtils,

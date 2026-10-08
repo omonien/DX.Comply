@@ -1,3 +1,8 @@
+// Same three files as tools\build-ide-resources.py. The package links the
+// committed src\DX.Comply.IDE.Resources.res from DX.Comply.IDE.Resources.pas.
+// Do not also compile this script into the package: the names would be defined twice.
+// EmbeddedReadme_MatchesRepositoryFile fails when DXCOMPLYREADME is stale
+// relative to README.md. Regenerate the .res and commit it with the README change.
 DXCOMPLYREADME RCDATA "..\\README.md"
 DXCOMPLYICONBMP RCDATA "..\\assets\\DX.Comply.Icon.bmp"
 DXCOMPLYICONPNG RCDATA "..\\assets\\DX.Comply.Icon.png"

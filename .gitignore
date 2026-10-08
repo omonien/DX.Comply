@@ -11,6 +11,7 @@
 *.dll
 *.res
 !src/DX.Comply.IDE.Splash.res
+!src/DX.Comply.IDE.Resources.res
 *.rsm
 *.map
 *.tvsconfig
