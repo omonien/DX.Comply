@@ -2,7 +2,7 @@
 
 ## Overview
 
-The release installer is built for Delphi 13 and registers the IDE plugin there. The command line tool is separate. It does not compile the project. It reads a `.dproj`, `.dpk`, or `.groupproj`, or a Delphi 7 `.dpr` with its `.dof` and `.cfg`, and a detailed MAP file, so the Delphi version that wrote the MAP file does not have to be Delphi 13.
+The release installer is built for Delphi 13 and registers the IDE plugin there. The command line tool is separate. GetIt installs the IDE plugin only and does not include `dxcomply.exe`. The executable is in the release ZIP and in the installer `bin` folder, or you can build `src/CLI/DX.Comply.CLI.dproj`. It does not compile the project. It reads a `.dproj`, `.dpk`, or `.groupproj`, or a Delphi 7 `.dpr` with its `.dof` and `.cfg`, and a detailed MAP file, so the Delphi version that wrote the MAP file does not have to be Delphi 13.
 
 The MAP file lists the units linked into the executable. DX.Comply turns that list into a CycloneDX or SPDX SBOM, with a hash where it could open the file.
 
@@ -39,7 +39,7 @@ Build the project as usual. The compiler produces a `.map` file alongside the ex
 
 ### 3. Run the CLI Tool
 
-```bash
+```cmd
 dxcomply --project=MyApp.dpr --output=bom.json --no-pause
 ```
 
@@ -73,7 +73,7 @@ You can fully automate SBOM generation by adding a Post-Build Event to a dedicat
    - Set **Map file** to **Detailed** (Linker settings)
    - Add a Post-Build Event:
 
-```bash
+```cmd
 dxcomply --project="$(PROJECTPATH)" --output="$(OUTPUTDIR)bom.json" --no-pause
 ```
 
@@ -109,7 +109,7 @@ The critical part is `/p:DCC_MapFile=3`. This tells MSBuild to produce the detai
 
 If the MAP file is not in the default output directory that DX.Comply derives from the `.dproj`, you can specify the directory explicitly:
 
-```bash
+```cmd
 dxcomply --project=MyApp.dproj --map-dir=C:\builds\output --output=bom.json --no-pause
 ```
 
