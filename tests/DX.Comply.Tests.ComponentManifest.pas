@@ -263,7 +263,7 @@ begin
   FMetadata.ProductVersion := '1.0.0';
   FMetadata.Timestamp := '2026-01-01T00:00:00Z';
   FMetadata.ToolName := 'DX.Comply';
-  FMetadata.ToolVersion := '1.3.0.0';
+  FMetadata.ToolVersion := '2.0.0.0';
   FProjectInfo := TProjectInfo.Create;
   FProjectInfo.ProjectName := 'TestApp';
   FProjectInfo.Version := '1.0.0';
