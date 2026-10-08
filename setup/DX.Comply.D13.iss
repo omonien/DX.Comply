@@ -19,6 +19,7 @@
 AppId={{F4A7E2B1-8C3D-4E5F-9A1B-2C3D4E5F6A7B}
 AppName={#MyAppName} for {#DelphiName}
 AppVersion={#MyAppVersion}
+VersionInfoVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 DefaultDirName={localappdata}\{#MyAppName}
