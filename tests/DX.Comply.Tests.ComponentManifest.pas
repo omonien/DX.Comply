@@ -856,8 +856,8 @@ begin
   LEnd := Pos('</component>', LContent, LStart);
   LLibrary := Copy(LContent, LStart, LEnd - LStart);
   Assert.IsTrue(Pos('<supplier>', LLibrary) < Pos('<author>', LLibrary), LLibrary);
-  Assert.IsTrue(Pos('<author>', LLibrary) < Pos('<name>', LLibrary), LLibrary);
-  Assert.IsTrue(Pos('<name>', LLibrary) < Pos('<version>', LLibrary), LLibrary);
+  Assert.IsTrue(Pos('<author>', LLibrary) < Pos('<name>', LLibrary, Pos('</supplier>', LLibrary)), LLibrary);
+  Assert.IsTrue(Pos('<name>', LLibrary, Pos('</supplier>', LLibrary)) < Pos('<version>', LLibrary), LLibrary);
   Assert.IsTrue(Pos('<version>', LLibrary) < Pos('<licenses>', LLibrary), LLibrary);
   Assert.IsTrue(Pos('<licenses>', LLibrary) < Pos('<purl>', LLibrary), LLibrary);
   Assert.IsTrue(Pos('<purl>', LLibrary) < Pos('<externalReferences>', LLibrary), LLibrary);
