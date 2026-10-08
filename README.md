@@ -26,7 +26,7 @@ DX.Comply produces build evidence and that component list from a RAD Studio proj
 
 ## Screenshots
 
-*Generating an SBOM for the Embarcadero AlienInvasion sample project:*
+*Generating an SBOM in the RAD Studio IDE:*
 
 | Build Confirmation | Progress and MAP Build | HTML SBOM Report |
 |:---:|:---:|:---:|
@@ -36,7 +36,7 @@ DX.Comply produces build evidence and that component list from a RAD Studio proj
 
 ## SBOM Output Example
 
-> **See it for yourself:** [Full example SBOM (JSON)](docs/examples/AlienInvasion.bom.json) and [full example HTML report](docs/examples/AlienInvasion.bom.report.html), generated from the Embarcadero *AlienInvasion* sample project.
+> **See it for yourself:** [Previous example SBOM (JSON)](docs/examples/AlienInvasion.bom.json) and [previous HTML report](docs/examples/AlienInvasion.bom.report.html). The reference sample is ConwaysLifeFMX from [RADStudio13Demos](https://github.com/Embarcadero/RADStudio13Demos.git), project `Object Pascal/RTL/Parallel Library/FMX/ConwaysLifeFMX.dproj`, built Release/Win32 with a map file. The example SBOM is regenerated from that demo and will replace `docs/examples/AlienInvasion.bom.json` as `docs/examples/ConwaysLifeFMX.cdx.json`. That file is not committed yet. The fragment below still uses names from the previous file.
 
 DX.Comply writes **CycloneDX 1.6** JSON by default. Each linked unit is a `library` component, with SHA-256 and SHA-512 hashes when the file could be opened, and with an origin classification:
 
@@ -214,7 +214,7 @@ DX.Comply produces **one machine-readable SBOM** and, if you ask for them, one o
 
 After it writes a file, DX.Comply runs its own structural check of required fields and value shapes. That check is not a validation against an official schema.
 
-The checked-in AlienInvasion example is a CycloneDX 1.5 document from an earlier run. It was not regenerated as 1.6, and this README does not claim that it passes the 1.6 schema. New CycloneDX output uses `specVersion` 1.6. The tool's own check is structural. It is not a validation against the official schema. SPDX JSON and CycloneDX XML are not checked against official schemas inside the tool.
+The checked-in file `docs/examples/AlienInvasion.bom.json` is a CycloneDX 1.5 document from an earlier AlienInvasion run. It was not regenerated as 1.6, and this README does not claim that it passes the 1.6 schema. The reference sample is now ConwaysLifeFMX (`Object Pascal/RTL/Parallel Library/FMX/ConwaysLifeFMX.dproj` in [RADStudio13Demos](https://github.com/Embarcadero/RADStudio13Demos.git)), built Release/Win32 with a map file. The example SBOM is regenerated from that demo and will replace `docs/examples/AlienInvasion.bom.json`. New CycloneDX output uses `specVersion` 1.6. The tool's own check is structural. It is not a validation against the official schema. SPDX JSON and CycloneDX XML are not checked against official schemas inside the tool.
 
 ### BSI TR-03183-2
 
@@ -367,9 +367,9 @@ No internet connection is required. All processing is local.
 | [Architecture](docs/Architecture.md) | Engine pipeline, component overview, unit origin classification |
 | [CI Integration](docs/CI-Integration.md) | Command-line usage, GitHub Actions examples, CI configuration |
 | [Legacy Support](docs/LegacySupport.md) | MAP files from older Delphi versions, and which project files the CLI accepts |
-| [Example SBOM (JSON)](docs/examples/AlienInvasion.bom.json) | Stored CycloneDX 1.5 sample from an earlier AlienInvasion run. Current output is 1.6 |
+| [Example SBOM (JSON)](docs/examples/AlienInvasion.bom.json) | Previous AlienInvasion file, still CycloneDX 1.5. The example SBOM is regenerated from ConwaysLifeFMX (Release/Win32, map file) and will replace this file as `docs/examples/ConwaysLifeFMX.cdx.json`. |
 | [Component manifest sample](docs/samples/components.sample.json) | Optional components.json (supplier, licence, version, type, package URL) |
-| [Example HTML Report](docs/examples/AlienInvasion.bom.report.html) | Human-readable SBOM report for the same project |
+| [Example HTML Report](docs/examples/AlienInvasion.bom.report.html) | HTML report for the previous AlienInvasion example. It goes away with that file. |
 
 ---
 
