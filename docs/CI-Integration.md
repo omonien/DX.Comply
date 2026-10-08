@@ -232,14 +232,22 @@ technical documentation, including an SBOM, for **at least 10 years**. The SBOM
 from DX.Comply is build evidence and a component list. It is a starting point
 for that part of the file. It does not make a product compliant.
 
-The tool's own check of the written file is structural. CycloneDX JSON from the
-example in this repository passes the official CycloneDX 1.5 JSON schema.
-SPDX JSON and CycloneDX XML are not checked against official schemas inside
-the tool.
+The tool's own check of the written file is structural. The checked-in
+AlienInvasion example is a CycloneDX 1.5 document from an earlier run. It was
+not regenerated as 1.6. SPDX JSON and CycloneDX XML are not checked against
+official schemas inside the tool.
 
-BSI TR-03183-2 v2.1.0 asks for more than this output, including CycloneDX 1.6
-or later, SHA-512 hashes, a licence and a supplier on each component, and
-recursive dependencies. Matching that profile is on the roadmap.
+BSI TR-03183-2 version 2.1.0 asks for CycloneDX 1.6 or later, or SPDX 3.0.1
+or later. CycloneDX output is 1.6. SPDX stays at 2.3. SPDX 3.0.1 is out of
+scope. The CLI writes SHA-512 next to SHA-256, and on a deployable file it
+also writes that SHA-512 as an external reference of type distribution. It
+writes the file name and the executable, archive, and structured properties
+when the component has a file name. Pass `--sbom-creator` with an email
+address or an http(s) URL when you want that contact in the document. A
+component manifest supplies licence, version, and creator for third-party
+libraries. The dependency list is the direct grouped graph and is marked
+incomplete. Recursive dependencies are not resolved. See
+[BSI-TR-03183-2.md](BSI-TR-03183-2.md). This output is not a certification.
 
 Practical checklist:
 

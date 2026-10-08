@@ -136,7 +136,7 @@ begin
   Result :=
     '{' +
     '  "bomFormat": "CycloneDX",' +
-    '  "specVersion": "1.5",' +
+    '  "specVersion": "1.6",' +
     '  "serialNumber": "urn:uuid:12345678-1234-1234-1234-123456789012",' +
     '  "version": 1,' +
     '  "metadata": {' +
@@ -172,7 +172,7 @@ function TSchemaValidatorTests.MakeValidCycloneDxXml: string;
 begin
   Result :=
     '<?xml version="1.0" encoding="UTF-8"?>' +
-    '<bom xmlns="http://cyclonedx.org/schema/bom/1.5" version="1" ' +
+    '<bom xmlns="http://cyclonedx.org/schema/bom/1.6" version="1" ' +
     'serialNumber="urn:uuid:12345678-1234-1234-1234-123456789012">' +
     '  <metadata>' +
     '    <timestamp>2026-02-24T10:00:00+01:00</timestamp>' +
@@ -230,7 +230,7 @@ procedure TSchemaValidatorTests.CycloneDxJson_MissingBomFormat_ReportsError;
 var
   LResult: TValidationResult;
 begin
-  LResult := FValidator.ValidateCycloneDxJson('{"specVersion": "1.5", "version": 1, "metadata": {}, "components": []}');
+  LResult := FValidator.ValidateCycloneDxJson('{"specVersion": "1.6", "version": 1, "metadata": {}, "components": []}');
   Assert.IsFalse(LResult.IsValid);
   Assert.IsTrue(Length(LResult.Errors) > 0);
 end;
@@ -239,7 +239,7 @@ procedure TSchemaValidatorTests.CycloneDxJson_WrongBomFormat_ReportsError;
 var
   LResult: TValidationResult;
 begin
-  LResult := FValidator.ValidateCycloneDxJson('{"bomFormat": "SPDX", "specVersion": "1.5", "version": 1, "metadata": {}, "components": []}');
+  LResult := FValidator.ValidateCycloneDxJson('{"bomFormat": "SPDX", "specVersion": "1.6", "version": 1, "metadata": {}, "components": []}');
   Assert.IsFalse(LResult.IsValid);
 end;
 
@@ -247,7 +247,7 @@ procedure TSchemaValidatorTests.CycloneDxJson_MissingComponents_ReportsError;
 var
   LResult: TValidationResult;
 begin
-  LResult := FValidator.ValidateCycloneDxJson('{"bomFormat": "CycloneDX", "specVersion": "1.5", "version": 1, "metadata": {}}');
+  LResult := FValidator.ValidateCycloneDxJson('{"bomFormat": "CycloneDX", "specVersion": "1.6", "version": 1, "metadata": {}}');
   Assert.IsFalse(LResult.IsValid);
 end;
 
@@ -259,7 +259,7 @@ begin
   LJson :=
     '{' +
     '  "bomFormat": "CycloneDX",' +
-    '  "specVersion": "1.5",' +
+    '  "specVersion": "1.6",' +
     '  "version": 1,' +
     '  "metadata": {"timestamp": "2026-01-01T00:00:00Z"},' +
     '  "components": [' +
@@ -284,7 +284,7 @@ begin
   LJson :=
     '{' +
     '  "bomFormat": "CycloneDX",' +
-    '  "specVersion": "1.5",' +
+    '  "specVersion": "1.6",' +
     '  "version": 1,' +
     '  "metadata": {"timestamp": "2026-01-01T00:00:00Z"},' +
     '  "components": [' +
@@ -326,7 +326,7 @@ procedure TSchemaValidatorTests.CycloneDxXml_MissingMetadata_ReportsError;
 var
   LResult: TValidationResult;
 begin
-  LResult := FValidator.ValidateCycloneDxXml('<?xml version="1.0"?><bom xmlns="http://cyclonedx.org/schema/bom/1.5"><components></components></bom>');
+  LResult := FValidator.ValidateCycloneDxXml('<?xml version="1.0"?><bom xmlns="http://cyclonedx.org/schema/bom/1.6"><components></components></bom>');
   Assert.IsFalse(LResult.IsValid);
 end;
 
@@ -342,7 +342,7 @@ procedure TSchemaValidatorTests.CycloneDxXml_PropertiesBeforeTools_ReportsError;
 const
   cXml =
     '<?xml version="1.0" encoding="UTF-8"?>' +
-    '<bom xmlns="http://cyclonedx.org/schema/bom/1.5" version="1" ' +
+    '<bom xmlns="http://cyclonedx.org/schema/bom/1.6" version="1" ' +
     'serialNumber="urn:uuid:12345678-1234-1234-1234-123456789012">' +
     '<metadata>' +
     '<timestamp>2026-02-24T10:00:00+01:00</timestamp>' +
@@ -369,7 +369,7 @@ procedure TSchemaValidatorTests.CycloneDxXml_PurlBeforeHashes_ReportsError;
 const
   cXml =
     '<?xml version="1.0" encoding="UTF-8"?>' +
-    '<bom xmlns="http://cyclonedx.org/schema/bom/1.5" version="1" ' +
+    '<bom xmlns="http://cyclonedx.org/schema/bom/1.6" version="1" ' +
     'serialNumber="urn:uuid:12345678-1234-1234-1234-123456789012">' +
     '<metadata><timestamp>2026-02-24T10:00:00+01:00</timestamp></metadata>' +
     '<components><component type="file" bom-ref="comp-0">' +
@@ -389,7 +389,7 @@ procedure TSchemaValidatorTests.CycloneDxXml_SchemaOrder_PassesValidation;
 const
   cXml =
     '<?xml version="1.0" encoding="UTF-8"?>' +
-    '<bom xmlns="http://cyclonedx.org/schema/bom/1.5" version="1" ' +
+    '<bom xmlns="http://cyclonedx.org/schema/bom/1.6" version="1" ' +
     'serialNumber="urn:uuid:12345678-1234-1234-1234-123456789012">' +
     '<metadata>' +
     '<timestamp>2026-02-24T10:00:00+01:00</timestamp>' +

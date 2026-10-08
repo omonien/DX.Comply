@@ -5,8 +5,8 @@
 ///
 /// <remarks>
 /// Provides TSbomValidator with deep structural validation of generated SBOMs:
-/// - CycloneDX 1.5 JSON: validates required fields, component structure, hash format
-/// - CycloneDX 1.5 XML: validates namespace, element presence, attribute correctness
+/// - CycloneDX 1.6 JSON: validates required fields, component structure, hash format
+/// - CycloneDX 1.6 XML: validates namespace, element presence, attribute correctness
 /// - SPDX 2.3 JSON: validates document structure, package fields, relationships
 ///
 /// Validation errors are collected in a TValidationResult record which contains
@@ -14,9 +14,9 @@
 ///
 /// Since full JSON Schema / XSD validation would require heavy external dependencies,
 /// this validator performs structural checks for required fields and value
-/// constraints. CycloneDX XML checks also enforce the 1.5 child order of
+/// constraints. CycloneDX XML checks also enforce the 1.6 child order of
 /// metadata and component. That is still not a substitute for xmllint against
-/// bom-1.5.xsd.
+/// bom-1.6.xsd.
 /// </remarks>
 ///
 /// <copyright>
@@ -65,7 +65,7 @@ type
     procedure ValidateCycloneDxJsonComponent(const AComponent: TJSONObject; const AContext: string);
     procedure ValidateCycloneDxJsonComponents(const AComponents: TJSONArray);
     procedure ValidateCycloneDxJsonDependencies(const ADependencies: TJSONArray);
-    procedure ValidateSha256Hash(const AHash: string; const AContext: string);
+    procedure ValidateHashValue(const AAlgorithm, AHash, AContext: string);
     procedure ValidateSpdxJsonInternal(const AJson: TJSONObject);
     procedure ValidateSpdxJsonPackage(const APackage: TJSONObject; const AContext: string);
     function BuildResult: TValidationResult;
@@ -73,11 +73,11 @@ type
     constructor Create;
     destructor Destroy; override;
     /// <summary>
-    /// Validates a CycloneDX 1.5 JSON document.
+    /// Validates a CycloneDX 1.6 JSON document.
     /// </summary>
     function ValidateCycloneDxJson(const AContent: string): TValidationResult;
     /// <summary>
-    /// Validates a CycloneDX 1.5 XML document.
+    /// Validates a CycloneDX 1.6 XML document.
     /// </summary>
     function ValidateCycloneDxXml(const AContent: string): TValidationResult;
     /// <summary>
@@ -91,7 +91,7 @@ type
   end;
 
 /// <summary>
-/// Returns CycloneDX 1.5 sequence errors for metadata and component children.
+/// Returns CycloneDX 1.6 sequence errors for metadata and component children.
 /// An empty array means those elements are in an order the XSD accepts.
 /// This does not validate the rest of the document.
 /// </summary>
@@ -141,17 +141,34 @@ begin
   Result.Warnings := FWarnings.ToArray;
 end;
 
-procedure TSbomValidator.ValidateSha256Hash(const AHash: string; const AContext: string);
+procedure TSbomValidator.ValidateHashValue(const AAlgorithm, AHash, AContext: string);
+var
+  LExpected: Integer;
+  LLabel: string;
 begin
+  if SameText(AAlgorithm, 'SHA-256') or SameText(AAlgorithm, 'SHA256') then
+  begin
+    LExpected := 64;
+    LLabel := 'SHA-256';
+  end
+  else if SameText(AAlgorithm, 'SHA-512') or SameText(AAlgorithm, 'SHA512') then
+  begin
+    LExpected := 128;
+    LLabel := 'SHA-512';
+  end
+  else
+    Exit;
+
   if AHash = '' then
   begin
     AddWarning(AContext + ': hash is empty');
     Exit;
   end;
-  if Length(AHash) <> 64 then
-    AddError(AContext + ': SHA-256 hash must be 64 hex characters, got ' + IntToStr(Length(AHash)));
-  if not TRegEx.IsMatch(AHash, '^[0-9a-fA-F]{64}$') then
-    AddError(AContext + ': SHA-256 hash contains invalid characters');
+  if Length(AHash) <> LExpected then
+    AddError(AContext + ': ' + LLabel + ' hash must be ' + IntToStr(LExpected) +
+      ' hex characters, got ' + IntToStr(Length(AHash)));
+  if not TRegEx.IsMatch(AHash, '^[0-9a-fA-F]{' + IntToStr(LExpected) + '}$') then
+    AddError(AContext + ': ' + LLabel + ' hash contains invalid characters');
 end;
 
 // ---------------------------------------------------------------------------
@@ -343,8 +360,10 @@ begin
           AddError(AContext + '.hashes[' + IntToStr(I) + ']: missing required field: alg');
         if LContent = nil then
           AddError(AContext + '.hashes[' + IntToStr(I) + ']: missing required field: content')
-        else if (LAlg <> nil) and (LAlg.Value = 'SHA-256') then
-          ValidateSha256Hash(LContent.Value, AContext + '.hashes[' + IntToStr(I) + ']');
+        else if (LAlg <> nil) and
+          (SameText(LAlg.Value, 'SHA-256') or SameText(LAlg.Value, 'SHA-512')) then
+          ValidateHashValue(LAlg.Value, LContent.Value,
+            AContext + '.hashes[' + IntToStr(I) + ']');
       end;
     end;
   end;
@@ -477,13 +496,12 @@ begin
     AddWarning('No <component> elements found with type attribute');
 
   // Hash elements validation
-  var LHashMatches := TRegEx.Matches(AContent, '<hash\s+alg="SHA-256">([^<]*)</hash>', [roIgnoreCase]);
+  var LHashMatches := TRegEx.Matches(AContent,
+    '<hash\s+alg="(SHA-256|SHA-512)">([^<]*)</hash>', [roIgnoreCase]);
   var LHashMatch: TMatch;
   for LHashMatch in LHashMatches do
-  begin
-    var LHashValue := LHashMatch.Groups[1].Value;
-    ValidateSha256Hash(LHashValue, 'XML hash element');
-  end;
+    ValidateHashValue(LHashMatch.Groups[1].Value, LHashMatch.Groups[2].Value,
+      'XML hash element');
 
   // <dependencies> section (recommended)
   if Pos('<dependencies>', AContent) = 0 then
@@ -497,14 +515,15 @@ end;
 
 function CycloneDxXmlSequenceErrors(const AContent: string): TArray<string>;
 const
-  cMetadataOrder: array[0..8] of string = (
+  cMetadataOrder: array[0..9] of string = (
     'timestamp', 'lifecycles', 'tools', 'authors', 'component',
-    'manufacture', 'supplier', 'licenses', 'properties');
-  cComponentOrder: array[0..22] of string = (
-    'supplier', 'author', 'publisher', 'group', 'name', 'version',
-    'description', 'scope', 'hashes', 'licenses', 'copyright', 'cpe',
-    'purl', 'swid', 'modified', 'pedigree', 'externalReferences',
-    'properties', 'components', 'evidence', 'releaseNotes', 'modelCard', 'data');
+    'manufacturer', 'manufacture', 'supplier', 'licenses', 'properties');
+  cComponentOrder: array[0..28] of string = (
+    'supplier', 'manufacturer', 'authors', 'author', 'publisher', 'group',
+    'name', 'version', 'description', 'scope', 'hashes', 'licenses',
+    'copyright', 'cpe', 'purl', 'omniborId', 'swhid', 'swid', 'modified',
+    'pedigree', 'externalReferences', 'properties', 'components', 'evidence',
+    'releaseNotes', 'modelCard', 'data', 'cryptoProperties', 'tags');
 var
   LErrors: TList<string>;
   LPos: Integer;
@@ -533,7 +552,7 @@ var
         Continue;
       if LIndex < LLast then
         LErrors.Add('<' + AParent + '>: <' + ANames[I] +
-          '> is out of CycloneDX 1.5 sequence order');
+          '> is out of CycloneDX 1.6 sequence order');
       LLast := LIndex;
     end;
   end;
@@ -855,8 +874,10 @@ begin
           AddError(AContext + '.checksums[' + IntToStr(I) + ']: missing required field: algorithm');
         if LVal = nil then
           AddError(AContext + '.checksums[' + IntToStr(I) + ']: missing required field: checksumValue')
-        else if (LAlg <> nil) and (LAlg.Value = 'SHA256') then
-          ValidateSha256Hash(LVal.Value, AContext + '.checksums[' + IntToStr(I) + ']');
+        else if (LAlg <> nil) and
+          (SameText(LAlg.Value, 'SHA256') or SameText(LAlg.Value, 'SHA512')) then
+          ValidateHashValue(LAlg.Value, LVal.Value,
+            AContext + '.checksums[' + IntToStr(I) + ']');
       end;
     end;
   end;

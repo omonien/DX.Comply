@@ -237,7 +237,7 @@ procedure ApplyManifestCycloneDxJson(const AManifestJson: string;
   const AProjectBomRef: string);
 
 /// <summary>
-/// Appends CycloneDX 1.5 library elements. Child order follows bom-1.5.xsd.
+/// Appends CycloneDX 1.6 library elements. Child order follows bom-1.6.xsd.
 /// </summary>
 procedure AppendManifestLibrariesXml(ALines: TStrings; const AManifestJson: string;
   const AArtefacts: TArtefactList; AIndentLevel: Integer);
@@ -1144,6 +1144,23 @@ var
   LValue: string;
   LLicences: TJSONArray;
   LWrapper, LLicence: TJSONObject;
+
+  procedure AddNamed(const AAcknowledgement: string);
+  begin
+    LWrapper := TJSONObject.Create;
+    LLicences.Add(LWrapper);
+    LLicence := TJSONObject.Create;
+    LWrapper.AddPair('license', LLicence);
+    if LKind = lkSpdxId then
+      LLicence.AddPair('id', LValue)
+    else
+      LLicence.AddPair('name', LValue);
+    // acknowledgement sits on the license object in bom-1.6.schema.json.
+    LLicence.AddPair('acknowledgement', AAcknowledgement);
+    if AEntry.LicenceUrl <> '' then
+      LLicence.AddPair('url', AEntry.LicenceUrl);
+  end;
+
 begin
   LKind := ClassifyLicence(AEntry.Licence, LValue);
   if LKind = lkNone then
@@ -1151,29 +1168,31 @@ begin
 
   LLicences := TJSONArray.Create;
   AComponent.AddPair('licenses', LLicences);
-  LWrapper := TJSONObject.Create;
-  LLicences.Add(LWrapper);
 
   if LKind = lkExpression then
-    LWrapper.AddPair('expression', LValue)
+  begin
+    // licenseChoice allows one expression. That slot is the distribution
+    // licence we assert, so the acknowledgement is concluded. A second
+    // declared copy would not match the schema.
+    LWrapper := TJSONObject.Create;
+    LLicences.Add(LWrapper);
+    LWrapper.AddPair('expression', LValue);
+    LWrapper.AddPair('acknowledgement', 'concluded');
+  end
   else
   begin
-    LLicence := TJSONObject.Create;
-    LWrapper.AddPair('license', LLicence);
-    if LKind = lkSpdxId then
-      LLicence.AddPair('id', LValue)
-    else
-      LLicence.AddPair('name', LValue);
-    if AEntry.LicenceUrl <> '' then
-      LLicence.AddPair('url', AEntry.LicenceUrl);
+    // The manifest row declares the licence, and it is also the distribution
+    // licence we assert. Same id or name, once concluded and once declared.
+    AddNamed('concluded');
+    AddNamed('declared');
   end;
 end;
 
 function BuildLibraryJson(const AEntry: TComponentEntry; AIndex: Integer;
   const ABomRef: string): TJSONObject;
 var
-  LSupplier: TJSONObject;
-  LUrls, LRefs: TJSONArray;
+  LSupplier, LContact: TJSONObject;
+  LUrls, LRefs, LContacts: TJSONArray;
   LRef: TJSONObject;
   LPurl: string;
 begin
@@ -1191,6 +1210,14 @@ begin
       LUrls := TJSONArray.Create;
       LSupplier.AddPair('url', LUrls);
       LUrls.Add(AEntry.VendorUrl);
+    end;
+    if IsBsiEmailAddress(Trim(AEntry.Vendor)) then
+    begin
+      LContacts := TJSONArray.Create;
+      LContact := TJSONObject.Create;
+      LContact.AddPair('email', Trim(AEntry.Vendor));
+      LContacts.Add(LContact);
+      LSupplier.AddPair('contact', LContacts);
     end;
     Result.AddPair('author', AEntry.Vendor);
   end;
@@ -1373,10 +1400,19 @@ var
       Exit;
     AddLine(ALevel, '<licenses>');
     if LKind = lkExpression then
-      AddLine(ALevel + 1, '<expression>' + EscapeXml(LValue) + '</expression>')
+      AddLine(ALevel + 1, '<expression acknowledgement="concluded">' +
+        EscapeXml(LValue) + '</expression>')
     else
     begin
-      AddLine(ALevel + 1, '<license>');
+      AddLine(ALevel + 1, '<license acknowledgement="concluded">');
+      if LKind = lkSpdxId then
+        AddLine(ALevel + 2, '<id>' + EscapeXml(LValue) + '</id>')
+      else
+        AddLine(ALevel + 2, '<name>' + EscapeXml(LValue) + '</name>');
+      if AEntry.LicenceUrl <> '' then
+        AddLine(ALevel + 2, '<url>' + EscapeXml(AEntry.LicenceUrl) + '</url>');
+      AddLine(ALevel + 1, '</license>');
+      AddLine(ALevel + 1, '<license acknowledgement="declared">');
       if LKind = lkSpdxId then
         AddLine(ALevel + 2, '<id>' + EscapeXml(LValue) + '</id>')
       else
@@ -1392,7 +1428,7 @@ var
   var
     LPurl: string;
   begin
-    // bom-1.5.xsd component order: supplier, author, name, version,
+    // bom-1.6.xsd component order: supplier, author, name, version,
     // hashes, licenses, purl, externalReferences.
     AddLine(AIndentLevel, '<component type="' + EscapeXml(AEntry.ComponentType) +
       '" bom-ref="' + EscapeXml(ABomRef) + '">');
@@ -1402,6 +1438,12 @@ var
       AddLine(AIndentLevel + 2, '<name>' + EscapeXml(AEntry.Vendor) + '</name>');
       if AEntry.VendorUrl <> '' then
         AddLine(AIndentLevel + 2, '<url>' + EscapeXml(AEntry.VendorUrl) + '</url>');
+      if IsBsiEmailAddress(Trim(AEntry.Vendor)) then
+      begin
+        AddLine(AIndentLevel + 2, '<contact>');
+        AddLine(AIndentLevel + 3, '<email>' + EscapeXml(Trim(AEntry.Vendor)) + '</email>');
+        AddLine(AIndentLevel + 2, '</contact>');
+      end;
       AddLine(AIndentLevel + 1, '</supplier>');
       AddLine(AIndentLevel + 1, '<author>' + EscapeXml(AEntry.Vendor) + '</author>');
     end;
@@ -1416,8 +1458,7 @@ var
     if AEntry.VendorUrl <> '' then
     begin
       AddLine(AIndentLevel + 1, '<externalReferences>');
-      AddLine(AIndentLevel + 2, '<reference>');
-      AddLine(AIndentLevel + 3, '<type>website</type>');
+      AddLine(AIndentLevel + 2, '<reference type="website">');
       AddLine(AIndentLevel + 3, '<url>' + EscapeXml(AEntry.VendorUrl) + '</url>');
       AddLine(AIndentLevel + 2, '</reference>');
       AddLine(AIndentLevel + 1, '</externalReferences>');
@@ -1564,6 +1605,11 @@ begin
     Result.AddPair('supplier', 'Organization: ' + AEntry.Vendor)
   else
     Result.AddPair('supplier', 'NOASSERTION');
+  if IsBsiEmailAddress(Trim(AEntry.Vendor)) then
+    Result.AddPair('originator', 'Person: ' + Trim(AEntry.Vendor) + ' (' +
+      Trim(AEntry.Vendor) + ')')
+  else if Trim(AEntry.Vendor) <> '' then
+    Result.AddPair('originator', 'Organization: ' + Trim(AEntry.Vendor));
 
   LToken := SpdxLicenceToken(AEntry, LKind);
   Result.AddPair('licenseConcluded', LToken);
@@ -1571,15 +1617,26 @@ begin
   Result.AddPair('copyrightText', 'NOASSERTION');
 
   LPurl := BuildDelphiPurl(AEntry.Name, AEntry.Version, AEntry.Purl);
-  if LPurl <> '' then
+  if (LPurl <> '') or (AEntry.VendorUrl <> '') then
   begin
     LRefs := TJSONArray.Create;
     Result.AddPair('externalRefs', LRefs);
-    LRef := TJSONObject.Create;
-    LRefs.Add(LRef);
-    LRef.AddPair('referenceCategory', 'PACKAGE-MANAGER');
-    LRef.AddPair('referenceType', 'purl');
-    LRef.AddPair('referenceLocator', LPurl);
+    if LPurl <> '' then
+    begin
+      LRef := TJSONObject.Create;
+      LRefs.Add(LRef);
+      LRef.AddPair('referenceCategory', 'PACKAGE-MANAGER');
+      LRef.AddPair('referenceType', 'purl');
+      LRef.AddPair('referenceLocator', LPurl);
+    end;
+    if AEntry.VendorUrl <> '' then
+    begin
+      LRef := TJSONObject.Create;
+      LRefs.Add(LRef);
+      LRef.AddPair('referenceCategory', 'OTHER');
+      LRef.AddPair('referenceType', 'website');
+      LRef.AddPair('referenceLocator', AEntry.VendorUrl);
+    end;
   end;
 end;
 

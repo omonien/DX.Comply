@@ -4,7 +4,7 @@
 /// </summary>
 ///
 /// <remarks>
-/// Verifies CycloneDX 1.5 JSON output: required top-level fields,
+/// Verifies CycloneDX 1.6 JSON output: required top-level fields,
 /// component entries, hash embedding, metadata, dependency section,
 /// serial-number uniqueness, validation logic, and edge cases such as
 /// supplier names that contain characters requiring JSON escaping.
@@ -256,8 +256,11 @@ begin
   try
     Assert.AreEqual('CycloneDX', LJson.GetValue<string>('bomFormat'),
       'bomFormat must be CycloneDX');
-    Assert.AreEqual('1.5', LJson.GetValue<string>('specVersion'),
-      'specVersion must be 1.5');
+    Assert.AreEqual('1.6', LJson.GetValue<string>('specVersion'),
+      'specVersion must be 1.6');
+    Assert.AreEqual('http://cyclonedx.org/schema/bom-1.6.schema.json',
+      LJson.GetValue<string>('$schema'),
+      '$schema must point at the CycloneDX 1.6 JSON schema');
     Assert.IsNotNull(LJson.GetValue('components'),
       'components array must be present');
     Assert.IsNotNull(LJson.GetValue('metadata'),
@@ -755,7 +758,7 @@ end;
 procedure TCycloneDxWriterTests.Validate_ValidCycloneDxJson_ReturnsTrue;
 const
   cValidJson =
-    '{"bomFormat":"CycloneDX","specVersion":"1.5","serialNumber":"urn:uuid:test",' +
+    '{"bomFormat":"CycloneDX","specVersion":"1.6","serialNumber":"urn:uuid:test",' +
     '"version":1,"metadata":{},"components":[],"dependencies":[]}';
 begin
   Assert.IsTrue(FWriter.Validate(cValidJson),
@@ -770,7 +773,7 @@ end;
 
 procedure TCycloneDxWriterTests.Validate_MissingBomFormat_ReturnsFalse;
 const
-  cJsonNoBomFormat = '{"specVersion":"1.5","serialNumber":"urn:uuid:test"}';
+  cJsonNoBomFormat = '{"specVersion":"1.6","serialNumber":"urn:uuid:test"}';
 begin
   Assert.IsFalse(FWriter.Validate(cJsonNoBomFormat),
     'Validate must return False when bomFormat is absent');

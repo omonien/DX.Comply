@@ -57,8 +57,8 @@ Every SBOM generation follows the same pipeline, regardless of whether it was tr
 | `DX.Comply.UnitResolver.pas` | Resolves units to files, classifies origin (RTL/VCL/FMX/Local/ThirdParty), computes SHA-256/SHA-512 hashes |
 | `DX.Comply.HashService.pas` | SHA-256 and SHA-512 via `System.Hash` |
 | `DX.Comply.FileScanner.pas` | Lists the named project output and binaries in that directory |
-| `DX.Comply.CycloneDx.Writer.pas` | CycloneDX 1.5 JSON output |
-| `DX.Comply.CycloneDx.XmlWriter.pas` | CycloneDX 1.5 XML output |
+| `DX.Comply.CycloneDx.Writer.pas` | CycloneDX 1.6 JSON output |
+| `DX.Comply.CycloneDx.XmlWriter.pas` | CycloneDX 1.6 XML output |
 | `DX.Comply.Spdx.Writer.pas` | SPDX 2.3 JSON output |
 | `DX.Comply.Report.HtmlWriter.pas` | HTML companion report |
 | `DX.Comply.Report.MarkdownWriter.pas` | Markdown companion report |
@@ -97,12 +97,15 @@ Every unit found in the MAP file is classified by origin:
 ## SBOM output structure
 
 Each resolved unit is emitted as a CycloneDX `component` with `type: "library"`, carrying:
-- SHA-256 hash of the resolved file
+- SHA-256 and SHA-512 hashes of the resolved file, when the file could be opened
+- `bsi:component:filename`, `bsi:component:executable`, `bsi:component:archive`, and `bsi:component:structured` when the component has a file name
 - `net.developer-experts.dx-comply:origin` property (e.g. "Embarcadero RTL")
 - `net.developer-experts.dx-comply:evidence` property (e.g. "DCU", "PAS", "MAP")
 - `net.developer-experts.dx-comply:confidence` property (e.g. "Strong", "Heuristic")
 
 When `--manifest` or the `manifest` key points at a components file, matched units stay in the document and are linked from one library component (name, version, supplier, licence, package URL, type). The program that was built depends on that library. Own-code rules keep those units with the program. The units come from the MAP file, so a Delphi 7 `.dpr` uses the same list. Matching and licence classification live in `DX.Comply.ComponentManifest.pas`. The CycloneDX and SPDX writers call that unit.
+
+CycloneDX 1.6 and SPDX 2.3 also carry the BSI TR-03183-2 fields DX.Comply can support from evidence. SHA-512 sits next to SHA-256, and a deployable file also carries that SHA-512 on an external reference of type distribution. The SBOM creator contact is written only from `sbomCreator` or `--sbom-creator`, as `metadata.manufacturer`. SPDX stays at 2.3. SPDX 3.0.1 is out of scope. Direct dependencies stay the grouped graph, and CycloneDX marks that graph incomplete. Details, including the fields that are left out, are in [BSI-TR-03183-2.md](BSI-TR-03183-2.md). This is not a certification against the technical guideline.
 
 ## Test suite
 

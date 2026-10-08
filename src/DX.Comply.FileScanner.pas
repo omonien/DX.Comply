@@ -447,13 +447,20 @@ begin
       LArtefact.FileSize := TFile.GetSize(LFile);
 
       if Assigned(FHashService) then
-        LArtefact.Hash := FHashService.ComputeSha256(LFile)
+      begin
+        LArtefact.Hash := FHashService.ComputeSha256(LFile);
+        LArtefact.HashSha512 := FHashService.ComputeSha512(LFile);
+      end
       else
+      begin
         LArtefact.Hash := '';
+        LArtefact.HashSha512 := '';
+      end;
     except
       // File might be locked or inaccessible
       LArtefact.FileSize := -1;
       LArtefact.Hash := '';
+      LArtefact.HashSha512 := '';
     end;
 
     Result.Add(LArtefact);
@@ -511,18 +518,23 @@ begin
   AArtefact.ArtefactType := GetArtefactType(AFilePath);
   AArtefact.FileSize := -1;
   AArtefact.Hash := '';
+  AArtefact.HashSha512 := '';
 
   // The project output is part of the SBOM even when the binary has not
-  // been built yet. Hash and size are filled in only when the file is there.
+  // been built yet. Hashes and size are filled in only when the file is there.
   if TFile.Exists(AFilePath) then
   begin
     try
       AArtefact.FileSize := TFile.GetSize(AFilePath);
       if Assigned(FHashService) then
+      begin
         AArtefact.Hash := FHashService.ComputeSha256(AFilePath);
+        AArtefact.HashSha512 := FHashService.ComputeSha512(AFilePath);
+      end;
     except
       AArtefact.FileSize := -1;
       AArtefact.Hash := '';
+      AArtefact.HashSha512 := '';
     end;
   end;
   Result := True;

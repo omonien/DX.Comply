@@ -1,17 +1,17 @@
 ﻿/// <summary>
 /// DX.Comply.CycloneDx.XmlWriter
-/// Generates CycloneDX 1.5 SBOM documents in XML format.
+/// Generates CycloneDX 1.6 SBOM documents in XML format.
 /// </summary>
 ///
 /// <remarks>
-/// This unit provides TCycloneDxXmlWriter which generates CycloneDX 1.5 XML SBOMs:
+/// This unit provides TCycloneDxXmlWriter which generates CycloneDX 1.6 XML SBOMs:
 /// - Full metadata section with tool information
-/// - Component list with hashes (SHA-256)
+/// - Component list with hashes (SHA-256 and SHA-512 when the file could be opened)
 /// - Dependency graph grouped by deliverable, runtime packages, external DLLs and linked units
 /// - Schema validation support
 ///
-/// The XML output conforms to the CycloneDX 1.5 XSD schema:
-/// https://cyclonedx.org/schema/bom-1.5.xsd
+/// The XML output conforms to the CycloneDX 1.6 XSD schema:
+/// https://cyclonedx.org/schema/bom-1.6.xsd
 ///
 /// Uses lightweight string-based XML generation to avoid MSXML/COM dependencies,
 /// ensuring the writer works in all environments (IDE, CLI, test runners).
@@ -41,8 +41,8 @@ type
   TCycloneDxXmlWriter = class(TInterfacedObject, ISbomWriter)
   private
     const
-      cSpecVersion = '1.5';
-      cNamespace = 'http://cyclonedx.org/schema/bom/1.5';
+      cSpecVersion = '1.6';
+      cNamespace = 'http://cyclonedx.org/schema/bom/1.6';
       cToolName = 'DX.Comply';
       cIndent = '  ';
   private
@@ -164,8 +164,9 @@ begin
   else
     AddElement('timestamp', DateToISO8601(Now, False));
 
-  // CycloneDX 1.5 metadata sequence: timestamp, lifecycles, tools, authors,
-  // component, manufacture, supplier, licenses, properties.
+  // CycloneDX 1.6 metadata sequence: timestamp, lifecycles, tools, authors,
+  // component, manufacturer, manufacture, supplier, licenses, properties.
+  // tools/tool is still accepted by bom-1.6.xsd and is marked deprecated there.
   OpenTag('tools');
   OpenTag('tool');
   AddElement('vendor', 'Olaf Monien');
@@ -185,6 +186,12 @@ begin
     AddElement('name', AMetadata.Supplier);
     if AMetadata.SupplierUrl <> '' then
       AddElement('url', AMetadata.SupplierUrl);
+    if IsBsiEmailAddress(Trim(AMetadata.Supplier)) then
+    begin
+      OpenTag('contact');
+      AddElement('email', Trim(AMetadata.Supplier));
+      CloseTag('contact');
+    end;
     CloseTag('supplier');
   end;
   if AMetadata.ProductName <> '' then
@@ -198,6 +205,24 @@ begin
   AddPropertyElements(AMetadata.ComponentProperties);
   CloseTag('component');
 
+  // manufacturer follows component in the CycloneDX 1.6 metadata sequence.
+  // It is one organizational entity. The deprecated manufacture element is
+  // not written.
+  if BsiCreatorKind(AMetadata.SbomCreator) = 'email' then
+  begin
+    OpenTag('manufacturer');
+    OpenTag('contact');
+    AddElement('email', Trim(AMetadata.SbomCreator));
+    CloseTag('contact');
+    CloseTag('manufacturer');
+  end
+  else if BsiCreatorKind(AMetadata.SbomCreator) = 'url' then
+  begin
+    OpenTag('manufacturer');
+    AddElement('url', Trim(AMetadata.SbomCreator));
+    CloseTag('manufacturer');
+  end;
+
   AddPropertyElements(AMetadata.Properties);
 
   CloseTag('metadata');
@@ -208,6 +233,7 @@ procedure TCycloneDxXmlWriter.BuildComponent(const AArtefact: TArtefactInfo;
 var
   LComponentType: string;
   LBomRef: string;
+  LFileName: string;
 begin
   if AArtefact.ArtefactType = 'application' then
     LComponentType := 'application'
@@ -228,26 +254,44 @@ begin
     AddElement('version', Copy(AArtefact.Hash, 1, 12));
 
   // Component sequence: name, version, then hashes, then purl, then properties.
-  if AArtefact.Hash <> '' then
+  if (AArtefact.Hash <> '') or (AArtefact.HashSha512 <> '') then
   begin
     OpenTag('hashes');
-    OpenTag('hash', 'alg="SHA-256"');
-    // Hash content goes directly without a sub-element
-    Dec(FIndentLevel);
-    // Replace last line with inline content
-    FLines[FLines.Count - 1] := StringOfChar(' ', FIndentLevel * 2) +
-      '<hash alg="SHA-256">' + LowerCase(AArtefact.Hash) + '</hash>';
+    if AArtefact.Hash <> '' then
+      AddLine('<hash alg="SHA-256">' + LowerCase(AArtefact.Hash) + '</hash>');
+    if AArtefact.HashSha512 <> '' then
+      AddLine('<hash alg="SHA-512">' + LowerCase(AArtefact.HashSha512) + '</hash>');
     CloseTag('hashes');
   end;
 
   AddElement('purl', 'file:' + AArtefact.RelativePath);
 
+  // Component sequence places externalReferences after purl and before
+  // properties. The distribution url is the file: locator. bom-1.6 requires
+  // that url. The reference is written for a hashed executable or archive.
+  if (AArtefact.HashSha512 <> '') and
+     (IsBsiExecutableArtefact(AArtefact) or
+      IsBsiArchiveFileName(BsiComponentFileName(AArtefact.RelativePath))) then
+  begin
+    OpenTag('externalReferences');
+    OpenTag('reference', 'type="distribution"');
+    AddElement('url', 'file:' + AArtefact.RelativePath);
+    OpenTag('hashes');
+    AddLine('<hash alg="SHA-512">' + LowerCase(AArtefact.HashSha512) + '</hash>');
+    CloseTag('hashes');
+    CloseTag('reference');
+    CloseTag('externalReferences');
+  end;
+
   // Evidence and confidence must be written for source-scanned DLLs, which
   // have no file on disk (size -1) and an empty origin. Gating the whole
   // block on size or origin dropped those properties. Issue #45.
+  // A file name is enough on its own: the TR properties still apply when
+  // the file could not be opened.
+  LFileName := BsiComponentFileName(AArtefact.RelativePath);
   if (AArtefact.FileSize >= 0) or (Trim(AArtefact.Origin) <> '') or
      (Trim(AArtefact.Evidence) <> '') or (Trim(AArtefact.Confidence) <> '') or
-     AArtefact.Conditional then
+     AArtefact.Conditional or (LFileName <> '') then
   begin
     OpenTag('properties');
     if AArtefact.FileSize >= 0 then
@@ -284,6 +328,16 @@ begin
       Dec(FIndentLevel);
       FLines[FLines.Count - 1] := StringOfChar(' ', FIndentLevel * 2) +
         '<property name="net.developer-experts.dx-comply:conditional">true</property>';
+    end;
+    if LFileName <> '' then
+    begin
+      AddLine('<property name="bsi:component:filename">' + EscapeXml(LFileName) + '</property>');
+      AddLine('<property name="bsi:component:executable">' +
+        BsiExecutableValue(AArtefact) + '</property>');
+      AddLine('<property name="bsi:component:archive">' +
+        EscapeXml(BsiArchiveValue(LFileName)) + '</property>');
+      AddLine('<property name="bsi:component:structured">' +
+        BsiStructuredValue(LFileName) + '</property>');
     end;
     CloseTag('properties');
   end;
@@ -375,6 +429,18 @@ begin
     else
       BuildDependencies(AArtefacts, AProjectInfo.ProjectName);
 
+    if Trim(AProjectInfo.ProjectName) <> '' then
+    begin
+      OpenTag('compositions');
+      OpenTag('composition');
+      AddElement('aggregate', 'incomplete');
+      OpenTag('dependencies');
+      AddLine('<dependency ref="' + EscapeXml(AProjectInfo.ProjectName) + '"/>');
+      CloseTag('dependencies');
+      CloseTag('composition');
+      CloseTag('compositions');
+    end;
+
     CloseTag('bom');
 
     FLines.WriteBOM := False;
@@ -425,7 +491,7 @@ begin
     Exit;
 
   // Presence of the expected tags is not enough: metadata.properties before
-  // tools, or component.purl before hashes, is invalid against bom-1.5.xsd.
+  // tools, or component.purl before hashes, is invalid against bom-1.6.xsd.
   if Length(CycloneDxXmlSequenceErrors(AContent)) > 0 then
     Exit;
 

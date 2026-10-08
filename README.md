@@ -2,7 +2,7 @@
 
 [![Delphi Supported Versions](https://img.shields.io/badge/Delphi-11%20|%2012%20|%2013-blue?logo=delphi)](https://www.embarcadero.com/products/delphi)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![CycloneDX](https://img.shields.io/badge/SBOM-CycloneDX%201.5-informational?logo=owasp)](https://cyclonedx.org/)
+[![CycloneDX](https://img.shields.io/badge/SBOM-CycloneDX%201.6-informational?logo=owasp)](https://cyclonedx.org/)
 [![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey?logo=windows)](https://www.microsoft.com/windows)
 [![EU CRA](https://img.shields.io/badge/EU%20CRA-2024%2F2847-orange)](https://eur-lex.europa.eu/eli/reg/2024/2847/oj/eng)
 
@@ -20,7 +20,7 @@ DX.Comply produces build evidence and that component list from a RAD Studio proj
 
 **You generate it. You archive it. You never have to submit it anywhere.**
 
-> **SBOM** = a structured component list for a piece of software. DX.Comply fills it from the build: unit names, package names and DLL names, plus a SHA-256 hash when the file could be opened.
+> **SBOM** = a structured component list for a piece of software. DX.Comply fills it from the build: unit names, package names and DLL names, plus SHA-256 and SHA-512 hashes when the file could be opened.
 
 ---
 
@@ -38,12 +38,12 @@ DX.Comply produces build evidence and that component list from a RAD Studio proj
 
 > **See it for yourself:** [Full example SBOM (JSON)](docs/examples/AlienInvasion.bom.json) and [full example HTML report](docs/examples/AlienInvasion.bom.report.html), generated from the Embarcadero *AlienInvasion* sample project.
 
-DX.Comply writes **CycloneDX 1.5** JSON by default. Each linked unit is a `library` component, with a SHA-256 hash when the file could be opened, and with an origin classification:
+DX.Comply writes **CycloneDX 1.6** JSON by default. Each linked unit is a `library` component, with SHA-256 and SHA-512 hashes when the file could be opened, and with an origin classification:
 
 ```json
 {
   "bomFormat": "CycloneDX",
-  "specVersion": "1.5",
+  "specVersion": "1.6",
   "metadata": {
     "component": {
       "type": "application",
@@ -56,14 +56,31 @@ DX.Comply writes **CycloneDX 1.5** JSON by default. Each linked unit is a `libra
       "type": "application",
       "name": "AlienInvasion.exe",
       "hashes": [
-        { "alg": "SHA-256", "content": "d0be8d3ad469b93c...f6cee44" }
+        { "alg": "SHA-256", "content": "d0be8d3ad469b93c...f6cee44" },
+        { "alg": "SHA-512", "content": "9c1e...ab70" }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "file:AlienInvasion.exe",
+          "hashes": [
+            { "alg": "SHA-512", "content": "9c1e...ab70" }
+          ]
+        }
+      ],
+      "properties": [
+        { "name": "bsi:component:filename", "value": "AlienInvasion.exe" },
+        { "name": "bsi:component:executable", "value": "executable" },
+        { "name": "bsi:component:archive", "value": "no archive" },
+        { "name": "bsi:component:structured", "value": "unstructured" }
       ]
     },
     {
       "type": "library",
       "name": "System.SysUtils.dcu",
       "hashes": [
-        { "alg": "SHA-256", "content": "a1c9f3e7b2d4..." }
+        { "alg": "SHA-256", "content": "a1c9f3e7b2d4..." },
+        { "alg": "SHA-512", "content": "b7d4...11aa" }
       ],
       "properties": [
         { "name": "net.developer-experts.dx-comply:origin", "value": "Embarcadero RTL" },
@@ -163,9 +180,9 @@ DX.Comply always performs a **Deep-Evidence analysis** based on the compiler-gen
 |---|---|
 | **Project metadata** | Name, version, platform, configuration, DllSuffix |
 | **MAP file analysis** | Extracts linked units from segment entries and line-number sections |
-| **Unit resolution** | Resolves each unit to its source/DCU/BPL file with a SHA-256 hash when the file could be opened |
+| **Unit resolution** | Resolves each unit to its source/DCU/BPL file with SHA-256 and SHA-512 hashes when the file could be opened |
 | **Origin classification** | Classifies each unit as Embarcadero RTL, VCL, FMX, Local project, or Third party |
-| **Build artefacts** | The exe, dll, or bpl named by the project, plus other `.exe`, `.dll`, `.bpl`, and `.dcp` files in that output directory. SHA-256 is recorded when the file could be opened |
+| **Build artefacts** | The exe, dll, or bpl named by the project, plus other `.exe`, `.dll`, `.bpl`, and `.dcp` files in that output directory. SHA-256 and SHA-512 are recorded when the file could be opened |
 | **Compiler evidence** | Parses `.cfg` and `.rsp` files for effective search paths and unit scopes |
 
 ---
@@ -178,9 +195,9 @@ DX.Comply produces **one machine-readable SBOM** and, if you ask for them, one o
 
 | Format | Version | Description |
 |---|---|---|
-| **CycloneDX JSON** | 1.5 | Default. A common SBOM format for tooling |
-| **CycloneDX XML** | 1.5 | XML variant for XML-based toolchains |
-| **SPDX JSON** | 2.3 | SPDX 2.3 JSON |
+| **CycloneDX JSON** | 1.6 | Default. A common SBOM format for tooling |
+| **CycloneDX XML** | 1.6 | XML variant for XML-based toolchains |
+| **SPDX JSON** | 2.3 | SPDX 2.3 JSON. SPDX 3.0.1 is out of scope |
 
 ### Human-readable companion reports (optional, opt-in via `--report=<format>`)
 
@@ -193,11 +210,13 @@ DX.Comply produces **one machine-readable SBOM** and, if you ask for them, one o
 
 After it writes a file, DX.Comply runs its own structural check of required fields and value shapes. That check is not a validation against an official schema.
 
-CycloneDX JSON from the example in this repository passes [`check-jsonschema`](https://github.com/python-jsonschema/check-jsonschema) against the [official CycloneDX 1.5 JSON schema](http://cyclonedx.org/schema/bom-1.5.schema.json). SPDX JSON and CycloneDX XML are not checked against official schemas inside the tool.
+The checked-in AlienInvasion example is a CycloneDX 1.5 document from an earlier run. It was not regenerated as 1.6, and this README does not claim that it passes the 1.6 schema. New CycloneDX output uses `specVersion` 1.6. The tool's own check is structural. It is not a validation against the official schema. SPDX JSON and CycloneDX XML are not checked against official schemas inside the tool.
 
-### Further SBOM fields (roadmap)
+### BSI TR-03183-2
 
-[BSI TR-03183-2](https://www.bsi.bund.de/dok/TR-03183-en) v2.1.0 asks for more than DX.Comply writes today, including CycloneDX 1.6 or later, SHA-512 hashes, a licence and a supplier on each component, and recursive dependencies. Matching that profile is on the roadmap. DX.Comply does not yet fully meet it.
+[BSI TR-03183-2](https://www.bsi.bund.de/dok/TR-03183-en) version 2.1.0 (20 August 2025) asks for CycloneDX 1.6 or later, or SPDX 3.0.1 or later. CycloneDX output is 1.6. SPDX stays at 2.3. SPDX 3.0.1 is out of scope. DX.Comply writes the fields it can fill from the build or from values you set. That is not a certification, and it is not full coverage of the technical guideline. The field list is in [docs/BSI-TR-03183-2.md](docs/BSI-TR-03183-2.md).
+
+Set the SBOM creator with `--sbom-creator=<email-or-url>` or with `sbomCreator` in `.dxcomply.json`. Use an email address or an http(s) URL. Leave it unset when you do not have one. A company name is rejected.
 
 ---
 
@@ -231,6 +250,7 @@ Add a `.dxcomply.json` to your project folder and pass `--ci` so the CLI loads i
   "exclude": ["build/**/Debug/**", "**/*.dcu"],
   "scanDirs": ["redist"],
   "manifest": "components.json",
+  "sbomCreator": "sbom@example.com",
   "product": {
     "name": "My Application",
     "version": "2.1.0",
@@ -253,7 +273,7 @@ When `--ci` is set and the file exists, values are merged in this order:
 2. Keys present in `.dxcomply.json`.
 3. Command-line options you actually pass. Those win over the file.
 
-An option you leave off the command line does not override the file, even though that option has a default. `dxcomply --ci --config-name=Debug` uses Debug even when the file says `"configName": "Release"`. `dxcomply --ci` with no `--config-name` uses the file's `configName`, or `Release` when the key is absent. The same rule applies to `--platform`, `--format`, `--output`, `--product`, `--version`, `--supplier`, `--report`, `--include`, `--exclude`, `--map-dir`, `--manifest`, and `--no-composition-evidence`.
+An option you leave off the command line does not override the file, even though that option has a default. `dxcomply --ci --config-name=Debug` uses Debug even when the file says `"configName": "Release"`. `dxcomply --ci` with no `--config-name` uses the file's `configName`, or `Release` when the key is absent. The same rule applies to `--platform`, `--format`, `--output`, `--product`, `--version`, `--supplier`, `--sbom-creator`, `--report`, `--include`, `--exclude`, `--map-dir`, `--manifest`, and `--no-composition-evidence`.
 
 If you pass `--include` or `--exclude`, that list replaces the file's list. `--report` overrides the file's enabled flag and format, and leaves the file's report output path as it is.
 
@@ -279,6 +299,8 @@ The units come from the MAP file, including a Delphi 7 `.dpr` with its `.dof` an
 A matched unit stays as its own evidence component (hash, origin, `file:` package URL). The SBOM adds one library component for the row (`name`, `version`, `type`, supplier and author from `vendor`, optional `vendor_url`). The program that was built depends on that library, and the library depends on the matched units. Other binaries stay linked from that program. This is written for CycloneDX JSON, CycloneDX XML, and SPDX 2.3 JSON.
 
 `licence` (British spelling) is an SPDX identifier such as `MIT` (written as `license.id`), an SPDX expression such as `MPL-1.1 OR LGPL-2.1-or-later` (written as `expression`), or any other text such as `Commercial` or `Proprietary` (written as `license.name`). `licence_url` is optional and is omitted for expressions. `license` and `license_url` are accepted as aliases. `type` is `library`, `framework`, or `application`.
+
+If `vendor` is an email address, that address is also written as the supplier contact. `vendor_url` is the URL. A company name is not rewritten into an email.
 
 There is no required `purl` field. When it is absent, DX.Comply writes `pkg:delphi/<name>@<version>` with the name and version percent-encoded. `pkg:delphi` is not a registered package-url type. Scanned files keep the existing `file:` locator. Set `purl` on a row when you want a different locator.
 
@@ -341,7 +363,7 @@ No internet connection is required. All processing is local.
 | [Architecture](docs/Architecture.md) | Engine pipeline, component overview, unit origin classification |
 | [CI Integration](docs/CI-Integration.md) | Command-line usage, GitHub Actions examples, CI configuration |
 | [Legacy Support](docs/LegacySupport.md) | MAP files from older Delphi versions, and which project files the CLI accepts |
-| [Example SBOM (JSON)](docs/examples/AlienInvasion.bom.json) | Full CycloneDX 1.5 SBOM generated from the AlienInvasion sample |
+| [Example SBOM (JSON)](docs/examples/AlienInvasion.bom.json) | Stored CycloneDX 1.5 sample from an earlier AlienInvasion run. Current output is 1.6 |
 | [Component manifest sample](docs/samples/components.sample.json) | Optional components.json (supplier, licence, version, type, package URL) |
 | [Example HTML Report](docs/examples/AlienInvasion.bom.report.html) | Human-readable SBOM report for the same project |
 

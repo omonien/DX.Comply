@@ -284,9 +284,9 @@ end;
 function SbomFormatToString(AValue: TSbomFormat): string;
 begin
   case AValue of
-    sfCycloneDxJson: Result := 'CycloneDX JSON';
-    sfCycloneDxXml: Result := 'CycloneDX XML';
-    sfSpdxJson: Result := 'SPDX JSON';
+    sfCycloneDxJson: Result := 'CycloneDX 1.6 JSON';
+    sfCycloneDxXml: Result := 'CycloneDX 1.6 XML';
+    sfSpdxJson: Result := 'SPDX 2.3 JSON';
   else
     Result := 'Unknown';
   end;

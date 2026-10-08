@@ -1,16 +1,16 @@
 ﻿/// <summary>
 /// DX.Comply.CycloneDx.Writer
-/// Generates CycloneDX 1.5 SBOM documents in JSON format.
+/// Generates CycloneDX 1.6 SBOM documents in JSON format.
 /// </summary>
 ///
 /// <remarks>
-/// This unit provides TCycloneDxJsonWriter which generates CycloneDX 1.5 JSON SBOMs:
+/// This unit provides TCycloneDxJsonWriter which generates CycloneDX 1.6 JSON SBOMs:
 /// - Full metadata section with tool information
-/// - Component list with hashes (SHA-256)
+/// - Component list with hashes (SHA-256 and SHA-512 when the file could be opened)
 /// - Dependency graph grouped by deliverable, runtime packages, external DLLs and linked units
 /// - Schema validation support
 ///
-/// CycloneDX 1.5 specification: https://cyclonedx.org/specification/overview/
+/// CycloneDX 1.6 specification: https://cyclonedx.org/specification/overview/
 /// </remarks>
 ///
 /// <copyright>
@@ -39,7 +39,7 @@ type
   private
     const
       /// <summary>CycloneDX specification version.</summary>
-      cSpecVersion = '1.5';
+      cSpecVersion = '1.6';
       /// <summary>Tool name.</summary>
       cToolName = 'DX.Comply';
   private
@@ -98,8 +98,9 @@ end;
 function TCycloneDxJsonWriter.BuildMetadata(const AMetadata: TSbomMetadata;
   const AProjectInfo: TProjectInfo): TJSONObject;
 var
-  LMetadata, LComponent, LTool, LTools, LSupplier: TJSONObject;
-  LToolArray, LSupplierUrls: TJSONArray;
+  LMetadata, LComponent, LTool, LTools, LSupplier, LManufacture, LContact: TJSONObject;
+  LToolArray, LSupplierUrls, LContacts: TJSONArray;
+  LKind: string;
 begin
   LMetadata := TJSONObject.Create;
 
@@ -134,6 +135,14 @@ begin
       LSupplier.AddPair('url', LSupplierUrls);
       LSupplierUrls.Add(AMetadata.SupplierUrl);
     end;
+    if IsBsiEmailAddress(Trim(AMetadata.Supplier)) then
+    begin
+      LContacts := TJSONArray.Create;
+      LContact := TJSONObject.Create;
+      LContact.AddPair('email', Trim(AMetadata.Supplier));
+      LContacts.Add(LContact);
+      LSupplier.AddPair('contact', LContacts);
+    end;
     LComponent.AddPair('supplier', LSupplier);
   end;
 
@@ -142,10 +151,35 @@ begin
 
   LMetadata.AddPair('component', LComponent);
 
+  // CycloneDX 1.6 names the SBOM creator metadata.manufacturer. It is one
+  // organizational entity, not an array. The contact is written only when
+  // the caller supplied an email or an http(s) URL. The deprecated
+  // manufacture element is not written.
+  LKind := BsiCreatorKind(AMetadata.SbomCreator);
+  if LKind <> '' then
+  begin
+    LManufacture := TJSONObject.Create;
+    if LKind = 'email' then
+    begin
+      LContacts := TJSONArray.Create;
+      LContact := TJSONObject.Create;
+      LContact.AddPair('email', Trim(AMetadata.SbomCreator));
+      LContacts.Add(LContact);
+      LManufacture.AddPair('contact', LContacts);
+    end
+    else
+    begin
+      LSupplierUrls := TJSONArray.Create;
+      LSupplierUrls.Add(Trim(AMetadata.SbomCreator));
+      LManufacture.AddPair('url', LSupplierUrls);
+    end;
+    LMetadata.AddPair('manufacturer', LManufacture);
+  end;
+
   if Length(AMetadata.Properties) > 0 then
     LMetadata.AddPair('properties', BuildProperties(AMetadata.Properties));
 
-  // Tool information (CycloneDX 1.5 tools.components format)
+  // Tool information (CycloneDX 1.6 tools.components format)
   LTool := TJSONObject.Create;
   LTool.AddPair('type', 'application');
   LTool.AddPair('author', 'Olaf Monien');
@@ -165,9 +199,19 @@ end;
 function TCycloneDxJsonWriter.BuildComponent(const AArtefact: TArtefactInfo;
   const AIndex: Integer): TJSONObject;
 var
-  LComponent, LHashes: TJSONObject;
-  LHashArray, LProperties: TJSONArray;
+  LComponent, LHashes, LRef, LRefHash: TJSONObject;
+  LHashArray, LProperties, LRefs, LRefHashes: TJSONArray;
   LProp: TJSONObject;
+  LFileName: string;
+
+  procedure AddProperty(const AName, AValue: string);
+  begin
+    LProp := TJSONObject.Create;
+    LProp.AddPair('name', AName);
+    LProp.AddPair('value', AValue);
+    LProperties.Add(LProp);
+  end;
+
 begin
   LComponent := TJSONObject.Create;
 
@@ -196,17 +240,50 @@ begin
   // File path
   LComponent.AddPair('purl', 'file:' + AArtefact.RelativePath);
 
-  // Hashes
-  if AArtefact.Hash <> '' then
+  // Hashes. SHA-256 stays first. SHA-512 is added when the file was hashed.
+  if (AArtefact.Hash <> '') or (AArtefact.HashSha512 <> '') then
   begin
     LHashArray := TJSONArray.Create;
 
-    LHashes := TJSONObject.Create;
-    LHashes.AddPair('alg', 'SHA-256');
-    LHashes.AddPair('content', LowerCase(AArtefact.Hash));
-    LHashArray.Add(LHashes);
+    if AArtefact.Hash <> '' then
+    begin
+      LHashes := TJSONObject.Create;
+      LHashes.AddPair('alg', 'SHA-256');
+      LHashes.AddPair('content', LowerCase(AArtefact.Hash));
+      LHashArray.Add(LHashes);
+    end;
+    if AArtefact.HashSha512 <> '' then
+    begin
+      LHashes := TJSONObject.Create;
+      LHashes.AddPair('alg', 'SHA-512');
+      LHashes.AddPair('content', LowerCase(AArtefact.HashSha512));
+      LHashArray.Add(LHashes);
+    end;
 
     LComponent.AddPair('hashes', LHashArray);
+  end;
+
+  // TR-03183-2 maps the deployable SHA-512 to externalReferences type
+  // distribution. bom-1.6 requires a url, and no download URL is known, so
+  // the url is the same file: locator already written as purl. The reference
+  // is written for a hashed executable or archive. Unit evidence is not a
+  // deployable file. The component hashes above stay as well.
+  if (AArtefact.HashSha512 <> '') and
+     (IsBsiExecutableArtefact(AArtefact) or
+      IsBsiArchiveFileName(BsiComponentFileName(AArtefact.RelativePath))) then
+  begin
+    LRefs := TJSONArray.Create;
+    LRef := TJSONObject.Create;
+    LRefHashes := TJSONArray.Create;
+    LRefHash := TJSONObject.Create;
+    LRef.AddPair('type', 'distribution');
+    LRef.AddPair('url', 'file:' + AArtefact.RelativePath);
+    LRefHash.AddPair('alg', 'SHA-512');
+    LRefHash.AddPair('content', LowerCase(AArtefact.HashSha512));
+    LRefHashes.Add(LRefHash);
+    LRef.AddPair('hashes', LRefHashes);
+    LRefs.Add(LRef);
+    LComponent.AddPair('externalReferences', LRefs);
   end;
 
   // Properties
@@ -246,6 +323,17 @@ begin
     LProp.AddPair('name', 'net.developer-experts.dx-comply:conditional');
     LProp.AddPair('value', 'true');
     LProperties.Add(LProp);
+  end;
+
+  // BSI TR-03183-2 file properties. Omitted when there is no file name,
+  // which is how a logical component is left without these fields.
+  LFileName := BsiComponentFileName(AArtefact.RelativePath);
+  if LFileName <> '' then
+  begin
+    AddProperty('bsi:component:filename', LFileName);
+    AddProperty('bsi:component:executable', BsiExecutableValue(AArtefact));
+    AddProperty('bsi:component:archive', BsiArchiveValue(LFileName));
+    AddProperty('bsi:component:structured', BsiStructuredValue(LFileName));
   end;
 
   if LProperties.Count > 0 then
@@ -330,7 +418,7 @@ begin
   LRoot := TJSONObject.Create;
   try
     // CycloneDX version
-    LRoot.AddPair('$schema', 'http://cyclonedx.org/schema/bom-1.5.schema.json');
+    LRoot.AddPair('$schema', 'http://cyclonedx.org/schema/bom-1.6.schema.json');
     LRoot.AddPair('bomFormat', 'CycloneDX');
     LRoot.AddPair('specVersion', cSpecVersion);
     LRoot.AddPair('serialNumber', 'urn:uuid:' + GenerateUuid);
@@ -355,6 +443,21 @@ begin
       ApplyManifestCycloneDxJson(AMetadata.ComponentManifestJson, AArtefacts,
         LComponents, LDependencies, AProjectInfo.ProjectName);
     LRoot.AddPair('dependencies', LDependencies);
+
+    // Direct dependencies are what the build shows. TR-03183-2 requires the
+    // completeness of that list to be stated. Recursive resolution is not
+    // done here, so the aggregate is incomplete.
+    if Trim(AProjectInfo.ProjectName) <> '' then
+    begin
+      var LCompositions := TJSONArray.Create;
+      var LComposition := TJSONObject.Create;
+      var LCompositionDeps := TJSONArray.Create;
+      LComposition.AddPair('aggregate', 'incomplete');
+      LCompositionDeps.Add(AProjectInfo.ProjectName);
+      LComposition.AddPair('dependencies', LCompositionDeps);
+      LCompositions.Add(LComposition);
+      LRoot.AddPair('compositions', LCompositions);
+    end;
 
     // Write to file
     LOutput := TStringList.Create;
