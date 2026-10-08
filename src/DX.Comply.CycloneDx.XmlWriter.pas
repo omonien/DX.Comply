@@ -6,7 +6,7 @@
 /// <remarks>
 /// This unit provides TCycloneDxXmlWriter which generates CycloneDX 1.5 XML SBOMs:
 /// - Full metadata section with tool information
-/// - Component list with hashes (SHA-256)
+/// - Component list with hashes (SHA-256 and SHA-512 when the file could be opened)
 /// - Dependency graph grouped by deliverable, runtime packages, external DLLs and linked units
 /// - Schema validation support
 ///
@@ -185,6 +185,12 @@ begin
     AddElement('name', AMetadata.Supplier);
     if AMetadata.SupplierUrl <> '' then
       AddElement('url', AMetadata.SupplierUrl);
+    if IsBsiEmailAddress(Trim(AMetadata.Supplier)) then
+    begin
+      OpenTag('contact');
+      AddElement('email', Trim(AMetadata.Supplier));
+      CloseTag('contact');
+    end;
     CloseTag('supplier');
   end;
   if AMetadata.ProductName <> '' then
@@ -198,6 +204,22 @@ begin
   AddPropertyElements(AMetadata.ComponentProperties);
   CloseTag('component');
 
+  // manufacture follows component in the CycloneDX 1.5 metadata sequence.
+  if BsiCreatorKind(AMetadata.SbomCreator) = 'email' then
+  begin
+    OpenTag('manufacture');
+    OpenTag('contact');
+    AddElement('email', Trim(AMetadata.SbomCreator));
+    CloseTag('contact');
+    CloseTag('manufacture');
+  end
+  else if BsiCreatorKind(AMetadata.SbomCreator) = 'url' then
+  begin
+    OpenTag('manufacture');
+    AddElement('url', Trim(AMetadata.SbomCreator));
+    CloseTag('manufacture');
+  end;
+
   AddPropertyElements(AMetadata.Properties);
 
   CloseTag('metadata');
@@ -208,6 +230,7 @@ procedure TCycloneDxXmlWriter.BuildComponent(const AArtefact: TArtefactInfo;
 var
   LComponentType: string;
   LBomRef: string;
+  LFileName: string;
 begin
   if AArtefact.ArtefactType = 'application' then
     LComponentType := 'application'
@@ -228,15 +251,13 @@ begin
     AddElement('version', Copy(AArtefact.Hash, 1, 12));
 
   // Component sequence: name, version, then hashes, then purl, then properties.
-  if AArtefact.Hash <> '' then
+  if (AArtefact.Hash <> '') or (AArtefact.HashSha512 <> '') then
   begin
     OpenTag('hashes');
-    OpenTag('hash', 'alg="SHA-256"');
-    // Hash content goes directly without a sub-element
-    Dec(FIndentLevel);
-    // Replace last line with inline content
-    FLines[FLines.Count - 1] := StringOfChar(' ', FIndentLevel * 2) +
-      '<hash alg="SHA-256">' + LowerCase(AArtefact.Hash) + '</hash>';
+    if AArtefact.Hash <> '' then
+      AddLine('<hash alg="SHA-256">' + LowerCase(AArtefact.Hash) + '</hash>');
+    if AArtefact.HashSha512 <> '' then
+      AddLine('<hash alg="SHA-512">' + LowerCase(AArtefact.HashSha512) + '</hash>');
     CloseTag('hashes');
   end;
 
@@ -245,9 +266,12 @@ begin
   // Evidence and confidence must be written for source-scanned DLLs, which
   // have no file on disk (size -1) and an empty origin. Gating the whole
   // block on size or origin dropped those properties. Issue #45.
+  // A file name is enough on its own: the TR properties still apply when
+  // the file could not be opened.
+  LFileName := BsiComponentFileName(AArtefact.RelativePath);
   if (AArtefact.FileSize >= 0) or (Trim(AArtefact.Origin) <> '') or
      (Trim(AArtefact.Evidence) <> '') or (Trim(AArtefact.Confidence) <> '') or
-     AArtefact.Conditional then
+     AArtefact.Conditional or (LFileName <> '') then
   begin
     OpenTag('properties');
     if AArtefact.FileSize >= 0 then
@@ -284,6 +308,16 @@ begin
       Dec(FIndentLevel);
       FLines[FLines.Count - 1] := StringOfChar(' ', FIndentLevel * 2) +
         '<property name="net.developer-experts.dx-comply:conditional">true</property>';
+    end;
+    if LFileName <> '' then
+    begin
+      AddLine('<property name="bsi:component:filename">' + EscapeXml(LFileName) + '</property>');
+      AddLine('<property name="bsi:component:executable">' +
+        BsiExecutableValue(AArtefact) + '</property>');
+      AddLine('<property name="bsi:component:archive">' +
+        EscapeXml(BsiArchiveValue(LFileName)) + '</property>');
+      AddLine('<property name="bsi:component:structured">' +
+        BsiStructuredValue(LFileName) + '</property>');
     end;
     CloseTag('properties');
   end;
@@ -374,6 +408,18 @@ begin
         AArtefacts, AProjectInfo.ProjectName, FIndentLevel)
     else
       BuildDependencies(AArtefacts, AProjectInfo.ProjectName);
+
+    if Trim(AProjectInfo.ProjectName) <> '' then
+    begin
+      OpenTag('compositions');
+      OpenTag('composition');
+      AddElement('aggregate', 'incomplete');
+      OpenTag('dependencies');
+      AddLine('<dependency ref="' + EscapeXml(AProjectInfo.ProjectName) + '"/>');
+      CloseTag('dependencies');
+      CloseTag('composition');
+      CloseTag('compositions');
+    end;
 
     CloseTag('bom');
 

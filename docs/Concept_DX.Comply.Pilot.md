@@ -4,11 +4,11 @@
 
 DX.Comply schreibt eine Komponentenliste (SBOM) und Build-Nachweise. Es listet die Units, Packages und DLL-Namen, die es aus dem Build sehen kann, und einen Hash, wo es die Datei oeffnen konnte. Diese Liste ist ein Anfang fuer den SBOM-Teil der technischen Dokumentation nach dem EU Cyber Resilience Act (Anhang I Teil II, Anhang VII). Sie macht ein Produkt nicht konform und ersetzt die uebrige technische Dokumentation nicht.
 
-Lieferant, Version und Lizenz fuer Komponenten Dritter fehlen noch (ein Manifest dafuer ist geplant, siehe Issue #20). Dasselbe gilt fuer den Rest der technischen Dokumentation: Verfahren zur Behandlung von Schwachstellen, Offenlegungspolitik, Auslieferung von Updates und Risikobewertung. Schwachstellenmanagement und Meldewesen liegen ausserhalb dieses Werkzeugs.
+Lieferant, Version und Lizenz fuer Komponenten Dritter schreibt DX.Comply, wenn ein Komponenten-Manifest (components.json) sie enthaelt. Der Rest der technischen Dokumentation fehlt weiterhin: Verfahren zur Behandlung von Schwachstellen, Offenlegungspolitik, Auslieferung von Updates und Risikobewertung. Schwachstellenmanagement und Meldewesen liegen ausserhalb dieses Werkzeugs.
 
 Die Pruefung im Werkzeug ist eine strukturelle Pruefung. Das CycloneDX-JSON-Beispiel in diesem Repository besteht die offizielle CycloneDX-1.5-JSON-Schema-Pruefung mit check-jsonschema. SPDX und CycloneDX-XML werden im Werkzeug nicht gegen offizielle Schemas geprueft.
 
-Die BSI TR-03183-2 v2.1.0 verlangt mehr, als DX.Comply heute schreibt, unter anderem CycloneDX 1.6 oder neuer, SHA-512, eine Lizenz und einen Lieferanten je Komponente sowie rekursive Abhaengigkeiten. Dieses Profil steht auf der Roadmap. DX.Comply erfuellt es noch nicht vollstaendig.
+Die BSI TR-03183-2 Version 2.1.0 verlangt CycloneDX 1.6 oder neuer und SPDX 3.0.1 oder neuer. DX.Comply bleibt bei CycloneDX 1.5 und SPDX 2.3. Es schreibt SHA-512 neben SHA-256, den Dateinamen und die Eigenschaften executable, archive und structured, wenn die Datei geoeffnet werden konnte. Den Ersteller der SBOM schreibt es nur, wenn eine E-Mail oder eine http(s)-URL angegeben wird. Lizenzen und Herstellerangaben kommen aus dem Komponenten-Manifest, wenn eines angegeben wird. Rekursive Abhaengigkeiten schreibt es nicht. Das ist keine Zertifizierung und keine volle Abdeckung der Richtlinie.
 
 ## Vision
 

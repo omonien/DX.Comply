@@ -36,6 +36,11 @@ type
     FileSize: Int64;
     /// <summary>SHA-256 hash as hexadecimal string.</summary>
     Hash: string;
+    /// <summary>
+    /// SHA-512 hash as a hexadecimal string. Empty when the file could not
+    /// be opened. Written next to Hash when it is present.
+    /// </summary>
+    HashSha512: string;
     /// <summary>Artefact type (exe, dll, bpl, dcp, resource, unit-evidence).</summary>
     ArtefactType: string;
     /// <summary>Unit origin label for composition evidence (e.g. Embarcadero RTL).</summary>
@@ -214,6 +219,11 @@ type
     Properties: TArray<TSbomProperty>;
     /// <summary>Additional DX.Comply component properties for metadata.component.</summary>
     ComponentProperties: TArray<TSbomProperty>;
+    /// <summary>
+    /// SBOM creator contact copied from the configuration. An email address
+    /// or an http(s) URL. Empty means the writers omit the contact.
+    /// </summary>
+    SbomCreator: string;
   end;
 
   /// <summary>
@@ -363,6 +373,59 @@ function FindDeliverableTargetIndex(const AArtefacts: TArtefactList;
 /// </summary>
 function ArtefactDependencyGroup(const AArtefact: TArtefactInfo): Integer;
 
+/// <summary>
+/// True when AValue is a single email address: one @, no whitespace, and a
+/// dot in the domain. A URL is not an email.
+/// </summary>
+function IsBsiEmailAddress(const AValue: string): Boolean;
+
+/// <summary>
+/// True when AValue starts with http:// or https:// and has a remainder.
+/// </summary>
+function IsBsiHttpUrl(const AValue: string): Boolean;
+
+/// <summary>
+/// Returns email, url, or an empty string when AValue is neither.
+/// </summary>
+function BsiCreatorKind(const AValue: string): string;
+
+/// <summary>
+/// True when AValue is empty, or an email address, or an http(s) URL.
+/// </summary>
+function IsAcceptableBsiCreator(const AValue: string): Boolean;
+
+/// <summary>
+/// File name without a directory. Empty when ARelativePath has no name.
+/// </summary>
+function BsiComponentFileName(const ARelativePath: string): string;
+
+/// <summary>
+/// True for archive names used by TR-03183-2 section 8.1.6 and for a short
+/// list of package archives (.tgz, .rar, .jar, .nupkg, .iso, .cab).
+/// </summary>
+function IsBsiArchiveFileName(const AFileName: string): Boolean;
+
+/// <summary>
+/// True for an application, library, package, or runtime package, and for a
+/// file whose name ends in .exe, .dll, or .bpl.
+/// </summary>
+function IsBsiExecutableArtefact(const AArtefact: TArtefactInfo): Boolean;
+
+/// <summary>TR value executable or non-executable.</summary>
+function BsiExecutableValue(const AArtefact: TArtefactInfo): string;
+
+/// <summary>TR value archive or no archive.</summary>
+function BsiArchiveValue(const AFileName: string): string;
+
+/// <summary>TR value structured or unstructured.</summary>
+function BsiStructuredValue(const AFileName: string): string;
+
+/// <summary>
+/// SPDX 2.3 package comment carrying the three TR properties. Empty when
+/// the artefact has no file name.
+/// </summary>
+function BsiPropertyComment(const AArtefact: TArtefactInfo): string;
+
 implementation
 
 uses
@@ -503,6 +566,131 @@ begin
     Result := 2
   else
     Result := 3;
+end;
+
+function HasWhitespace(const AValue: string): Boolean;
+var
+  LChar: Char;
+begin
+  Result := False;
+  for LChar in AValue do
+    if LChar <= ' ' then
+      Exit(True);
+end;
+
+function IsBsiEmailAddress(const AValue: string): Boolean;
+var
+  LAt: Integer;
+  LDomain: string;
+begin
+  Result := False;
+  if (AValue = '') or HasWhitespace(AValue) or (Pos('://', AValue) > 0) then
+    Exit;
+  LAt := Pos('@', AValue);
+  if (LAt <= 1) or (LAt <> LastDelimiter('@', AValue)) then
+    Exit;
+  LDomain := Copy(AValue, LAt + 1, MaxInt);
+  if (LDomain = '') or (Pos('.', LDomain) = 0) then
+    Exit;
+  if LDomain.StartsWith('.') or LDomain.EndsWith('.') then
+    Exit;
+  Result := True;
+end;
+
+function IsBsiHttpUrl(const AValue: string): Boolean;
+begin
+  if AValue.StartsWith('https://', True) then
+    Result := Length(AValue) > Length('https://')
+  else if AValue.StartsWith('http://', True) then
+    Result := Length(AValue) > Length('http://')
+  else
+    Result := False;
+end;
+
+function BsiCreatorKind(const AValue: string): string;
+var
+  LValue: string;
+begin
+  LValue := Trim(AValue);
+  if IsBsiEmailAddress(LValue) then
+    Result := 'email'
+  else if IsBsiHttpUrl(LValue) then
+    Result := 'url'
+  else
+    Result := '';
+end;
+
+function IsAcceptableBsiCreator(const AValue: string): Boolean;
+begin
+  Result := BsiCreatorKind(AValue) <> '';
+  if not Result then
+    Result := Trim(AValue) = '';
+end;
+
+function BsiComponentFileName(const ARelativePath: string): string;
+begin
+  Result := TPath.GetFileName(ARelativePath);
+end;
+
+function IsBsiArchiveFileName(const AFileName: string): Boolean;
+var
+  LName, LExt: string;
+begin
+  LName := LowerCase(AFileName);
+  LExt := LowerCase(TPath.GetExtension(LName));
+  Result := (LExt = '.zip') or (LExt = '.7z') or (LExt = '.tar') or
+    (LExt = '.tgz') or (LExt = '.rar') or (LExt = '.jar') or
+    (LExt = '.nupkg') or (LExt = '.iso') or (LExt = '.cab') or
+    LName.EndsWith('.tar.gz') or LName.EndsWith('.tar.bz2');
+end;
+
+function IsBsiExecutableArtefact(const AArtefact: TArtefactInfo): Boolean;
+var
+  LExt: string;
+begin
+  if SameText(AArtefact.ArtefactType, 'application') or
+     SameText(AArtefact.ArtefactType, 'library') or
+     SameText(AArtefact.ArtefactType, 'package') or
+     SameText(AArtefact.ArtefactType, 'runtime-package') then
+    Exit(True);
+  LExt := LowerCase(TPath.GetExtension(BsiComponentFileName(AArtefact.RelativePath)));
+  Result := (LExt = '.exe') or (LExt = '.dll') or (LExt = '.bpl');
+end;
+
+function BsiExecutableValue(const AArtefact: TArtefactInfo): string;
+begin
+  if IsBsiExecutableArtefact(AArtefact) then
+    Result := 'executable'
+  else
+    Result := 'non-executable';
+end;
+
+function BsiArchiveValue(const AFileName: string): string;
+begin
+  if IsBsiArchiveFileName(AFileName) then
+    Result := 'archive'
+  else
+    Result := 'no archive';
+end;
+
+function BsiStructuredValue(const AFileName: string): string;
+begin
+  if IsBsiArchiveFileName(AFileName) then
+    Result := 'structured'
+  else
+    Result := 'unstructured';
+end;
+
+function BsiPropertyComment(const AArtefact: TArtefactInfo): string;
+var
+  LFileName: string;
+begin
+  LFileName := BsiComponentFileName(AArtefact.RelativePath);
+  if LFileName = '' then
+    Exit('');
+  Result := 'bsi:component:executable=' + BsiExecutableValue(AArtefact) + '; ' +
+    'bsi:component:archive=' + BsiArchiveValue(LFileName) + '; ' +
+    'bsi:component:structured=' + BsiStructuredValue(LFileName);
 end;
 
 end.

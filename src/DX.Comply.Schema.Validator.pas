@@ -65,7 +65,7 @@ type
     procedure ValidateCycloneDxJsonComponent(const AComponent: TJSONObject; const AContext: string);
     procedure ValidateCycloneDxJsonComponents(const AComponents: TJSONArray);
     procedure ValidateCycloneDxJsonDependencies(const ADependencies: TJSONArray);
-    procedure ValidateSha256Hash(const AHash: string; const AContext: string);
+    procedure ValidateHashValue(const AAlgorithm, AHash, AContext: string);
     procedure ValidateSpdxJsonInternal(const AJson: TJSONObject);
     procedure ValidateSpdxJsonPackage(const APackage: TJSONObject; const AContext: string);
     function BuildResult: TValidationResult;
@@ -141,17 +141,34 @@ begin
   Result.Warnings := FWarnings.ToArray;
 end;
 
-procedure TSbomValidator.ValidateSha256Hash(const AHash: string; const AContext: string);
+procedure TSbomValidator.ValidateHashValue(const AAlgorithm, AHash, AContext: string);
+var
+  LExpected: Integer;
+  LLabel: string;
 begin
+  if SameText(AAlgorithm, 'SHA-256') or SameText(AAlgorithm, 'SHA256') then
+  begin
+    LExpected := 64;
+    LLabel := 'SHA-256';
+  end
+  else if SameText(AAlgorithm, 'SHA-512') or SameText(AAlgorithm, 'SHA512') then
+  begin
+    LExpected := 128;
+    LLabel := 'SHA-512';
+  end
+  else
+    Exit;
+
   if AHash = '' then
   begin
     AddWarning(AContext + ': hash is empty');
     Exit;
   end;
-  if Length(AHash) <> 64 then
-    AddError(AContext + ': SHA-256 hash must be 64 hex characters, got ' + IntToStr(Length(AHash)));
-  if not TRegEx.IsMatch(AHash, '^[0-9a-fA-F]{64}$') then
-    AddError(AContext + ': SHA-256 hash contains invalid characters');
+  if Length(AHash) <> LExpected then
+    AddError(AContext + ': ' + LLabel + ' hash must be ' + IntToStr(LExpected) +
+      ' hex characters, got ' + IntToStr(Length(AHash)));
+  if not TRegEx.IsMatch(AHash, '^[0-9a-fA-F]{' + IntToStr(LExpected) + '}$') then
+    AddError(AContext + ': ' + LLabel + ' hash contains invalid characters');
 end;
 
 // ---------------------------------------------------------------------------
@@ -343,8 +360,10 @@ begin
           AddError(AContext + '.hashes[' + IntToStr(I) + ']: missing required field: alg');
         if LContent = nil then
           AddError(AContext + '.hashes[' + IntToStr(I) + ']: missing required field: content')
-        else if (LAlg <> nil) and (LAlg.Value = 'SHA-256') then
-          ValidateSha256Hash(LContent.Value, AContext + '.hashes[' + IntToStr(I) + ']');
+        else if (LAlg <> nil) and
+          (SameText(LAlg.Value, 'SHA-256') or SameText(LAlg.Value, 'SHA-512')) then
+          ValidateHashValue(LAlg.Value, LContent.Value,
+            AContext + '.hashes[' + IntToStr(I) + ']');
       end;
     end;
   end;
@@ -477,13 +496,12 @@ begin
     AddWarning('No <component> elements found with type attribute');
 
   // Hash elements validation
-  var LHashMatches := TRegEx.Matches(AContent, '<hash\s+alg="SHA-256">([^<]*)</hash>', [roIgnoreCase]);
+  var LHashMatches := TRegEx.Matches(AContent,
+    '<hash\s+alg="(SHA-256|SHA-512)">([^<]*)</hash>', [roIgnoreCase]);
   var LHashMatch: TMatch;
   for LHashMatch in LHashMatches do
-  begin
-    var LHashValue := LHashMatch.Groups[1].Value;
-    ValidateSha256Hash(LHashValue, 'XML hash element');
-  end;
+    ValidateHashValue(LHashMatch.Groups[1].Value, LHashMatch.Groups[2].Value,
+      'XML hash element');
 
   // <dependencies> section (recommended)
   if Pos('<dependencies>', AContent) = 0 then
@@ -855,8 +873,10 @@ begin
           AddError(AContext + '.checksums[' + IntToStr(I) + ']: missing required field: algorithm');
         if LVal = nil then
           AddError(AContext + '.checksums[' + IntToStr(I) + ']: missing required field: checksumValue')
-        else if (LAlg <> nil) and (LAlg.Value = 'SHA256') then
-          ValidateSha256Hash(LVal.Value, AContext + '.checksums[' + IntToStr(I) + ']');
+        else if (LAlg <> nil) and
+          (SameText(LAlg.Value, 'SHA256') or SameText(LAlg.Value, 'SHA512')) then
+          ValidateHashValue(LAlg.Value, LVal.Value,
+            AContext + '.checksums[' + IntToStr(I) + ']');
       end;
     end;
   end;

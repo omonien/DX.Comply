@@ -237,9 +237,15 @@ example in this repository passes the official CycloneDX 1.5 JSON schema.
 SPDX JSON and CycloneDX XML are not checked against official schemas inside
 the tool.
 
-BSI TR-03183-2 v2.1.0 asks for more than this output, including CycloneDX 1.6
-or later, SHA-512 hashes, a licence and a supplier on each component, and
-recursive dependencies. Matching that profile is on the roadmap.
+BSI TR-03183-2 version 2.1.0 asks for CycloneDX 1.6 or later, or SPDX 3.0.1
+or later. This CLI stays on CycloneDX 1.5 and SPDX 2.3. It writes SHA-512 next
+to SHA-256, the file name, and the executable, archive, and structured
+properties when it could open the file. Pass `--sbom-creator` with an email
+address or an http(s) URL when you want that contact in the document. A
+component manifest supplies licence, version, and creator for third-party
+libraries. The dependency list is the direct grouped graph and is marked
+incomplete. Recursive dependencies are not resolved. See
+[BSI-TR-03183-2.md](BSI-TR-03183-2.md). This output is not a certification.
 
 Practical checklist:
 

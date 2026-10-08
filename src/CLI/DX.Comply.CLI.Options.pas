@@ -63,6 +63,7 @@ type
     FDelphi7Root: string;
     FManifestFile: string;
     FManifestExplicit: Boolean;
+    FSbomCreator: string;
     FParseError: string;
     /// <summary>
     /// Parses the --report value (markdown | html | both | none) and updates
@@ -147,6 +148,8 @@ type
     property ManifestFile: string read FManifestFile;
     /// <summary>True when --manifest was passed. That path wins over the config file.</summary>
     property ManifestExplicit: Boolean read FManifestExplicit;
+    /// <summary>SBOM creator contact from --sbom-creator. Empty when the flag was not passed.</summary>
+    property SbomCreator: string read FSbomCreator;
     property ParseError: string read FParseError;
   end;
 
@@ -429,6 +432,21 @@ begin
         FManifestFile := LValue;
         FManifestExplicit := True;
       end
+      else if LKey = 'sbom-creator' then
+      begin
+        if Trim(LValue) = '' then
+        begin
+          FParseError := 'Invalid value for --sbom-creator: value is empty.';
+          Exit(False);
+        end;
+        if BsiCreatorKind(LValue) = '' then
+        begin
+          FParseError := 'Invalid value for --sbom-creator: expected an email address or an http(s) URL.';
+          Exit(False);
+        end;
+        FSbomCreator := Trim(LValue);
+        Include(FExplicitOverrides, scoSbomCreator);
+      end
       else
       begin
         FParseError := 'Unknown option: --' + LKey;
@@ -489,6 +507,10 @@ begin
   Writeln('  --product=<name>              Product name override');
   Writeln('  --version=<version>           Product version override');
   Writeln('  --supplier=<name>             Supplier/company name');
+  Writeln('  --sbom-creator=<email-or-url> SBOM creator contact (BSI TR-03183-2).');
+  Writeln('                                An email address or an http(s) URL.');
+  Writeln('                                Omitted when you do not set it.');
+  Writeln('                                File key: sbomCreator');
   Writeln('  --include=<pattern>           File include pattern (repeatable)');
   Writeln('  --exclude=<pattern>           File exclude pattern (repeatable)');
   Writeln('  --scan-dir=<path>             Also scan this directory for binaries');
@@ -527,6 +549,7 @@ begin
   Writeln('Examples:');
   Writeln('  dxcomply --project=src\MyApp.dproj --format=cyclonedx-json --output=bom.json');
   Writeln('  dxcomply --project=src\MyApp.dproj --manifest=components.json --no-pause');
+  Writeln('  dxcomply --project=src\MyApp.dproj --sbom-creator=sbom@example.com --no-pause');
   Writeln('  dxcomply --project=src\MyApp.dpr --delphi7-root=C:\Delphi7 --no-pause');
   Writeln('  dxcomply --project=src\MyApp.dproj --ci --config=.dxcomply.json --no-pause');
   Writeln('  dxcomply --project=src\MyApp.dproj --ci --config-name=Debug --no-pause');
@@ -563,6 +586,7 @@ begin
   Result.ProductName     := FProductName;
   Result.ProductVersion  := FProductVersion;
   Result.Supplier        := FSupplier;
+  Result.SbomCreator     := FSbomCreator;
   Result.IncludePatterns             := FIncludePatterns;
   Result.ExcludePatterns             := FExcludePatterns;
   Result.ScanDirs                    := FScanDirs;

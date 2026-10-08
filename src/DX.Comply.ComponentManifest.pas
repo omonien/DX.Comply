@@ -1172,8 +1172,8 @@ end;
 function BuildLibraryJson(const AEntry: TComponentEntry; AIndex: Integer;
   const ABomRef: string): TJSONObject;
 var
-  LSupplier: TJSONObject;
-  LUrls, LRefs: TJSONArray;
+  LSupplier, LContact: TJSONObject;
+  LUrls, LRefs, LContacts: TJSONArray;
   LRef: TJSONObject;
   LPurl: string;
 begin
@@ -1191,6 +1191,14 @@ begin
       LUrls := TJSONArray.Create;
       LSupplier.AddPair('url', LUrls);
       LUrls.Add(AEntry.VendorUrl);
+    end;
+    if IsBsiEmailAddress(Trim(AEntry.Vendor)) then
+    begin
+      LContacts := TJSONArray.Create;
+      LContact := TJSONObject.Create;
+      LContact.AddPair('email', Trim(AEntry.Vendor));
+      LContacts.Add(LContact);
+      LSupplier.AddPair('contact', LContacts);
     end;
     Result.AddPair('author', AEntry.Vendor);
   end;
@@ -1402,6 +1410,12 @@ var
       AddLine(AIndentLevel + 2, '<name>' + EscapeXml(AEntry.Vendor) + '</name>');
       if AEntry.VendorUrl <> '' then
         AddLine(AIndentLevel + 2, '<url>' + EscapeXml(AEntry.VendorUrl) + '</url>');
+      if IsBsiEmailAddress(Trim(AEntry.Vendor)) then
+      begin
+        AddLine(AIndentLevel + 2, '<contact>');
+        AddLine(AIndentLevel + 3, '<email>' + EscapeXml(Trim(AEntry.Vendor)) + '</email>');
+        AddLine(AIndentLevel + 2, '</contact>');
+      end;
       AddLine(AIndentLevel + 1, '</supplier>');
       AddLine(AIndentLevel + 1, '<author>' + EscapeXml(AEntry.Vendor) + '</author>');
     end;
@@ -1564,6 +1578,11 @@ begin
     Result.AddPair('supplier', 'Organization: ' + AEntry.Vendor)
   else
     Result.AddPair('supplier', 'NOASSERTION');
+  if IsBsiEmailAddress(Trim(AEntry.Vendor)) then
+    Result.AddPair('originator', 'Person: ' + Trim(AEntry.Vendor) + ' (' +
+      Trim(AEntry.Vendor) + ')')
+  else if Trim(AEntry.Vendor) <> '' then
+    Result.AddPair('originator', 'Organization: ' + Trim(AEntry.Vendor));
 
   LToken := SpdxLicenceToken(AEntry, LKind);
   Result.AddPair('licenseConcluded', LToken);
@@ -1571,15 +1590,26 @@ begin
   Result.AddPair('copyrightText', 'NOASSERTION');
 
   LPurl := BuildDelphiPurl(AEntry.Name, AEntry.Version, AEntry.Purl);
-  if LPurl <> '' then
+  if (LPurl <> '') or (AEntry.VendorUrl <> '') then
   begin
     LRefs := TJSONArray.Create;
     Result.AddPair('externalRefs', LRefs);
-    LRef := TJSONObject.Create;
-    LRefs.Add(LRef);
-    LRef.AddPair('referenceCategory', 'PACKAGE-MANAGER');
-    LRef.AddPair('referenceType', 'purl');
-    LRef.AddPair('referenceLocator', LPurl);
+    if LPurl <> '' then
+    begin
+      LRef := TJSONObject.Create;
+      LRefs.Add(LRef);
+      LRef.AddPair('referenceCategory', 'PACKAGE-MANAGER');
+      LRef.AddPair('referenceType', 'purl');
+      LRef.AddPair('referenceLocator', LPurl);
+    end;
+    if AEntry.VendorUrl <> '' then
+    begin
+      LRef := TJSONObject.Create;
+      LRefs.Add(LRef);
+      LRef.AddPair('referenceCategory', 'OTHER');
+      LRef.AddPair('referenceType', 'website');
+      LRef.AddPair('referenceLocator', AEntry.VendorUrl);
+    end;
   end;
 end;
 

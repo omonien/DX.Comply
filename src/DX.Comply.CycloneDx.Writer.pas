@@ -6,7 +6,7 @@
 /// <remarks>
 /// This unit provides TCycloneDxJsonWriter which generates CycloneDX 1.5 JSON SBOMs:
 /// - Full metadata section with tool information
-/// - Component list with hashes (SHA-256)
+/// - Component list with hashes (SHA-256 and SHA-512 when the file could be opened)
 /// - Dependency graph grouped by deliverable, runtime packages, external DLLs and linked units
 /// - Schema validation support
 ///
@@ -98,8 +98,9 @@ end;
 function TCycloneDxJsonWriter.BuildMetadata(const AMetadata: TSbomMetadata;
   const AProjectInfo: TProjectInfo): TJSONObject;
 var
-  LMetadata, LComponent, LTool, LTools, LSupplier: TJSONObject;
-  LToolArray, LSupplierUrls: TJSONArray;
+  LMetadata, LComponent, LTool, LTools, LSupplier, LManufacture, LContact: TJSONObject;
+  LToolArray, LSupplierUrls, LContacts: TJSONArray;
+  LKind: string;
 begin
   LMetadata := TJSONObject.Create;
 
@@ -134,6 +135,14 @@ begin
       LSupplier.AddPair('url', LSupplierUrls);
       LSupplierUrls.Add(AMetadata.SupplierUrl);
     end;
+    if IsBsiEmailAddress(Trim(AMetadata.Supplier)) then
+    begin
+      LContacts := TJSONArray.Create;
+      LContact := TJSONObject.Create;
+      LContact.AddPair('email', Trim(AMetadata.Supplier));
+      LContacts.Add(LContact);
+      LSupplier.AddPair('contact', LContacts);
+    end;
     LComponent.AddPair('supplier', LSupplier);
   end;
 
@@ -141,6 +150,29 @@ begin
     LComponent.AddPair('properties', BuildProperties(AMetadata.ComponentProperties));
 
   LMetadata.AddPair('component', LComponent);
+
+  // CycloneDX 1.5 calls this manufacture. The contact is written only when
+  // the caller supplied an email or an http(s) URL.
+  LKind := BsiCreatorKind(AMetadata.SbomCreator);
+  if LKind <> '' then
+  begin
+    LManufacture := TJSONObject.Create;
+    if LKind = 'email' then
+    begin
+      LContacts := TJSONArray.Create;
+      LContact := TJSONObject.Create;
+      LContact.AddPair('email', Trim(AMetadata.SbomCreator));
+      LContacts.Add(LContact);
+      LManufacture.AddPair('contact', LContacts);
+    end
+    else
+    begin
+      LSupplierUrls := TJSONArray.Create;
+      LSupplierUrls.Add(Trim(AMetadata.SbomCreator));
+      LManufacture.AddPair('url', LSupplierUrls);
+    end;
+    LMetadata.AddPair('manufacture', LManufacture);
+  end;
 
   if Length(AMetadata.Properties) > 0 then
     LMetadata.AddPair('properties', BuildProperties(AMetadata.Properties));
@@ -168,6 +200,16 @@ var
   LComponent, LHashes: TJSONObject;
   LHashArray, LProperties: TJSONArray;
   LProp: TJSONObject;
+  LFileName: string;
+
+  procedure AddProperty(const AName, AValue: string);
+  begin
+    LProp := TJSONObject.Create;
+    LProp.AddPair('name', AName);
+    LProp.AddPair('value', AValue);
+    LProperties.Add(LProp);
+  end;
+
 begin
   LComponent := TJSONObject.Create;
 
@@ -196,15 +238,25 @@ begin
   // File path
   LComponent.AddPair('purl', 'file:' + AArtefact.RelativePath);
 
-  // Hashes
-  if AArtefact.Hash <> '' then
+  // Hashes. SHA-256 stays first. SHA-512 is added when the file was hashed.
+  if (AArtefact.Hash <> '') or (AArtefact.HashSha512 <> '') then
   begin
     LHashArray := TJSONArray.Create;
 
-    LHashes := TJSONObject.Create;
-    LHashes.AddPair('alg', 'SHA-256');
-    LHashes.AddPair('content', LowerCase(AArtefact.Hash));
-    LHashArray.Add(LHashes);
+    if AArtefact.Hash <> '' then
+    begin
+      LHashes := TJSONObject.Create;
+      LHashes.AddPair('alg', 'SHA-256');
+      LHashes.AddPair('content', LowerCase(AArtefact.Hash));
+      LHashArray.Add(LHashes);
+    end;
+    if AArtefact.HashSha512 <> '' then
+    begin
+      LHashes := TJSONObject.Create;
+      LHashes.AddPair('alg', 'SHA-512');
+      LHashes.AddPair('content', LowerCase(AArtefact.HashSha512));
+      LHashArray.Add(LHashes);
+    end;
 
     LComponent.AddPair('hashes', LHashArray);
   end;
@@ -246,6 +298,17 @@ begin
     LProp.AddPair('name', 'net.developer-experts.dx-comply:conditional');
     LProp.AddPair('value', 'true');
     LProperties.Add(LProp);
+  end;
+
+  // BSI TR-03183-2 file properties. Omitted when there is no file name,
+  // which is how a logical component is left without these fields.
+  LFileName := BsiComponentFileName(AArtefact.RelativePath);
+  if LFileName <> '' then
+  begin
+    AddProperty('bsi:component:filename', LFileName);
+    AddProperty('bsi:component:executable', BsiExecutableValue(AArtefact));
+    AddProperty('bsi:component:archive', BsiArchiveValue(LFileName));
+    AddProperty('bsi:component:structured', BsiStructuredValue(LFileName));
   end;
 
   if LProperties.Count > 0 then
@@ -355,6 +418,21 @@ begin
       ApplyManifestCycloneDxJson(AMetadata.ComponentManifestJson, AArtefacts,
         LComponents, LDependencies, AProjectInfo.ProjectName);
     LRoot.AddPair('dependencies', LDependencies);
+
+    // Direct dependencies are what the build shows. TR-03183-2 requires the
+    // completeness of that list to be stated. Recursive resolution is not
+    // done here, so the aggregate is incomplete.
+    if Trim(AProjectInfo.ProjectName) <> '' then
+    begin
+      var LCompositions := TJSONArray.Create;
+      var LComposition := TJSONObject.Create;
+      var LCompositionDeps := TJSONArray.Create;
+      LComposition.AddPair('aggregate', 'incomplete');
+      LCompositionDeps.Add(AProjectInfo.ProjectName);
+      LComposition.AddPair('dependencies', LCompositionDeps);
+      LCompositions.Add(LComposition);
+      LRoot.AddPair('compositions', LCompositions);
+    end;
 
     // Write to file
     LOutput := TStringList.Create;

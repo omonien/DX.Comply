@@ -72,7 +72,8 @@ type
     scoIncludeCompositionEvidence,
     scoReport,
     scoScanDirs,
-    scoScanTree
+    scoScanTree,
+    scoSbomCreator
   );
   /// <summary>Set of TSbomConfig fields that were set explicitly.</summary>
   TSbomConfigOverrides = set of TSbomConfigOverride;
@@ -95,6 +96,12 @@ type
     ProductVersion: string;
     /// <summary>Supplier name.</summary>
     Supplier: string;
+    /// <summary>
+    /// Optional SBOM creator contact from --sbom-creator or sbomCreator.
+    /// An email address or an http(s) URL. Empty means the field is omitted.
+    /// A company name is not accepted.
+    /// </summary>
+    SbomCreator: string;
     /// <summary>
     /// Optional component manifest (components.json). Empty means no enrichment.
     /// A relative path is resolved from the project directory.
@@ -348,6 +355,7 @@ begin
   Result.ProductName := '';
   Result.ProductVersion := '';
   Result.Supplier := '';
+  Result.SbomCreator := '';
   Result.ManifestFile := '';
   Result.ManifestFileExplicit := False;
   SetLength(Result.IncludePatterns, 0);
@@ -552,6 +560,7 @@ begin
     LArtefact.FilePath := LResolvedUnit.ResolvedPath;
     LArtefact.RelativePath := TPath.GetFileName(LResolvedUnit.ResolvedPath);
     LArtefact.Hash := LResolvedUnit.SecondaryHashSha256;
+    LArtefact.HashSha512 := LResolvedUnit.PrimaryHashSha512;
 
     if TFile.Exists(LResolvedUnit.ResolvedPath) then
       LArtefact.FileSize := TFile.GetSize(LResolvedUnit.ResolvedPath)
@@ -593,6 +602,7 @@ begin
     LArtefact.RelativePath := LBplFileName;
     LArtefact.FileSize := -1;
     LArtefact.Hash := '';
+    LArtefact.HashSha512 := '';
     LArtefact.ArtefactType := 'runtime-package';
     LArtefact.Origin := '';
     LArtefact.Evidence := 'BPL';
@@ -667,6 +677,7 @@ begin
       LArtefact.RelativePath := LDllName;
       LArtefact.FileSize := -1;
       LArtefact.Hash := '';
+      LArtefact.HashSha512 := '';
       LArtefact.ArtefactType := 'external-reference';
       LArtefact.Origin := '';
       LArtefact.Evidence := TPath.GetExtension(LDllName).ToUpper.TrimLeft(['.']);
@@ -1272,6 +1283,16 @@ begin
           if (LManifestValue is TJSONString) or (LManifestValue is TJSONNumber) then
             Result.ManifestFile := Trim(LManifestValue.Value);
         end;
+
+        // SBOM creator contact. An empty value is ignored. A non-empty value
+        // that is neither an email nor an http(s) URL is kept so Generate
+        // can reject it instead of dropping it.
+        if LJson.GetValue('sbomCreator') <> nil then
+        begin
+          LText := Trim(LJson.GetValue<string>('sbomCreator'));
+          if LText <> '' then
+            Result.SbomCreator := LText;
+        end;
       end;
     finally
       LRoot.Free;
@@ -1349,6 +1370,7 @@ begin
   Result.ProductName := AConfig.ProductName;
   Result.ProductVersion := AConfig.ProductVersion;
   Result.Supplier := AConfig.Supplier;
+  Result.SbomCreator := Trim(AConfig.SbomCreator);
   Result.SupplierUrl := '';
   Result.ComponentManifestJson := '';
   Result.Timestamp := DateToISO8601(Now, False);
@@ -1589,6 +1611,12 @@ var
   LWarningIndex: Integer;
 begin
   Result := False;
+
+  if not IsAcceptableBsiCreator(FConfig.SbomCreator) then
+  begin
+    DoProgress('Error: sbomCreator must be an email address or an http(s) URL.', -1);
+    Exit;
+  end;
 
   // Validate project
   if not FProjectScanner.Validate(AProjectPath) then
@@ -1854,6 +1882,8 @@ begin
     Result.ProductVersion := ACaller.ProductVersion;
   if scoSupplier in ACaller.ExplicitOverrides then
     Result.Supplier := ACaller.Supplier;
+  if scoSbomCreator in ACaller.ExplicitOverrides then
+    Result.SbomCreator := ACaller.SbomCreator;
   if scoIncludePatterns in ACaller.ExplicitOverrides then
     Result.IncludePatterns := ACaller.IncludePatterns;
   if scoExcludePatterns in ACaller.ExplicitOverrides then

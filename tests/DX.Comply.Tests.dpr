@@ -46,6 +46,7 @@ uses
   DX.Comply.Tests.Engine in 'DX.Comply.Tests.Engine.pas',
   DX.Comply.Tests.CLI.Options in 'DX.Comply.Tests.CLI.Options.pas',
   DX.Comply.Tests.ComponentManifest in 'DX.Comply.Tests.ComponentManifest.pas',
+  DX.Comply.Tests.BsiTr03183 in 'DX.Comply.Tests.BsiTr03183.pas',
   DX.Comply.Tests.UsesClauseParser in 'DX.Comply.Tests.UsesClauseParser.pas',
   DX.Comply.Tests.VersionInfo in 'DX.Comply.Tests.VersionInfo.pas';
 

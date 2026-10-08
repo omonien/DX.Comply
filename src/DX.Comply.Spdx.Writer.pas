@@ -351,6 +351,7 @@ function TSpdxJsonWriter.BuildCreationInfo(const AMetadata: TSbomMetadata): TJSO
 var
   LCreationInfo: TJSONObject;
   LCreators: TJSONArray;
+  LKind, LCreator: string;
 begin
   LCreationInfo := TJSONObject.Create;
 
@@ -361,7 +362,15 @@ begin
   LCreators.Add('Tool: ' + cToolName + '-' + ResolveDxComplyToolVersion(AMetadata.ToolVersion));
   if AMetadata.Supplier <> '' then
     LCreators.Add('Organization: ' + AMetadata.Supplier);
+  // SPDX 2.3 creators have no URL slot. An email is a Person. A URL goes
+  // in the creation comment. The tool does not invent a person name.
+  LCreator := Trim(AMetadata.SbomCreator);
+  LKind := BsiCreatorKind(LCreator);
+  if LKind = 'email' then
+    LCreators.Add('Person: ' + LCreator + ' (' + LCreator + ')');
   LCreationInfo.AddPair('creators', LCreators);
+  if LKind = 'url' then
+    LCreationInfo.AddPair('comment', 'SBOM creator URL: ' + LCreator);
 
   Result := LCreationInfo;
 end;
@@ -379,6 +388,11 @@ begin
   LFileName := TPath.GetFileName(AArtefact.RelativePath);
   LPackage.AddPair('SPDXID', ASpdxId);
   LPackage.AddPair('name', LFileName);
+  if LFileName <> '' then
+  begin
+    LPackage.AddPair('packageFileName', LFileName);
+    LPackage.AddPair('comment', BsiPropertyComment(AArtefact));
+  end;
 
   if AArtefact.Hash <> '' then
     LPackage.AddPair('versionInfo', Copy(AArtefact.Hash, 1, 12));
@@ -395,16 +409,29 @@ begin
     LPackage.AddPair('supplier', 'Organization: ' + Trim(ASupplier))
   else
     LPackage.AddPair('supplier', 'NOASSERTION');
+  if IsBsiEmailAddress(Trim(ASupplier)) then
+    LPackage.AddPair('originator', 'Person: ' + Trim(ASupplier) + ' (' +
+      Trim(ASupplier) + ')');
   LPackage.AddPair('copyrightText', 'NOASSERTION');
 
-  // Checksums
-  if AArtefact.Hash <> '' then
+  // Checksums. SHA256 stays first. SHA512 is the SPDX 2.3 algorithm name.
+  if (AArtefact.Hash <> '') or (AArtefact.HashSha512 <> '') then
   begin
     LChecksums := TJSONArray.Create;
-    LChecksum := TJSONObject.Create;
-    LChecksum.AddPair('algorithm', 'SHA256');
-    LChecksum.AddPair('checksumValue', LowerCase(AArtefact.Hash));
-    LChecksums.Add(LChecksum);
+    if AArtefact.Hash <> '' then
+    begin
+      LChecksum := TJSONObject.Create;
+      LChecksum.AddPair('algorithm', 'SHA256');
+      LChecksum.AddPair('checksumValue', LowerCase(AArtefact.Hash));
+      LChecksums.Add(LChecksum);
+    end;
+    if AArtefact.HashSha512 <> '' then
+    begin
+      LChecksum := TJSONObject.Create;
+      LChecksum.AddPair('algorithm', 'SHA512');
+      LChecksum.AddPair('checksumValue', LowerCase(AArtefact.HashSha512));
+      LChecksums.Add(LChecksum);
+    end;
     LPackage.AddPair('checksums', LChecksums);
   end;
 
