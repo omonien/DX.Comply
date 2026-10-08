@@ -30,6 +30,7 @@ interface
 uses
   System.Classes,
   System.JSON,
+  DX.Comply.DependencyGraph,
   DX.Comply.Engine.Intf;
 
 type
@@ -249,7 +250,15 @@ procedure AppendManifestLibrariesXml(ALines: TStrings; const AManifestJson: stri
 /// </summary>
 procedure AppendManifestDependenciesXml(ALines: TStrings; const AManifestJson: string;
   const AArtefacts: TArtefactList; const AProjectBomRef: string;
-  AIndentLevel: Integer);
+  AIndentLevel: Integer; const AUsesGraph: TUsesDependencyGraph);
+
+/// <summary>
+/// bom-ref values of manifest libraries that matched at least one unit.
+/// Those libraries are a complete declaration: dependsOn is exactly the
+/// matched units. Empty when the manifest is inactive.
+/// </summary>
+function ManifestLibraryBomRefs(const AManifestJson: string;
+  const AArtefacts: TArtefactList): TArray<string>;
 
 /// <summary>
 /// Appends SPDX 2.3 packages, relationships, and extracted licence names.
@@ -1482,7 +1491,8 @@ begin
 end;
 
 procedure AppendManifestDependenciesXml(ALines: TStrings; const AManifestJson: string;
-  const AArtefacts: TArtefactList; const AProjectBomRef: string; AIndentLevel: Integer);
+  const AArtefacts: TArtefactList; const AProjectBomRef: string; AIndentLevel: Integer;
+  const AUsesGraph: TUsesDependencyGraph);
 var
   LManifest: TComponentManifest;
   LPlan: TManifestPlan;
@@ -1566,7 +1576,25 @@ begin
           EscapeXml(LPlan.Libraries[I].UnitBomRefs[J]) + '"/>');
       AddLine(AIndentLevel + 1, '</dependency>');
     end;
+  WriteUsesDependenciesXml(ALines, AIndentLevel, AUsesGraph);
   AddLine(AIndentLevel, '</dependencies>');
+end;
+
+function ManifestLibraryBomRefs(const AManifestJson: string;
+  const AArtefacts: TArtefactList): TArray<string>;
+var
+  LManifest: TComponentManifest;
+  LPlan: TManifestPlan;
+  I: Integer;
+begin
+  Result := nil;
+  if not TryPrepareManifest(AManifestJson, AArtefacts, LManifest, LPlan) then
+    Exit;
+  if not LPlan.Active then
+    Exit;
+  SetLength(Result, Length(LPlan.Libraries));
+  for I := 0 to High(LPlan.Libraries) do
+    Result[I] := LPlan.Libraries[I].BomRef;
 end;
 
 function SpdxLicenceToken(const AEntry: TComponentEntry; out AKind: TLicenceKind): string;

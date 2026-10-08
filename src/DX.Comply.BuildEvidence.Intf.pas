@@ -122,6 +122,16 @@ type
     SecondaryHashSha256: string;
     EvidenceSources: TArray<TBuildEvidenceSourceKind>;
     Warnings: TArray<string>;
+    /// <summary>
+    /// Unit names from the uses clauses of ResolvedPath, when that file is a
+    /// .pas that was read. Empty for a DCU or a missing file.
+    /// </summary>
+    UsedUnitNames: TArray<string>;
+    /// <summary>
+    /// True after the resolver has considered the uses clause. A .pas that
+    /// was read keeps the names above, including when the clause is empty.
+    /// </summary>
+    UsesCached: Boolean;
   end;
 
   /// <summary>

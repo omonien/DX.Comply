@@ -7,7 +7,7 @@
 /// This unit provides TSpdxJsonWriter which generates SPDX 2.3 JSON SBOMs:
 /// - Document creation information (tool, timestamp, namespace)
 /// - Package list with checksums (SHA-256)
-/// - Relationship graph (DESCRIBES, DEPENDS_ON, CONTAINS)
+/// - Relationship graph (DESCRIBES, DEPENDS_ON, CONTAINS), including direct uses edges
 /// - Extracted licensing information
 ///
 /// SPDX 2.3 specification: https://spdx.github.io/spdx-spec/v2.3/
@@ -81,6 +81,7 @@ implementation
 uses
   System.Hash,
   DX.Comply.ComponentManifest,
+  DX.Comply.DependencyGraph,
   DX.Comply.VersionInfo;
 
 { TSpdxJsonWriter }
@@ -502,6 +503,29 @@ begin
   Result := LRelationships;
 end;
 
+procedure AppendUsesRelationships(ARelationships: TJSONArray;
+  const APackageIds: TArray<string>; const AGraph: TUsesDependencyGraph);
+var
+  LDep: TUsesDependency;
+  LRel: TJSONObject;
+  LTarget: Integer;
+begin
+  if not Assigned(ARelationships) then
+    Exit;
+  for LDep in AGraph.Dependencies do
+    for LTarget in LDep.TargetIndexes do
+    begin
+      if (LDep.SourceIndex < 0) or (LDep.SourceIndex > High(APackageIds)) or
+         (LTarget < 0) or (LTarget > High(APackageIds)) then
+        Continue;
+      LRel := TJSONObject.Create;
+      LRel.AddPair('spdxElementId', APackageIds[LDep.SourceIndex]);
+      LRel.AddPair('relationshipType', 'DEPENDS_ON');
+      LRel.AddPair('relatedSpdxElement', APackageIds[LTarget]);
+      ARelationships.Add(LRel);
+    end;
+end;
+
 function TSpdxJsonWriter.Write(const AOutputPath: string;
   const AMetadata: TSbomMetadata;
   const AArtefacts: TArtefactList;
@@ -513,6 +537,7 @@ var
   LDocumentSpdxId: string;
   LDocNamespace: string;
   LPackageIds: TArray<string>;
+  LGraph: TUsesDependencyGraph;
   I: Integer;
 begin
   Result := False;
@@ -550,12 +575,17 @@ begin
     LRoot.AddPair('packages', LPackages);
 
     // Relationships. Manifest libraries use the same package IDs.
+    // Uses edges are added after that rewrite. A unit-to-unit DEPENDS_ON is
+    // not one of the edges the manifest moves onto a library.
+    LGraph := BuildUsesDependencyGraph(AArtefacts);
     LRoot.AddPair('relationships', BuildRelationships(AArtefacts, LPackageIds,
       LDocumentSpdxId, AProjectInfo.ProjectName));
     if AMetadata.ComponentManifestJson <> '' then
       ApplyManifestSpdx(AMetadata.ComponentManifestJson, AArtefacts, LPackages,
         LRoot.GetValue('relationships') as TJSONArray, LPackageIds,
         LDocumentSpdxId, LRoot);
+    AppendUsesRelationships(LRoot.GetValue('relationships') as TJSONArray,
+      LPackageIds, LGraph);
 
     // Write to file
     LOutput := TStringList.Create;

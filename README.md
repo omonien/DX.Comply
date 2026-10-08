@@ -214,7 +214,7 @@ The checked-in AlienInvasion example is a CycloneDX 1.5 document from an earlier
 
 ### BSI TR-03183-2
 
-[BSI TR-03183-2](https://www.bsi.bund.de/dok/TR-03183-en) version 2.1.0 (20 August 2025) asks for CycloneDX 1.6 or later, or SPDX 3.0.1 or later. CycloneDX output is 1.6. SPDX stays at 2.3. SPDX 3.0.1 is out of scope. DX.Comply writes the fields it can fill from the build or from values you set. That is not a certification, and it is not full coverage of the technical guideline. The field list is in [docs/BSI-TR-03183-2.md](docs/BSI-TR-03183-2.md).
+[BSI TR-03183-2](https://www.bsi.bund.de/dok/TR-03183-en) version 2.1.0 (20 August 2025) asks for CycloneDX 1.6 or later, or SPDX 3.0.1 or later. CycloneDX output is 1.6. SPDX stays at 2.3. SPDX 3.0.1 is out of scope. DX.Comply writes the fields it can fill from the build or from values you set. Where a unit's Pascal source was read, direct uses edges to other units already in the SBOM are written as well. A unit with no source stays a leaf. That is not a certification, and it is not full coverage of the technical guideline. The field list, including when a dependency set is complete, is in [docs/BSI-TR-03183-2.md](docs/BSI-TR-03183-2.md).
 
 Set the SBOM creator with `--sbom-creator=<email-or-url>` or with `sbomCreator` in `.dxcomply.json`. Use an email address or an http(s) URL. Leave it unset when you do not have one. A company name is rejected.
 

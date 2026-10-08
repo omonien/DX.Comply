@@ -571,6 +571,8 @@ begin
     LArtefact.Origin := UnitOriginKindToString(LResolvedUnit.OriginKind);
     LArtefact.Evidence := UnitEvidenceKindToString(LResolvedUnit.EvidenceKind);
     LArtefact.Confidence := ResolutionConfidenceToString(LResolvedUnit.Confidence);
+    LArtefact.UsedUnitNames := LResolvedUnit.UsedUnitNames;
+    LArtefact.UsesCached := LResolvedUnit.UsesCached;
 
     AArtefacts.Add(LArtefact);
   end;
