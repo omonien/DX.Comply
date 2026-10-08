@@ -49,6 +49,12 @@ function GetDxComplyToolVersion: string;
 /// </summary>
 function ResolveDxComplyToolVersion(const AMetadataToolVersion: string): string;
 
+/// <summary>
+/// Caption for the About dialog version line.
+/// An empty product version stays unavailable. It is not replaced with a constant.
+/// </summary>
+function FormatDXComplyVersionCaption(const AProductVersion, ACompanyName: string): string;
+
 implementation
 
 uses
@@ -187,6 +193,21 @@ begin
   Result := Trim(AMetadataToolVersion);
   if Result = '' then
     Result := GetDxComplyToolVersion;
+end;
+
+function FormatDXComplyVersionCaption(const AProductVersion, ACompanyName: string): string;
+var
+  LCompany: string;
+  LVersion: string;
+begin
+  LVersion := Trim(AProductVersion);
+  if LVersion = '' then
+    Exit('Version unavailable');
+
+  Result := 'Version ' + LVersion;
+  LCompany := Trim(ACompanyName);
+  if LCompany <> '' then
+    Result := Result + ' · ' + LCompany;
 end;
 
 end.

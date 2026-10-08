@@ -72,7 +72,7 @@
       Top = 86
       Width = 163
       Height = 21
-      Caption = 'Version 1.0.0.0 · Olaf Monien'
+      Caption = 'Version unavailable'
       Font.Charset = DEFAULT_CHARSET
       Font.Color = clGrayText
       Font.Height = -16

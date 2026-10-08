@@ -62,6 +62,7 @@ contains
   DX.Comply.IDE.Logger in 'DX.Comply.IDE.Logger.pas',
   DX.Comply.IDE.AboutDialog in 'DX.Comply.IDE.AboutDialog.pas',
   DX.Comply.IDE.PathSupport in 'DX.Comply.IDE.PathSupport.pas',
+  DX.Comply.IDE.Resources in 'DX.Comply.IDE.Resources.pas',
   DX.Comply.IDE.ReadmeSupport in 'DX.Comply.IDE.ReadmeSupport.pas',
   DX.Comply.IDE.BuildConfirmationDialog in 'DX.Comply.IDE.BuildConfirmationDialog.pas',
   DX.Comply.IDE.ProgressDialog in 'DX.Comply.IDE.ProgressDialog.pas',

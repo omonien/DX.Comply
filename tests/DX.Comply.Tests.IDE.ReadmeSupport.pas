@@ -29,13 +29,19 @@ type
     procedure ConvertMarkdownToHtmlDocument_RendersCommonReadmeStructures;
     [Test]
     procedure LoadDXComplyReadmeMarkdown_LoadsRepositoryReadme;
+    [Test]
+    procedure EmbeddedReadme_MatchesRepositoryFile;
   end;
 
 implementation
 
 uses
+  System.IOUtils,
   System.SysUtils,
-  DX.Comply.IDE.ReadmeSupport;
+  Winapi.Windows,
+  DX.Comply.IDE.ReadmeSupport,
+  DX.Comply.IDE.Resources,
+  DX.Comply.Tests.Paths;
 
 procedure TIDEReadmeSupportTests.ConvertMarkdownToHtmlDocument_RendersCommonReadmeStructures;
 const
@@ -67,6 +73,15 @@ begin
   Assert.Contains(LHtml, 'ShowMessage(''Hi'');');
 end;
 
+function NormalizeReadmeText(const AValue: string): string;
+begin
+  Result := AValue;
+  if Result.StartsWith(#$FEFF) then
+    Delete(Result, 1, 1);
+  Result := StringReplace(Result, #13#10, #10, [rfReplaceAll]);
+  Result := StringReplace(Result, #13, #10, [rfReplaceAll]);
+end;
+
 procedure TIDEReadmeSupportTests.LoadDXComplyReadmeMarkdown_LoadsRepositoryReadme;
 var
   LMarkdown: string;
@@ -75,6 +90,25 @@ begin
 
   Assert.Contains(LMarkdown, '# DX.Comply');
   Assert.Contains(LMarkdown, '## Why DX.Comply?');
+  Assert.IsFalse(LMarkdown.Contains('could not be located'),
+    'The info page must load the README instead of the missing-file message');
+end;
+
+procedure TIDEReadmeSupportTests.EmbeddedReadme_MatchesRepositoryFile;
+var
+  LFromRepo: string;
+  LFromResource: string;
+begin
+  Assert.IsTrue(
+    TryLoadDXComplyResourceText(HInstance, cDXComplyReadmeResource, LFromResource),
+    'DXCOMPLYREADME must be linked into the test executable');
+
+  LFromRepo := TFile.ReadAllText(TPath.Combine(RepoRoot, 'README.md'), TEncoding.UTF8);
+  Assert.AreEqual(NormalizeReadmeText(LFromRepo), NormalizeReadmeText(LFromResource),
+    'The embedded README must match README.md at the repository root');
+  Assert.AreEqual(NormalizeReadmeText(LFromResource),
+    NormalizeReadmeText(LoadDXComplyReadmeMarkdown),
+    'The info page must prefer the embedded README over a file lookup');
 end;
 
 initialization

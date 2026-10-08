@@ -98,9 +98,13 @@ DX.Comply writes **CycloneDX 1.6** JSON by default. Each linked unit is a `libra
 
 ### Installer (Delphi 13)
 
-The installer in the current release is built for Delphi 13 (RAD Studio 37.0). Run it from the [Releases](https://github.com/omonien/DX.Comply/releases) page. It registers the IDE plugin for Delphi 13 and copies the command line tool onto the machine.
+The installer in the current release is built for Delphi 13 (RAD Studio 37.0). Run it from the [Releases](https://github.com/omonien/DX.Comply/releases) page. It registers the IDE plugin for Delphi 13 and copies the command line tool onto the machine as `dxcomply.exe` in the installer's `bin` folder.
 
 The command line tool does not use the IDE and does not compile the project. It reads a `.dproj`, `.dpk`, or `.groupproj`, or a Delphi 7 `.dpr` with its `.dof` and `.cfg`, together with a detailed MAP file from a build. That MAP file can come from an older Delphi.
+
+### GetIt
+
+GetIt installs the IDE plugin only. It does not include `dxcomply.exe`. The command line tool comes from the release ZIP, from the Delphi 13 installer, or from building `src/CLI/DX.Comply.CLI.dproj`.
 
 ### Manual
 
@@ -122,32 +126,32 @@ The command line tool does not use the IDE and does not compile the project. It 
 
 ### Option B: Command line / CI
 
+`dxcomply.exe` is not part of a GetIt install. Use the copy from the release ZIP or the installer `bin` folder, or build `src/CLI/DX.Comply.CLI.dproj` and run `DX.Comply.CLI.exe` from the build output. The examples below assume that executable is on `PATH`, or that the current directory is the folder that contains it.
+
 The CLI tool expects an existing detailed MAP file. Build your project first with `DCC_MapFile=3`, then run:
 
-```bash
+```cmd
 dxcomply --project=MyApp.dproj --format=cyclonedx-json --output=bom.json --no-pause
 ```
 
 If the MAP file is in a non-standard directory, use `--map-dir`:
 
-```bash
-dxcomply --project=MyApp.dproj --map-dir=build/Win32/Release --output=bom.json --no-pause
+```cmd
+dxcomply --project=MyApp.dproj --map-dir=build\Win32\Release --output=bom.json --no-pause
 ```
 
-To also generate the HTML/Markdown companion report from the CLI (the report ships disabled by default), pass `--report`:
+To also generate the HTML/Markdown companion report from the CLI (the report ships disabled by default), pass `--report`. `--report=html` writes HTML only. `--report=both` writes HTML and Markdown. `--report` is the same as `--report=both`.
 
-```bash
-dxcomply --project=MyApp.dproj --report=html --no-pause          # HTML only
-dxcomply --project=MyApp.dproj --report=both --no-pause          # HTML + Markdown
-dxcomply --project=MyApp.dproj --report --no-pause               # same as --report=both
+```cmd
+dxcomply --project=MyApp.dproj --report=html --no-pause
+dxcomply --project=MyApp.dproj --report=both --no-pause
+dxcomply --project=MyApp.dproj --report --no-pause
 ```
 
-When building the same project for several targets, append the platform/configuration to the default filename so subsequent runs don't overwrite each other:
+When building the same project for several targets, append the platform and configuration to the default filename so subsequent runs do not overwrite each other. The output file is `bom.Win64.Release.json`. With `--report` set, the HTML report is `bom.Win64.Release.report.html`.
 
-```bash
-dxcomply --project=MyApp.dproj --platform=Win64 --config-name=Release \
-         --include-platform-in-output --no-pause
-# -> bom.Win64.Release.json (+ bom.Win64.Release.report.html if --report is set)
+```cmd
+dxcomply --project=MyApp.dproj --platform=Win64 --config-name=Release --include-platform-in-output --no-pause
 ```
 
 Run `dxcomply --help` for the full list of switches. See [docs/CI-Integration.md](docs/CI-Integration.md) for GitHub Actions / GitLab CI examples.
@@ -160,7 +164,7 @@ The command line tool can write an SBOM for a project that was built with an old
 2. Build the project. This produces a `.map` file.
 3. Run the CLI against the project file. Delphi 2007 and later use a `.dproj`, `.dpk`, or `.groupproj`. A Delphi 7 project is the `.dpr` together with its `.dof` and `.cfg`, or the `.dpk` when a package has no `.dproj`. Delphi 2005 and 2006 can use the `.bdsproj`. If a `.dproj` is also present, pass the `.dproj`.
 
-```bash
+```cmd
 dxcomply --project=MyApp.dpr --output=bom.json --no-pause
 ```
 
@@ -228,7 +232,7 @@ Subfolders are not walked. `setup\`, `tools\`, and old build directories stay ou
 
 Pass `--scan-dir=<path>` (repeatable) or set `scanDirs` when you stage extra binaries on purpose. Each entry is scanned non-recursively. If the value contains `**`, subdirectories are included. A relative path is resolved from the project directory.
 
-```bash
+```cmd
 dxcomply --project=MyApp.dproj --scan-dir=redist --scan-dir=plugins\** --no-pause
 ```
 
@@ -286,7 +290,7 @@ Without `--ci`, the file is not read. `--config=<path>` only chooses which file 
 
 An optional components file adds one library component for each matched row and fills in supplier, licence, version, type, and package URL. The format is the DelphiSBOM schema 1.0, so a file written for that tool works here unchanged. A sample is in [docs/samples/components.sample.json](docs/samples/components.sample.json).
 
-```bash
+```cmd
 dxcomply --project=MyApp.dproj --manifest=components.json --no-pause
 ```
 
@@ -349,7 +353,7 @@ The CRA requires (Annex I, Part II):
 | Mode | Requirement |
 |---|---|
 | **IDE plugin** | Release installer: Delphi 13. The design-time package is the IDE integration. |
-| **CLI tool** | Windows executable. Needs a `.dproj`, `.dpk`, `.groupproj`, or a Delphi 7 `.dpr` with `.dof` and `.cfg`, and a detailed MAP file. It does not compile the project. |
+| **CLI tool** | Windows executable from the release ZIP, the installer `bin` folder, or a build of `src/CLI/DX.Comply.CLI.dproj`. GetIt does not include it. Needs a `.dproj`, `.dpk`, `.groupproj`, or a Delphi 7 `.dpr` with `.dof` and `.cfg`, and a detailed MAP file. It does not compile the project. |
 | **Platform** | Windows build host |
 
 No internet connection is required. All processing is local.
