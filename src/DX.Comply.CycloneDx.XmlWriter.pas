@@ -7,7 +7,7 @@
 /// This unit provides TCycloneDxXmlWriter which generates CycloneDX 1.5 XML SBOMs:
 /// - Full metadata section with tool information
 /// - Component list with hashes (SHA-256)
-/// - Basic dependency graph
+/// - Dependency graph grouped by deliverable, runtime packages, external DLLs and linked units
 /// - Schema validation support
 ///
 /// The XML output conforms to the CycloneDX 1.5 XSD schema:
@@ -242,7 +242,12 @@ begin
 
   AddElement('purl', 'file:' + AArtefact.RelativePath);
 
-  if (AArtefact.FileSize >= 0) or (Trim(AArtefact.Origin) <> '') then
+  // Evidence and confidence must be written for source-scanned DLLs, which
+  // have no file on disk (size -1) and an empty origin. Gating the whole
+  // block on size or origin dropped those properties. Issue #45.
+  if (AArtefact.FileSize >= 0) or (Trim(AArtefact.Origin) <> '') or
+     (Trim(AArtefact.Evidence) <> '') or (Trim(AArtefact.Confidence) <> '') or
+     AArtefact.Conditional then
   begin
     OpenTag('properties');
     if AArtefact.FileSize >= 0 then
@@ -273,6 +278,13 @@ begin
       FLines[FLines.Count - 1] := StringOfChar(' ', FIndentLevel * 2) +
         '<property name="net.developer-experts.dx-comply:confidence">' + EscapeXml(AArtefact.Confidence) + '</property>';
     end;
+    if AArtefact.Conditional then
+    begin
+      OpenTag('property', 'name="net.developer-experts.dx-comply:conditional"');
+      Dec(FIndentLevel);
+      FLines[FLines.Count - 1] := StringOfChar(' ', FIndentLevel * 2) +
+        '<property name="net.developer-experts.dx-comply:conditional">true</property>';
+    end;
     CloseTag('properties');
   end;
 
@@ -299,12 +311,33 @@ procedure TCycloneDxXmlWriter.BuildDependencies(const AArtefacts: TArtefactList;
   const AProjectBomRef: string);
 var
   I: Integer;
+  LGroup: Integer;
+  LTargetIndex: Integer;
 begin
+  // Same shape as the JSON writer: project -> deliverable, and the
+  // deliverable depends on runtime packages, external DLLs and linked units.
   OpenTag('dependencies');
+  LTargetIndex := FindDeliverableTargetIndex(AArtefacts, AProjectBomRef);
+
   OpenTag('dependency', 'ref="' + EscapeXml(AProjectBomRef) + '"');
-  for I := 0 to AArtefacts.Count - 1 do
-    AddLine('<dependency ref="comp-' + IntToStr(I) + '"/>');
+  if LTargetIndex >= 0 then
+    AddLine('<dependency ref="comp-' + IntToStr(LTargetIndex) + '"/>')
+  else if Assigned(AArtefacts) then
+    for I := 0 to AArtefacts.Count - 1 do
+      AddLine('<dependency ref="comp-' + IntToStr(I) + '"/>');
   CloseTag('dependency');
+
+  if (LTargetIndex >= 0) and Assigned(AArtefacts) and (AArtefacts.Count > 1) then
+  begin
+    OpenTag('dependency', 'ref="comp-' + IntToStr(LTargetIndex) + '"');
+    for LGroup := 0 to 3 do
+      for I := 0 to AArtefacts.Count - 1 do
+        if (I <> LTargetIndex) and
+           (ArtefactDependencyGroup(AArtefacts[I]) = LGroup) then
+          AddLine('<dependency ref="comp-' + IntToStr(I) + '"/>');
+    CloseTag('dependency');
+  end;
+
   CloseTag('dependencies');
 end;
 

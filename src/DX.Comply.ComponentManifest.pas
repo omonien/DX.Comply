@@ -229,7 +229,8 @@ procedure ApplyManifestPublisher(const AManifest: TComponentManifest;
 
 /// <summary>
 /// Appends library components and rewrites the dependency graph.
-/// Does nothing when the JSON is empty or not a manifest.
+/// The program that was built depends on each library. Each library
+/// depends on the units it matched. Does nothing when the JSON is empty.
 /// </summary>
 procedure ApplyManifestCycloneDxJson(const AManifestJson: string;
   const AArtefacts: TArtefactList; AComponents, ADependencies: TJSONArray;
@@ -242,7 +243,9 @@ procedure AppendManifestLibrariesXml(ALines: TStrings; const AManifestJson: stri
   const AArtefacts: TArtefactList; AIndentLevel: Integer);
 
 /// <summary>
-/// Writes the dependencies element, with matched units linked under their library.
+/// Writes the dependencies element. The project depends on the program
+/// that was built. That program depends on each library and on components
+/// the manifest did not group. Each library depends on its matched units.
 /// </summary>
 procedure AppendManifestDependenciesXml(ALines: TStrings; const AManifestJson: string;
   const AArtefacts: TArtefactList; const AProjectBomRef: string;
@@ -250,10 +253,12 @@ procedure AppendManifestDependenciesXml(ALines: TStrings; const AManifestJson: s
 
 /// <summary>
 /// Appends SPDX 2.3 packages, relationships, and extracted licence names.
+/// Unit edges use APackageIds so they match the packages in the document.
 /// </summary>
 procedure ApplyManifestSpdx(const AManifestJson: string;
   const AArtefacts: TArtefactList; APackages, ARelationships: TJSONArray;
-  const ADocumentSpdxId: string; ARoot: TJSONObject);
+  const APackageIds: TArray<string>; const ADocumentSpdxId: string;
+  ARoot: TJSONObject);
 
 implementation
 
@@ -261,7 +266,8 @@ uses
   System.SysUtils,
   System.IOUtils,
   System.Generics.Collections,
-  System.RegularExpressions;
+  System.RegularExpressions,
+  System.Hash;
 
 const
   cScopePrefixes: array[0..14] of string = (
@@ -399,8 +405,27 @@ begin
 end;
 
 function SpdxPackageIdForRelativePath(const ARelativePath: string): string;
+var
+  LPath: string;
+  LSanitized: string;
+  LHash: string;
+  LBytes: TBytes;
+  LSha: THashSHA1;
 begin
-  Result := 'SPDXRef-Package-' + SanitizeSpdxId(TPath.GetFileName(ARelativePath));
+  // Same path hash as TSpdxJsonWriter.BuildPackageSpdxId. The writer still
+  // passes its package ids, which add a suffix when two paths collide.
+  LPath := StringReplace(Trim(ARelativePath), '\', '/', [rfReplaceAll]);
+  if LPath = '' then
+    LPath := 'unknown';
+  LSanitized := SanitizeSpdxId(LPath);
+  if LSanitized = '' then
+    LSanitized := 'unknown';
+  LBytes := TEncoding.UTF8.GetBytes(LPath);
+  LSha := THashSHA1.Create;
+  if Length(LBytes) > 0 then
+    LSha.Update(LBytes, Length(LBytes));
+  LHash := Copy(LowerCase(LSha.HashAsString), 1, 8);
+  Result := 'SPDXRef-Package-' + LSanitized + '-' + LHash;
 end;
 
 function ManifestSpdxId(const AName: string; AIndex: Integer): string;
@@ -1218,6 +1243,8 @@ var
   I, J: Integer;
   LRef: string;
   LArtefactCount: Integer;
+  LHasGrouped: Boolean;
+  LRewritten: Boolean;
 begin
   if not Assigned(AComponents) or not Assigned(ADependencies) then
     Exit;
@@ -1241,25 +1268,35 @@ begin
       (LPlan.GroupedArtefactIndexes[I] < LArtefactCount) then
       LGrouped[LPlan.GroupedArtefactIndexes[I]] := True;
 
+  // The grouped graph lists matched units on the deliverable, not on
+  // the project. Rewrite whichever dependency still lists those units.
+  // When none does, hang the libraries off the project.
+  LRewritten := False;
   for I := 0 to ADependencies.Count - 1 do
   begin
     if not (ADependencies.Items[I] is TJSONObject) then
       Continue;
     LDep := TJSONObject(ADependencies.Items[I]);
-    LValue := LDep.GetValue('ref');
-    if (LValue = nil) or not SameText(LValue.Value, AProjectBomRef) then
+    if not (LDep.GetValue('dependsOn') is TJSONArray) then
+      Continue;
+
+    LDepends := TJSONArray(LDep.GetValue('dependsOn'));
+    LHasGrouped := False;
+    for J := 0 to LDepends.Count - 1 do
+      if IsGroupedComponentRef(LDepends.Items[J].Value, LGrouped) then
+      begin
+        LHasGrouped := True;
+        Break;
+      end;
+    if not LHasGrouped then
       Continue;
 
     LNewDepends := TJSONArray.Create;
-    if LDep.GetValue('dependsOn') is TJSONArray then
+    for J := 0 to LDepends.Count - 1 do
     begin
-      LDepends := TJSONArray(LDep.GetValue('dependsOn'));
-      for J := 0 to LDepends.Count - 1 do
-      begin
-        LRef := LDepends.Items[J].Value;
-        if not IsGroupedComponentRef(LRef, LGrouped) then
-          LNewDepends.Add(LRef);
-      end;
+      LRef := LDepends.Items[J].Value;
+      if not IsGroupedComponentRef(LRef, LGrouped) then
+        LNewDepends.Add(LRef);
     end;
     for J := 0 to High(LPlan.Libraries) do
       LNewDepends.Add(LPlan.Libraries[J].BomRef);
@@ -1268,8 +1305,39 @@ begin
     if Assigned(LPair) then
       LPair.Free;
     LDep.AddPair('dependsOn', LNewDepends);
-    Break;
+    LRewritten := True;
   end;
+
+  if not LRewritten then
+    for I := 0 to ADependencies.Count - 1 do
+    begin
+      if not (ADependencies.Items[I] is TJSONObject) then
+        Continue;
+      LDep := TJSONObject(ADependencies.Items[I]);
+      LValue := LDep.GetValue('ref');
+      if (LValue = nil) or not SameText(LValue.Value, AProjectBomRef) then
+        Continue;
+
+      LNewDepends := TJSONArray.Create;
+      if LDep.GetValue('dependsOn') is TJSONArray then
+      begin
+        LDepends := TJSONArray(LDep.GetValue('dependsOn'));
+        for J := 0 to LDepends.Count - 1 do
+        begin
+          LRef := LDepends.Items[J].Value;
+          if not IsGroupedComponentRef(LRef, LGrouped) then
+            LNewDepends.Add(LRef);
+        end;
+      end;
+      for J := 0 to High(LPlan.Libraries) do
+        LNewDepends.Add(LPlan.Libraries[J].BomRef);
+
+      LPair := LDep.RemovePair('dependsOn');
+      if Assigned(LPair) then
+        LPair.Free;
+      LDep.AddPair('dependsOn', LNewDepends);
+      Break;
+    end;
 
   for I := 0 to High(LPlan.Libraries) do
   begin
@@ -1378,6 +1446,9 @@ var
   LManifest: TComponentManifest;
   LPlan: TManifestPlan;
   LGrouped: TArray<Boolean>;
+  LChildren: TStringList;
+  LTargetIndex: Integer;
+  LGroup: Integer;
   I, J: Integer;
 
   procedure AddLine(ALevel: Integer; const AText: string);
@@ -1398,17 +1469,51 @@ begin
         (LPlan.GroupedArtefactIndexes[I] <= High(LGrouped)) then
         LGrouped[LPlan.GroupedArtefactIndexes[I]] := True;
 
+  LTargetIndex := -1;
+  if Assigned(AArtefacts) then
+    LTargetIndex := FindDeliverableTargetIndex(AArtefacts, AProjectBomRef);
+
   AddLine(AIndentLevel, '<dependencies>');
   AddLine(AIndentLevel + 1, '<dependency ref="' + EscapeXml(AProjectBomRef) + '">');
-  if Assigned(AArtefacts) then
+  if LTargetIndex >= 0 then
+    AddLine(AIndentLevel + 2, '<dependency ref="comp-' + IntToStr(LTargetIndex) + '"/>')
+  else if Assigned(AArtefacts) then
+  begin
     for I := 0 to AArtefacts.Count - 1 do
       if (I > High(LGrouped)) or not LGrouped[I] then
         AddLine(AIndentLevel + 2, '<dependency ref="comp-' + IntToStr(I) + '"/>');
-  if LPlan.Active then
-    for I := 0 to High(LPlan.Libraries) do
-      AddLine(AIndentLevel + 2, '<dependency ref="' +
-        EscapeXml(LPlan.Libraries[I].BomRef) + '"/>');
+    if LPlan.Active then
+      for I := 0 to High(LPlan.Libraries) do
+        AddLine(AIndentLevel + 2, '<dependency ref="' +
+          EscapeXml(LPlan.Libraries[I].BomRef) + '"/>');
+  end;
   AddLine(AIndentLevel + 1, '</dependency>');
+
+  if (LTargetIndex >= 0) and Assigned(AArtefacts) then
+  begin
+    LChildren := TStringList.Create;
+    try
+      for LGroup := 0 to 3 do
+        for I := 0 to AArtefacts.Count - 1 do
+          if (I <> LTargetIndex) and
+             (ArtefactDependencyGroup(AArtefacts[I]) = LGroup) and
+             ((I > High(LGrouped)) or not LGrouped[I]) then
+            LChildren.Add('<dependency ref="comp-' + IntToStr(I) + '"/>');
+      if LPlan.Active then
+        for I := 0 to High(LPlan.Libraries) do
+          LChildren.Add('<dependency ref="' +
+            EscapeXml(LPlan.Libraries[I].BomRef) + '"/>');
+      if LChildren.Count > 0 then
+      begin
+        AddLine(AIndentLevel + 1, '<dependency ref="comp-' + IntToStr(LTargetIndex) + '">');
+        for I := 0 to LChildren.Count - 1 do
+          AddLine(AIndentLevel + 2, LChildren[I]);
+        AddLine(AIndentLevel + 1, '</dependency>');
+      end;
+    finally
+      LChildren.Free;
+    end;
+  end;
 
   if LPlan.Active then
     for I := 0 to High(LPlan.Libraries) do
@@ -1492,17 +1597,45 @@ end;
 
 procedure ApplyManifestSpdx(const AManifestJson: string;
   const AArtefacts: TArtefactList; APackages, ARelationships: TJSONArray;
-  const ADocumentSpdxId: string; ARoot: TJSONObject);
+  const APackageIds: TArray<string>; const ADocumentSpdxId: string;
+  ARoot: TJSONObject);
 var
   LManifest: TComponentManifest;
   LPlan: TManifestPlan;
   LExtracted: TJSONArray;
   LSeen: TStringList;
+  LAddedEdges: TStringList;
+  LUnitToLibrary: TDictionary<string, string>;
   LEntry: TComponentEntry;
   LKind: TLicenceKind;
-  LToken, LNormalised: string;
-  LInfo: TJSONObject;
-  I, J: Integer;
+  LToken, LNormalised, LUnitId, LParent, LLibraryId, LEdge: string;
+  LInfo, LRel: TJSONObject;
+  LRemoved: TJSONValue;
+  I, J, LIndex, LCode, LBar: Integer;
+
+  function JsonText(AObject: TJSONObject; const AName: string): string;
+  var
+    LItem: TJSONValue;
+  begin
+    Result := '';
+    if not Assigned(AObject) then
+      Exit;
+    LItem := AObject.GetValue(AName);
+    if LItem <> nil then
+      Result := LItem.Value;
+  end;
+
+  function PackageIdForBomRef(const ARef: string): string;
+  begin
+    Result := '';
+    if not ARef.StartsWith('comp-') then
+      Exit;
+    Val(Copy(ARef, 6, MaxInt), LIndex, LCode);
+    if (LCode <> 0) or (LIndex < 0) or (LIndex > High(APackageIds)) then
+      Exit;
+    Result := APackageIds[LIndex];
+  end;
+
 begin
   if not Assigned(APackages) or not Assigned(ARelationships) or not Assigned(ARoot) then
     Exit;
@@ -1513,8 +1646,11 @@ begin
 
   LExtracted := TJSONArray.Create;
   LSeen := TStringList.Create;
+  LAddedEdges := TStringList.Create;
+  LUnitToLibrary := TDictionary<string, string>.Create;
   try
     LSeen.CaseSensitive := False;
+    LAddedEdges.CaseSensitive := False;
     for I := 0 to High(LPlan.Libraries) do
     begin
       LEntry := LManifest.Components[LPlan.Libraries[I].ComponentIndex];
@@ -1522,9 +1658,17 @@ begin
         LPlan.Libraries[I].SpdxId));
       AddSpdxRelationship(ARelationships, ADocumentSpdxId, 'DESCRIBES',
         LPlan.Libraries[I].SpdxId);
-      for J := 0 to High(LPlan.Libraries[I].UnitSpdxIds) do
+      for J := 0 to High(LPlan.Libraries[I].UnitBomRefs) do
+      begin
+        LUnitId := PackageIdForBomRef(LPlan.Libraries[I].UnitBomRefs[J]);
+        if (LUnitId = '') and (J <= High(LPlan.Libraries[I].UnitSpdxIds)) then
+          LUnitId := LPlan.Libraries[I].UnitSpdxIds[J];
+        if LUnitId = '' then
+          Continue;
+        LUnitToLibrary.AddOrSetValue(LUnitId, LPlan.Libraries[I].SpdxId);
         AddSpdxRelationship(ARelationships, LPlan.Libraries[I].SpdxId, 'DEPENDS_ON',
-          LPlan.Libraries[I].UnitSpdxIds[J]);
+          LUnitId);
+      end;
 
       LToken := SpdxLicenceToken(LEntry, LKind);
       if (LKind = lkName) and (LSeen.IndexOf(LToken) < 0) then
@@ -1539,11 +1683,46 @@ begin
       end;
     end;
 
+    // The deliverable contains every linked unit. Move the grouped ones
+    // onto the library and record one DEPENDS_ON edge to that library.
+    for I := ARelationships.Count - 1 downto 0 do
+    begin
+      if not (ARelationships.Items[I] is TJSONObject) then
+        Continue;
+      LRel := TJSONObject(ARelationships.Items[I]);
+      LToken := JsonText(LRel, 'relationshipType');
+      if (LToken <> 'CONTAINS') and (LToken <> 'DEPENDS_ON') then
+        Continue;
+      LUnitId := JsonText(LRel, 'relatedSpdxElement');
+      if not LUnitToLibrary.TryGetValue(LUnitId, LLibraryId) then
+        Continue;
+      LParent := JsonText(LRel, 'spdxElementId');
+      if SameText(LParent, ADocumentSpdxId) then
+        Continue;
+      if LParent.StartsWith('SPDXRef-Package-Manifest-') then
+        Continue;
+      LRemoved := ARelationships.Remove(I);
+      if Assigned(LRemoved) then
+        LRemoved.Free;
+      LEdge := LParent + '|' + LLibraryId;
+      if LAddedEdges.IndexOf(LEdge) < 0 then
+        LAddedEdges.Add(LEdge);
+    end;
+
+    for I := 0 to LAddedEdges.Count - 1 do
+    begin
+      LBar := Pos('|', LAddedEdges[I]);
+      AddSpdxRelationship(ARelationships, Copy(LAddedEdges[I], 1, LBar - 1),
+        'DEPENDS_ON', Copy(LAddedEdges[I], LBar + 1, MaxInt));
+    end;
+
     if LExtracted.Count > 0 then
       ARoot.AddPair('hasExtractedLicensingInfos', LExtracted)
     else
       LExtracted.Free;
   finally
+    LUnitToLibrary.Free;
+    LAddedEdges.Free;
     LSeen.Free;
   end;
 end;

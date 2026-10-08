@@ -20,11 +20,13 @@ unit DX.Comply.Tests.CLI.Options;
 interface
 
 uses
+  System.SysUtils,
+  System.IOUtils,
   DUnitX.TestFramework,
   DX.Comply.Engine,
   DX.Comply.Engine.Intf,
-  DX.Comply.CLI.Options,
-  System.SysUtils;
+  DX.Comply.Report.Intf,
+  DX.Comply.CLI.Options;
 
 type
   /// <summary>
@@ -82,6 +84,23 @@ type
     [Test]
     procedure SanitizeForFilename_PreservesAllowedChars;
 
+    /// <summary>
+    /// --config-name, --platform, --product, --supplier and --report mark
+    /// those fields explicit so a config file cannot replace them (issue #50).
+    /// </summary>
+    [Test]
+    procedure Parse_ExplicitFlags_AreRecorded;
+
+    /// <summary>Defaults are not treated as explicit overrides.</summary>
+    [Test]
+    procedure Parse_OmittedFlags_AreNotExplicit;
+
+    /// <summary>
+    /// Explicit CLI values win over .dxcomply.json. Omitted ones keep the file.
+    /// </summary>
+    [Test]
+    procedure Parse_ExplicitFlags_WinOverConfigFile;
+
     /// <summary>--scan-dir can be passed more than once.</summary>
     [Test]
     procedure Parse_ScanDir_IsRepeatable;
@@ -101,6 +120,18 @@ type
     /// <summary>ToSbomConfig copies scan directories and the scanTree flag.</summary>
     [Test]
     procedure ToSbomConfig_CopiesScanOptions;
+
+    /// <summary>--delphi7-root is copied into the engine configuration.</summary>
+    [Test]
+    procedure Parse_Delphi7Root_CopiesToConfig;
+
+    /// <summary>The built-in Win32 and Release defaults are not explicit.</summary>
+    [Test]
+    procedure Parse_DefaultTarget_IsNotExplicit;
+
+    /// <summary>--platform and --config-name mark the target as explicitly set.</summary>
+    [Test]
+    procedure Parse_ConfigName_MarksTargetExplicit;
   end;
 
 implementation
@@ -224,6 +255,100 @@ begin
     'Alphanumeric, hyphen and underscore must be preserved');
 end;
 
+procedure TCliOptionsTests.Parse_ExplicitFlags_AreRecorded;
+var
+  LOptions: TCliOptions;
+  LConfig: TSbomConfig;
+begin
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsTrue(LOptions.Parse([
+      '--project=App.dproj',
+      '--config-name=Debug',
+      '--platform=Win64',
+      '--product=CliApp',
+      '--supplier=CliCo',
+      '--report=html']));
+    LConfig := LOptions.ToSbomConfig;
+    Assert.AreEqual('Debug', LConfig.Configuration);
+    Assert.AreEqual('Win64', LConfig.Platform);
+    Assert.AreEqual('CliApp', LConfig.ProductName);
+    Assert.AreEqual('CliCo', LConfig.Supplier);
+    Assert.IsTrue(LConfig.HumanReadableReport.Enabled);
+    Assert.AreEqual(Ord(hrfHtml), Ord(LConfig.HumanReadableReport.Format));
+    Assert.IsTrue(scoConfiguration in LConfig.ExplicitOverrides);
+    Assert.IsTrue(scoPlatform in LConfig.ExplicitOverrides);
+    Assert.IsTrue(scoProductName in LConfig.ExplicitOverrides);
+    Assert.IsTrue(scoSupplier in LConfig.ExplicitOverrides);
+    Assert.IsTrue(scoReport in LConfig.ExplicitOverrides);
+    Assert.IsFalse(scoFormat in LConfig.ExplicitOverrides,
+      '--format was not passed, so the file may still set the format');
+  finally
+    LOptions.Free;
+  end;
+end;
+
+procedure TCliOptionsTests.Parse_OmittedFlags_AreNotExplicit;
+var
+  LOptions: TCliOptions;
+  LConfig: TSbomConfig;
+begin
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsTrue(LOptions.Parse(['--project=App.dproj']));
+    LConfig := LOptions.ToSbomConfig;
+    Assert.AreEqual('Release', LConfig.Configuration);
+    Assert.AreEqual('Win32', LConfig.Platform);
+    Assert.IsFalse(scoConfiguration in LConfig.ExplicitOverrides);
+    Assert.IsFalse(scoPlatform in LConfig.ExplicitOverrides);
+    Assert.IsFalse(scoProductName in LConfig.ExplicitOverrides);
+    Assert.IsFalse(scoSupplier in LConfig.ExplicitOverrides);
+    Assert.IsFalse(scoReport in LConfig.ExplicitOverrides);
+  finally
+    LOptions.Free;
+  end;
+end;
+
+procedure TCliOptionsTests.Parse_ExplicitFlags_WinOverConfigFile;
+var
+  LOptions: TCliOptions;
+  LGen: TDxComplyGenerator;
+  LPath: string;
+begin
+  LPath := TPath.Combine(TPath.GetTempPath, 'dxcomply-cli-precedence.json');
+  TFile.WriteAllText(LPath,
+    '{"configName":"Release","platform":"Win32","format":"spdx-json",' +
+    '"product":{"name":"FileApp","supplier":"FileCo"},' +
+    '"report":{"enabled":true,"format":"html","output":"auditor-report"}}',
+    TEncoding.UTF8);
+  LOptions := TCliOptions.Create;
+  LGen := nil;
+  try
+    Assert.IsTrue(LOptions.Parse([
+      '--project=App.dproj',
+      '--config-name=Debug',
+      '--supplier=CliCo',
+      '--report=markdown']));
+    LGen := TDxComplyGenerator.Create(LOptions.ToSbomConfig);
+    LGen.GenerateFromConfig('missing.dproj', LPath);
+    Assert.AreEqual('Debug', LGen.Config.Configuration);
+    Assert.AreEqual('Win32', LGen.Config.Platform,
+      'platform was not passed, so the file value stays');
+    Assert.AreEqual(Ord(sfSpdxJson), Ord(LGen.Config.Format),
+      'format was not passed, so the file value stays');
+    Assert.AreEqual('FileApp', LGen.Config.ProductName);
+    Assert.AreEqual('CliCo', LGen.Config.Supplier);
+    Assert.IsTrue(LGen.Config.HumanReadableReport.Enabled);
+    Assert.AreEqual(Ord(hrfMarkdown), Ord(LGen.Config.HumanReadableReport.Format));
+    Assert.AreEqual('auditor-report', LGen.Config.HumanReadableReport.OutputBasePath);
+  finally
+    LGen.Free;
+    LOptions.Free;
+    if TFile.Exists(LPath) then
+      TFile.Delete(LPath);
+  end;
+end;
+
 procedure TCliOptionsTests.Parse_ScanDir_IsRepeatable;
 var
   LOptions: TCliOptions;
@@ -307,6 +432,67 @@ begin
     Assert.AreEqual(NativeInt(1), NativeInt(Length(LConfig.ScanDirs)),
       'ToSbomConfig must copy scan directories');
     Assert.AreEqual('redist', LConfig.ScanDirs[0]);
+  finally
+    LOptions.Free;
+  end;
+end;
+
+procedure TCliOptionsTests.Parse_Delphi7Root_CopiesToConfig;
+var
+  LConfig: TSbomConfig;
+  LOptions: TCliOptions;
+begin
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsTrue(LOptions.Parse(TArray<string>.Create(
+      '--project=App.dpr', '--delphi7-root=C:\Delphi7')),
+      '--delphi7-root must parse');
+    Assert.AreEqual('C:\Delphi7', LOptions.Delphi7Root);
+    LConfig := LOptions.ToSbomConfig;
+    Assert.AreEqual('C:\Delphi7', LConfig.Delphi7Root,
+      'ToSbomConfig must copy the Delphi 7 root');
+  finally
+    LOptions.Free;
+  end;
+end;
+
+procedure TCliOptionsTests.Parse_DefaultTarget_IsNotExplicit;
+var
+  LConfig: TSbomConfig;
+  LOptions: TCliOptions;
+begin
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsTrue(LOptions.Parse(TArray<string>.Create('--project=App.dpr')),
+      'A project-only command line must parse');
+    LConfig := LOptions.ToSbomConfig;
+    Assert.AreEqual('Win32', LConfig.Platform);
+    Assert.AreEqual('Release', LConfig.Configuration);
+    Assert.IsFalse(LConfig.PlatformExplicit,
+      'The built-in Win32 default must not count as --platform');
+    Assert.IsFalse(LConfig.ConfigurationExplicit,
+      'The built-in Release default must not count as --config-name');
+  finally
+    LOptions.Free;
+  end;
+end;
+
+procedure TCliOptionsTests.Parse_ConfigName_MarksTargetExplicit;
+var
+  LConfig: TSbomConfig;
+  LOptions: TCliOptions;
+begin
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsTrue(LOptions.Parse(TArray<string>.Create(
+      '--project=App.dpr', '--platform=Win64', '--config-name=Release')),
+      '--platform and --config-name must parse');
+    LConfig := LOptions.ToSbomConfig;
+    Assert.AreEqual('Win64', LConfig.Platform);
+    Assert.AreEqual('Release', LConfig.Configuration);
+    Assert.IsTrue(LConfig.PlatformExplicit);
+    Assert.IsTrue(LConfig.ConfigurationExplicit,
+      'An explicit Release must still count as set by the user');
   finally
     LOptions.Free;
   end;

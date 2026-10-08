@@ -1,10 +1,20 @@
-# Konzept: DX.Comply Pilot — CRA-Compliance-Begleiter
+# Konzept: DX.Comply Pilot, Begleiter fuer die technische Dokumentation
+
+## Was DX.Comply heute schreibt
+
+DX.Comply schreibt eine Komponentenliste (SBOM) und Build-Nachweise. Es listet die Units, Packages und DLL-Namen, die es aus dem Build sehen kann, und einen Hash, wo es die Datei oeffnen konnte. Diese Liste ist ein Anfang fuer den SBOM-Teil der technischen Dokumentation nach dem EU Cyber Resilience Act (Anhang I Teil II, Anhang VII). Sie macht ein Produkt nicht konform und ersetzt die uebrige technische Dokumentation nicht.
+
+Lieferant, Version und Lizenz fuer Komponenten Dritter fehlen noch (ein Manifest dafuer ist geplant, siehe Issue #20). Dasselbe gilt fuer den Rest der technischen Dokumentation: Verfahren zur Behandlung von Schwachstellen, Offenlegungspolitik, Auslieferung von Updates und Risikobewertung. Schwachstellenmanagement und Meldewesen liegen ausserhalb dieses Werkzeugs.
+
+Die Pruefung im Werkzeug ist eine strukturelle Pruefung. Das CycloneDX-JSON-Beispiel in diesem Repository besteht die offizielle CycloneDX-1.5-JSON-Schema-Pruefung mit check-jsonschema. SPDX und CycloneDX-XML werden im Werkzeug nicht gegen offizielle Schemas geprueft.
+
+Die BSI TR-03183-2 v2.1.0 verlangt mehr, als DX.Comply heute schreibt, unter anderem CycloneDX 1.6 oder neuer, SHA-512, eine Lizenz und einen Lieferanten je Komponente sowie rekursive Abhaengigkeiten. Dieses Profil steht auf der Roadmap. DX.Comply erfuellt es noch nicht vollstaendig.
 
 ## Vision
 
-**DX.Comply Pilot** ist eine eigenstandige FMX-Anwendung innerhalb des DX.Comply-Projekts, die Software-Unternehmen als interaktiver Begleiter durch den gesamten EU Cyber Resilience Act (CRA) Compliance-Prozess fuehrt. Die SBOM-Generierung (DX.Comply Engine) ist dabei ein integrierter Baustein — der Wizard deckt den gesamten Compliance-Lebenszyklus ab.
+**DX.Comply Pilot** ist ein Konzept fuer eine spaetere eigenstaendige FMX-Anwendung. Sie soll weitere Teile der technischen Dokumentation begleiten. Die SBOM-Generierung der DX.Comply Engine waere darin ein Baustein. Dieses Dokument beschreibt keinen heutigen Funktionsumfang.
 
-> **SBOM = ein Schritt von vielen.** DX.Comply Pilot verwandelt abstrakte EU-Vorgaben in konkrete, erfassbare Arbeitsschritte und dokumentiert den Fortschritt nachvollziehbar.
+> **Die SBOM ist ein Schritt von vielen.** Das Konzept soll aus den weiteren EU-Vorgaben konkrete Arbeitsschritte machen und den Fortschritt festhalten.
 
 ---
 
@@ -111,7 +121,7 @@ Die SBOM wird aktiv genutzt:
 
 ### 5. Kennzeichnung & Konformitaet
 
-- **EU-Konformitaetserklaerung:** Vorgefertigtes Template, automatisch befuellt mit Produktdaten und Klassifizierung
+- **EU-Konformitaetserklaerung:** Geplantes Formular, vorbefuellt mit Produktdaten und Klassifizierung. Ein Entwurf, keine Zertifizierung.
 - **CE-Kennzeichen-Leitfaden:** Anleitung zur korrekten Anbringung
 - **Nutzer-Sicherheitsleitfaden:** Template fuer die Endkunden-Dokumentation (sichere Installation, Konfiguration, Support-Zeitraum)
 
@@ -119,21 +129,21 @@ Die SBOM wird aktiv genutzt:
 
 ### 6. Report Generator
 
-Per Knopfdruck werden alle erfassten Daten in formelle Dokumente exportiert:
+Geplant ist ein Export der erfassten Daten in diese Dokumente. Das ist nicht Teil des aktuellen Werkzeugs:
 
 | Dokument | Format | Inhalt |
 |---|---|---|
 | **Compliance-Report** | PDF / HTML | Gesamtuebersicht: Klassifizierung, SBOM-Zusammenfassung, Evidence-Status, Schwachstellen |
-| **EU-Konformitaetserklaerung** | PDF | Formelles Dokument zur CRA-Einhaltung |
+| **EU-Konformitaetserklaerung** | PDF | Entwurf eines Formulars, kein Nachweis einer Zertifizierung |
 | **Technisches Dossier** | Strukturiertes Archiv (ZIP) | Alle Nachweise, SBOM, Test-Reports, Design-Docs |
 | **Nutzer-Sicherheitsleitfaden** | PDF / Markdown | Endkunden-Information |
 | **Audit-Trail** | JSON / CSV | Chronologische Aenderungshistorie |
 
 ---
 
-## CRA-Compliance-Checkliste (integriert)
+## Geplante Checkliste
 
-DX.Comply Pilot fuehrt den User durch diese Schritte und trackt den Fortschritt:
+DX.Comply Pilot soll durch diese Schritte fuehren. Die Liste ist Konzept. Das aktuelle Werkzeug erzeugt sie nicht und bescheinigt keine CRA-Konformitaet:
 
 ### Produkt-Klassifizierung
 - [ ] Klassifizierung pruefen: Standard / Wichtig (Klasse I/II) / Kritisch

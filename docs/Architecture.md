@@ -1,4 +1,4 @@
-# DX.Comply — Architecture
+# DX.Comply: Architecture
 
 ## Overview
 
@@ -47,10 +47,10 @@ Every SBOM generation follows the same pipeline, regardless of whether it was tr
 
 | Unit | Responsibility |
 |------|---------------|
-| `DX.Comply.Engine.pas` | `TDxComplyGenerator` facade — orchestrates the full pipeline |
+| `DX.Comply.Engine.pas` | `TDxComplyGenerator` facade. Orchestrates the full pipeline |
 | `DX.Comply.Engine.Intf.pas` | Shared types: `TProjectInfo`, `TArtefactInfo`, `TSbomMetadata` |
-| `DX.Comply.ComponentManifest.pas` | Optional components.json: match units to libraries, licences, and PURLs |
-| `DX.Comply.ProjectScanner.pas` | Regex-based `.dproj` parser — extracts paths, toolchain, version, DllSuffix |
+| `DX.Comply.ComponentManifest.pas` | Optional components.json: match units to libraries, licences, and package URLs |
+| `DX.Comply.ProjectScanner.pas` | Regex-based `.dproj` parser. Extracts paths, toolchain, version, DllSuffix |
 | `DX.Comply.BuildOrchestrator.pas` | Plan construction and script-based build execution (used by CLI fallback) |
 | `DX.Comply.BuildEvidence.Reader.pas` | Reads MAP files, compiler CFG/RSP files; collects evidence items |
 | `DX.Comply.MapFile.Reader.pas` | Extracts unit names from MAP segment entries (`M=Unit`) and line-number sections |
@@ -65,14 +65,14 @@ Every SBOM generation follows the same pipeline, regardless of whether it was tr
 | `DX.Comply.Report.Intf.pas` | Report writer interface and shared report types |
 | `DX.Comply.Report.Support.pas` | Common report helper functions (HTML escaping, formatting) |
 | `DX.Comply.BuildEvidence.Intf.pas` | Build evidence types and interfaces |
-| `DX.Comply.Schema.Validator.pas` | Post-generation SBOM schema validation |
+| `DX.Comply.Schema.Validator.pas` | Post-generation structural check of the SBOM (not an official schema) |
 | `DX.Comply.CLI.Options.pas` | CLI argument parser (`--project`, `--format`, `--map-dir`, etc.) |
 
 ## MAP file generation
 
-DX.Comply always performs a **Deep-Evidence analysis** — using the compiler-generated MAP file to resolve all linked units (PAS/DCU) with their dependencies, SHA-256 hashes, and origin classification. The MAP file is the single source of truth for dependency resolution.
+DX.Comply always performs a **Deep-Evidence analysis**, using the compiler-generated MAP file to resolve linked units (PAS/DCU) with their dependencies, SHA-256 hashes where the file could be opened, and origin classification. The MAP file is the source of truth for dependency resolution.
 
-When a MAP file does not yet exist, DX.Comply can optionally trigger a build with `DCC_MapFile=3` (detailed MAP) to generate one. This is an implementation detail — the analysis quality is identical regardless of how the MAP file was produced.
+When a MAP file does not yet exist, DX.Comply can optionally trigger a build with `DCC_MapFile=3` (detailed MAP) to generate one. This is an implementation detail. The analysis quality is the same regardless of how the MAP file was produced.
 
 ### IDE plugin
 
@@ -80,7 +80,7 @@ The IDE plugin compiles the project directly via the OTA (`IOTAProject.ProjectBu
 
 ### CLI tool
 
-The CLI tool does **not** compile the project. It expects the MAP file to already exist — either from a prior build with `DCC_MapFile=3` in the IDE or via MSBuild in a CI pipeline. This design keeps the CLI lightweight and enables support for legacy Delphi versions (including Delphi 7) where no IDE plugin is available.
+The CLI tool does **not** compile the project. It expects the MAP file to already exist, either from a prior build with `DCC_MapFile=3` in the IDE or via MSBuild in a CI pipeline. `--project` may be a `.dproj`, `.dpk`, or `.groupproj`. A Delphi 7 `.dpr` is also accepted when the sibling `.dof` and `.cfg` are present. A `.dof` alone is not a project file. This keeps the CLI independent of the IDE.
 
 ## Unit origin classification
 
@@ -102,11 +102,11 @@ Each resolved unit is emitted as a CycloneDX `component` with `type: "library"`,
 - `net.developer-experts.dx-comply:evidence` property (e.g. "DCU", "PAS", "MAP")
 - `net.developer-experts.dx-comply:confidence` property (e.g. "Strong", "Heuristic")
 
-When `--manifest` or the `manifest` key points at a components file, units that match a row are also linked from one library component (name, version, supplier, licence, PURL, type). The unit evidence itself stays in the document. Own-code rules keep those units on the application. Matching, licence classification, and the writer output live in `DX.Comply.ComponentManifest.pas`. The CycloneDX and SPDX writers only call that unit.
+When `--manifest` or the `manifest` key points at a components file, matched units stay in the document and are linked from one library component (name, version, supplier, licence, package URL, type). The program that was built depends on that library. Own-code rules keep those units with the program. The units come from the MAP file, so a Delphi 7 `.dpr` uses the same list. Matching and licence classification live in `DX.Comply.ComponentManifest.pas`. The CycloneDX and SPDX writers call that unit.
 
 ## Test suite
 
-185 DUnitX tests cover the full pipeline. Run:
+DUnitX tests cover the full pipeline. Run:
 
 ```
 build\Win32\Debug\DX.Comply.Tests.exe --no-pause

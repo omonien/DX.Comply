@@ -419,7 +419,7 @@ begin
   LResult := FValidator.ValidateCycloneDxXml(cXml);
   Assert.IsTrue(LResult.IsValid, 'A document in XSD order must pass. ' +
     string.Join('; ', LResult.Errors));
-  Assert.AreEqual(0, Length(CycloneDxXmlSequenceErrors(cXml)),
+  Assert.AreEqual(NativeInt(0), NativeInt(Length(CycloneDxXmlSequenceErrors(cXml))),
     'The sequence check must accept XSD order');
 end;
 

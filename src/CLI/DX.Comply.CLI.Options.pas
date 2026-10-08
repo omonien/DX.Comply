@@ -38,7 +38,9 @@ type
     FFormat: TSbomFormat;
     FOutput: string;
     FPlatform: string;
+    FPlatformExplicit: Boolean;
     FConfiguration: string;
+    FConfigurationExplicit: Boolean;
     FProductName: string;
     FProductVersion: string;
     FSupplier: string;
@@ -55,8 +57,10 @@ type
     FOutputExplicit: Boolean;
     FReportEnabled: Boolean;
     FReportFormat: THumanReadableReportFormat;
+    FExplicitOverrides: TSbomConfigOverrides;
     FScanDirs: TArray<string>;
     FScanTree: Boolean;
+    FDelphi7Root: string;
     FManifestFile: string;
     FManifestExplicit: Boolean;
     FParseError: string;
@@ -92,8 +96,8 @@ type
     /// </summary>
     function Parse: Boolean; overload;
     /// <summary>
-    /// Parses AArgs as if they were the process arguments, without the
-    /// executable name. Exposed so tests can cover flag handling.
+    /// Parses AArgs as the command line (without the program name).
+    /// Used by tests so parsing does not depend on ParamStr.
     /// </summary>
     function Parse(const AArgs: TArray<string>): Boolean; overload;
     /// <summary>Writes the usage text to stdout.</summary>
@@ -126,10 +130,10 @@ type
     /// <summary>
     /// When True (and --output is not supplied), the default bom.json
     /// filename is decorated with the selected platform and configuration
-    /// (e.g. bom.Win64.Release.json) — issue #25.
+    /// (e.g. bom.Win64.Release.json). See issue #25.
     /// </summary>
     property IncludePlatformInOutput: Boolean read FIncludePlatformInOutput;
-    /// <summary>True when the user passed --report=… to enable companion reports — issue #30.</summary>
+    /// <summary>True when the user passed --report=... to enable companion reports (issue #30).</summary>
     property ReportEnabled: Boolean read FReportEnabled;
     /// <summary>Effective report format when ReportEnabled is True.</summary>
     property ReportFormat: THumanReadableReportFormat read FReportFormat;
@@ -137,6 +141,8 @@ type
     property ScanDirs: TArray<string> read FScanDirs;
     /// <summary>True when --scan-tree was requested. Deprecated.</summary>
     property ScanTree: Boolean read FScanTree;
+    /// <summary>Delphi 7 installation directory from --delphi7-root.</summary>
+    property Delphi7Root: string read FDelphi7Root;
     /// <summary>Path from --manifest. Empty when the flag was not passed.</summary>
     property ManifestFile: string read FManifestFile;
     /// <summary>True when --manifest was passed. That path wins over the config file.</summary>
@@ -157,6 +163,7 @@ begin
   FPlatform      := 'Win32';
   FConfiguration := 'Release';
   FConfigFile    := '.dxcomply.json';
+  FExplicitOverrides := [];
 end;
 
 // ---------------------------------------------------------------------------
@@ -254,6 +261,8 @@ var
 begin
   Result := True;
   FParseError := '';
+  FExplicitOverrides := [];
+  FOutputExplicit := False;
 
   for I := 0 to High(AArgs) do
   begin
@@ -286,6 +295,7 @@ begin
     if LArg = '--no-composition-evidence' then
     begin
       FNoCompositionEvidence := True;
+      Include(FExplicitOverrides, scoIncludeCompositionEvidence);
       Continue;
     end;
 
@@ -299,6 +309,7 @@ begin
     if LArg = '--scan-tree' then
     begin
       FScanTree := True;
+      Include(FExplicitOverrides, scoScanTree);
       Continue;
     end;
 
@@ -306,6 +317,7 @@ begin
     if LArg = '--report' then
     begin
       TryParseReport('both');
+      Include(FExplicitOverrides, scoReport);
       Continue;
     end;
 
@@ -326,30 +338,62 @@ begin
       if LKey = 'project' then
         FProject := LValue
       else if LKey = 'format' then
-        FFormat := ParseFormat(LValue)
+      begin
+        FFormat := ParseFormat(LValue);
+        Include(FExplicitOverrides, scoFormat);
+      end
       else if LKey = 'output' then
       begin
         FOutput := LValue;
         FOutputExplicit := True;
+        Include(FExplicitOverrides, scoOutputPath);
       end
       else if LKey = 'platform' then
-        FPlatform := LValue
+      begin
+        FPlatform := LValue;
+        FPlatformExplicit := True;
+        Include(FExplicitOverrides, scoPlatform);
+      end
       else if LKey = 'config-name' then
-        FConfiguration := LValue
+      begin
+        FConfiguration := LValue;
+        FConfigurationExplicit := True;
+        Include(FExplicitOverrides, scoConfiguration);
+      end
       else if LKey = 'product' then
-        FProductName := LValue
+      begin
+        FProductName := LValue;
+        Include(FExplicitOverrides, scoProductName);
+      end
       else if LKey = 'version' then
-        FProductVersion := LValue
+      begin
+        FProductVersion := LValue;
+        Include(FExplicitOverrides, scoProductVersion);
+      end
       else if LKey = 'supplier' then
-        FSupplier := LValue
+      begin
+        FSupplier := LValue;
+        Include(FExplicitOverrides, scoSupplier);
+      end
       else if LKey = 'include' then
-        AppendPattern(FIncludePatterns, LValue)
+      begin
+        AppendPattern(FIncludePatterns, LValue);
+        Include(FExplicitOverrides, scoIncludePatterns);
+      end
       else if LKey = 'exclude' then
-        AppendPattern(FExcludePatterns, LValue)
+      begin
+        AppendPattern(FExcludePatterns, LValue);
+        Include(FExplicitOverrides, scoExcludePatterns);
+      end
       else if LKey = 'config' then
         FConfigFile := LValue
       else if LKey = 'map-dir' then
-        FMapDir := LValue
+      begin
+        FMapDir := LValue;
+        Include(FExplicitOverrides, scoMapFileDir);
+      end
+      else if LKey = 'delphi7-root' then
+        FDelphi7Root := LValue
       else if LKey = 'report' then
       begin
         if not TryParseReport(LValue) then
@@ -358,9 +402,13 @@ begin
             ' (expected markdown, html, both, or none)';
           Exit(False);
         end;
+        Include(FExplicitOverrides, scoReport);
       end
       else if LKey = 'scan-dir' then
-        AppendPattern(FScanDirs, LValue)
+      begin
+        AppendPattern(FScanDirs, LValue);
+        Include(FExplicitOverrides, scoScanDirs);
+      end
       else if LKey = 'scan-tree' then
       begin
         if not TryParseBool(LValue, FScanTree) then
@@ -369,6 +417,7 @@ begin
             ' (expected true or false)';
           Exit(False);
         end;
+        Include(FExplicitOverrides, scoScanTree);
       end
       else if LKey = 'manifest' then
       begin
@@ -424,12 +473,19 @@ begin
   Writeln('  dxcomply --project=<path> [options]');
   Writeln;
   Writeln('Options:');
-  Writeln('  --project=<path>              Path to the .dproj file (required)');
+  Writeln('  --project=<path>              Project file (required): .dproj, .dpr,');
+  Writeln('                                .dpk, .bdsproj, or .groupproj');
   Writeln('  --format=<format>             Output format (default: cyclonedx-json)');
   Writeln('                                  cyclonedx-json | cyclonedx-xml | spdx-json');
   Writeln('  --output=<path>               Output file path (default: bom.json)');
-  Writeln('  --platform=<Win32|Win64>      Target platform (default: Win32)');
-  Writeln('  --config-name=<Debug|Release> Build configuration (default: Release)');
+  Writeln('  --platform=<name>             Target platform (default: Win32)');
+  Writeln('                                File key: platform');
+  Writeln('  --config-name=<name>          Build configuration (default: Release)');
+  Writeln('                                File key: configName');
+  Writeln('                                For .dpr, .dpk, and .bdsproj, --platform');
+  Writeln('                                and --config-name are not applied.');
+  Writeln('                                The defaults are not reported. A value');
+  Writeln('                                you set is reported and ignored.');
   Writeln('  --product=<name>              Product name override');
   Writeln('  --version=<version>           Product version override');
   Writeln('  --supplier=<name>             Supplier/company name');
@@ -447,10 +503,13 @@ begin
   Writeln('                                and PURL. Relative to the project directory.');
   Writeln('                                Overrides the manifest key in .dxcomply.json');
   Writeln('  --map-dir=<path>              Directory containing the pre-built MAP file');
+  Writeln('  --delphi7-root=<path>         Delphi 7 install directory (RootDir).');
+  Writeln('                                Optional. Used to resolve library units');
+  Writeln('                                for .dpr, .dpk, and .bdsproj projects.');
   Writeln('  --no-composition-evidence     Omit source/DCU units from SBOM (binary-only)');
   Writeln('  --include-platform-in-output  Append <Platform>.<Config> to the default');
   Writeln('                                output filename (e.g. bom.Win64.Release.json)');
-  Writeln('                                — ignored when --output is supplied');
+  Writeln('                                Ignored when --output is supplied');
   Writeln('  --report[=<format>]           Generate companion human-readable report');
   Writeln('                                  markdown | html | both (default) | none');
   Writeln('  --ci                          CI mode: use .dxcomply.json config file');
@@ -459,10 +518,18 @@ begin
   Writeln('  --verbose                     Print all progress messages (default: errors only)');
   Writeln('  --no-pause                    Suppress "Press Enter to quit" prompt');
   Writeln;
+  Writeln('Config file (--ci, when the file exists):');
+  Writeln('  Built-in defaults are filled in first, then .dxcomply.json, then any');
+  Writeln('  option you actually pass. A passed option wins over the file. An');
+  Writeln('  option you omit keeps the file value (the default does not override');
+  Writeln('  the file). Without --ci the file is not read.');
+  Writeln;
   Writeln('Examples:');
   Writeln('  dxcomply --project=src\MyApp.dproj --format=cyclonedx-json --output=bom.json');
   Writeln('  dxcomply --project=src\MyApp.dproj --manifest=components.json --no-pause');
+  Writeln('  dxcomply --project=src\MyApp.dpr --delphi7-root=C:\Delphi7 --no-pause');
   Writeln('  dxcomply --project=src\MyApp.dproj --ci --config=.dxcomply.json --no-pause');
+  Writeln('  dxcomply --project=src\MyApp.dproj --ci --config-name=Debug --no-pause');
 end;
 
 procedure TCliOptions.PrintVersion;
@@ -485,31 +552,14 @@ begin
 end;
 
 function TCliOptions.ToSbomConfig: TSbomConfig;
-var
-  LDir, LName, LExt, LSafePlatform, LSafeConfig: string;
 begin
   Result := TSbomConfig.Default;
   Result.OutputPath      := FOutput;
-
-  // When --include-platform-in-output is set and --output was not supplied,
-  // decorate the default filename with the selected platform/config so that
-  // multi-platform builds do not overwrite one another. Issue #25.
-  //
-  // FPlatform and FConfiguration are sanitized before interpolation: a
-  // user-supplied value such as "..\\..\\evil" or "Win32/etc" would otherwise
-  // escape the intended output directory or break path semantics.
-  if FIncludePlatformInOutput and not FOutputExplicit and (FOutput <> '') then
-  begin
-    LDir          := ExtractFilePath(FOutput);
-    LExt          := ExtractFileExt(FOutput);
-    LName         := ChangeFileExt(ExtractFileName(FOutput), '');
-    LSafePlatform := TCliOptions.SanitizeForFilename(FPlatform);
-    LSafeConfig   := TCliOptions.SanitizeForFilename(FConfiguration);
-    Result.OutputPath := LDir + LName + '.' + LSafePlatform + '.' + LSafeConfig + LExt;
-  end;
   Result.Format          := FFormat;
   Result.Platform        := FPlatform;
+  Result.PlatformExplicit := FPlatformExplicit;
   Result.Configuration   := FConfiguration;
+  Result.ConfigurationExplicit := FConfigurationExplicit;
   Result.ProductName     := FProductName;
   Result.ProductVersion  := FProductVersion;
   Result.Supplier        := FSupplier;
@@ -518,17 +568,32 @@ begin
   Result.ScanDirs                    := FScanDirs;
   Result.ScanTree                    := FScanTree;
   Result.MapFileDir                  := FMapDir;
+  Result.Delphi7Root                 := FDelphi7Root;
   Result.IncludeCompositionEvidence  := not FNoCompositionEvidence;
   Result.ManifestFile                := FManifestFile;
   Result.ManifestFileExplicit        := FManifestExplicit;
+  Result.ExplicitOverrides           := FExplicitOverrides;
+  Result.IncludePlatformInOutput     := FIncludePlatformInOutput;
 
-  // Enable companion human-readable reports on demand — issue #30.
+  // When --include-platform-in-output is set and --output was not supplied,
+  // decorate the filename with the selected platform/config so that
+  // multi-platform builds do not overwrite one another. Issue #25.
+  //
+  // Platform and configuration are sanitized inside DecorateOutputFileName.
+  // GenerateFromConfig applies the same decoration after the config file is
+  // merged, using the file's output path when --output was not passed.
+  if FIncludePlatformInOutput and not FOutputExplicit and (Result.OutputPath <> '') then
+    Result.OutputPath := TSbomConfig.DecorateOutputFileName(
+      Result.OutputPath, Result.Platform, Result.Configuration);
+
+  // Enable companion human-readable reports on demand. Issue #30.
   // README documented HTML/Markdown as output formats but they live in the
   // optional HumanReadableReport block, not in TSbomFormat. The CLI exposes
   // them via --report so users can turn them on without a config file.
-  if FReportEnabled then
+  // When the flag was passed, including --report=none, it overrides the file.
+  if scoReport in FExplicitOverrides then
   begin
-    Result.HumanReadableReport.Enabled := True;
+    Result.HumanReadableReport.Enabled := FReportEnabled;
     Result.HumanReadableReport.Format  := FReportFormat;
   end;
 end;

@@ -54,6 +54,30 @@ uses
 
 type
   /// <summary>
+  /// Fields of TSbomConfig that a caller set on purpose.
+  /// GenerateFromConfig keeps these when a .dxcomply.json file is also loaded,
+  /// so an explicit CLI option is not replaced by the file (issue #50).
+  /// </summary>
+  TSbomConfigOverride = (
+    scoOutputPath,
+    scoFormat,
+    scoPlatform,
+    scoConfiguration,
+    scoProductName,
+    scoProductVersion,
+    scoSupplier,
+    scoIncludePatterns,
+    scoExcludePatterns,
+    scoMapFileDir,
+    scoIncludeCompositionEvidence,
+    scoReport,
+    scoScanDirs,
+    scoScanTree
+  );
+  /// <summary>Set of TSbomConfig fields that were set explicitly.</summary>
+  TSbomConfigOverrides = set of TSbomConfigOverride;
+
+  /// <summary>
   /// Configuration for SBOM generation.
   /// </summary>
   TSbomConfig = record
@@ -83,8 +107,18 @@ type
     ManifestFileExplicit: Boolean;
     /// <summary>Target platform.</summary>
     Platform: string;
+    /// <summary>
+    /// True when the caller set the platform with --platform or with
+    /// platform in .dxcomply.json. The built-in Win32 default stays False.
+    /// </summary>
+    PlatformExplicit: Boolean;
     /// <summary>Build configuration.</summary>
     Configuration: string;
+    /// <summary>
+    /// True when the caller set the configuration with --config-name or with
+    /// configuration in .dxcomply.json. The built-in Release default stays False.
+    /// </summary>
+    ConfigurationExplicit: Boolean;
     /// <summary>Controls whether Deep-Evidence builds are disabled, conditional, or forced.</summary>
     DeepEvidenceMode: TDeepEvidenceBuildMode;
     /// <summary>Optional Delphi major version to use for the Deep-Evidence build.</summary>
@@ -106,6 +140,18 @@ type
     /// </summary>
     IncludeCompositionEvidence: Boolean;
     /// <summary>
+    /// When True, and OutputPath was not set explicitly, append the platform
+    /// and configuration to the output filename (issue #25). Applied after a
+    /// config file is merged so the file's output, platform, and configName
+    /// are the values that get decorated.
+    /// </summary>
+    IncludePlatformInOutput: Boolean;
+    /// <summary>
+    /// Which fields were set explicitly by the caller. Empty means every field
+    /// is still a default and may be replaced by .dxcomply.json.
+    /// </summary>
+    ExplicitOverrides: TSbomConfigOverrides;
+    /// <summary>
     /// Extra directories or globs to scan for binaries (CLI --scan-dir,
     /// config scanDirs). Each entry is non-recursive unless it contains **.
     /// Relative entries are resolved from the project directory.
@@ -116,8 +162,20 @@ type
     /// versions did. Deprecated and kept for one release. Default is False.
     /// </summary>
     ScanTree: Boolean;
+    /// <summary>
+    /// Optional Delphi 7 installation directory for legacy .dpr/.dpk/.bdsproj
+    /// scans. Empty uses the Borland registry key and the DELPHI variable.
+    /// </summary>
+    Delphi7Root: string;
     /// <summary>Creates a new TSbomConfig with default values.</summary>
     class function Default: TSbomConfig; static;
+    /// <summary>
+    /// Appends the platform and configuration to a filename.
+    /// Both values are reduced to letters, digits, hyphen and underscore
+    /// before they are interpolated.
+    /// </summary>
+    class function DecorateOutputFileName(const AOutputPath, APlatform,
+      AConfiguration: string): string; static;
   end;
 
   /// <summary>
@@ -143,7 +201,7 @@ type
     FConfig: TSbomConfig;
     FOnProgress: TProgressEvent;
     procedure DoProgress(const AMessage: string; const AProgress: Integer);
-    function LoadConfig(const AConfigPath: string): TSbomConfig;
+    function MergeFileConfig(const ACaller, AFile: TSbomConfig): TSbomConfig;
     function CreateWriter(AFormat: TSbomFormat): ISbomWriter;
     function CreateReportWriter(AFormat: THumanReadableReportFormat): IHumanReadableReportWriter;
     function BuildMetadata(const AConfig: TSbomConfig; const AProjectInfo: TProjectInfo;
@@ -195,14 +253,23 @@ type
     procedure RememberPatternWarnings(const AWarnings: TList<string>);
   public
     /// <summary>
-    /// Scans the supplied .pas files for external DLL references — string
-    /// literals in 'external' or LoadLibrary/GetModuleHandle calls, plus
-    /// identifier-form calls that are resolved against a per-unit const map.
-    /// Returns lower-cased, de-duplicated DLL/BPL file names. Public for
-    /// testability — issue #24.
+    /// Scans the supplied .pas files for external DLL references. String
+    /// literals in 'external' or LoadLibrary/GetModuleHandle calls are taken
+    /// as-is. Identifier forms (external DLLName, LoadLibrary(DLLName)) are
+    /// resolved against const declarations. {$I}/{$INCLUDE} files are read
+    /// from the including unit's directory and then from ASearchPaths.
+    /// When one const has several values (typical {$IFDEF} branches), every
+    /// value is returned and the matching AConditional entry is True.
+    /// Names are lower-cased and de-duplicated. Public for testability.
     /// </summary>
     class function ScanPasFilesForDllReferences(
-      const APasFilePaths: TArray<string>): TArray<string>; static;
+      const APasFilePaths, ASearchPaths: TArray<string>;
+      out AConditional: TArray<Boolean>): TArray<string>; overload; static;
+    /// <summary>
+    /// Same scan with no extra search paths. Conditional flags are discarded.
+    /// </summary>
+    class function ScanPasFilesForDllReferences(
+      const APasFilePaths: TArray<string>): TArray<string>; overload; static;
     /// <summary>
     /// Creates a new TDxComplyGenerator instance.
     /// </summary>
@@ -226,7 +293,14 @@ type
       const AOutputPath: string = '';
       AFormat: TSbomFormat = sfCycloneDxJson): Boolean;
     /// <summary>
+    /// Reads a .dxcomply.json file. A missing file returns
+    /// TSbomConfig.Default. Does not modify this generator.
+    /// </summary>
+    function LoadConfig(const AConfigPath: string): TSbomConfig;
+    /// <summary>
     /// Generates an SBOM using a configuration file.
+    /// File values replace built-in defaults. Fields listed in
+    /// Config.ExplicitOverrides keep the caller's value (issue #50).
     /// </summary>
     function GenerateFromConfig(const AProjectPath, AConfigPath: string): Boolean;
     /// <summary>
@@ -251,6 +325,7 @@ implementation
 
 uses
   DX.Comply.ComponentManifest,
+  DX.Comply.LegacyProject,
   DX.Comply.Report.Support,
   DX.Comply.VersionInfo;
 
@@ -261,7 +336,9 @@ begin
   Result.OutputPath := 'bom.json';
   Result.Format := sfCycloneDxJson;
   Result.Platform := 'Win32';
+  Result.PlatformExplicit := False;
   Result.Configuration := 'Release';
+  Result.ConfigurationExplicit := False;
   Result.DeepEvidenceMode := debWhenMapMissing;
   Result.DeepEvidenceDelphiVersion := 0;
   Result.DeepEvidenceBuildScriptPath := '';
@@ -276,9 +353,43 @@ begin
   SetLength(Result.IncludePatterns, 0);
   SetLength(Result.ExcludePatterns, 0);
   Result.IncludeCompositionEvidence := True;
+  Result.IncludePlatformInOutput := False;
+  Result.ExplicitOverrides := [];
+  Result.MapFileDir := '';
   Result.ScanTree := False;
   SetLength(Result.ScanDirs, 0);
+  Result.Delphi7Root := '';
 end;
+
+
+class function TSbomConfig.DecorateOutputFileName(const AOutputPath, APlatform,
+  AConfiguration: string): string;
+
+  function SanitizeSegment(const AValue: string): string;
+  var
+    LChar: Char;
+  begin
+    // Same whitelist as TCliOptions.SanitizeForFilename.
+    Result := '';
+    for LChar in AValue do
+      if CharInSet(LChar, ['A'..'Z', 'a'..'z', '0'..'9', '-', '_']) then
+        Result := Result + LChar;
+  end;
+
+var
+  LDir, LName, LExt, LSafePlatform, LSafeConfig: string;
+begin
+  if AOutputPath = '' then
+    Exit('');
+  LDir := ExtractFilePath(AOutputPath);
+  LExt := ExtractFileExt(AOutputPath);
+  LName := ChangeFileExt(ExtractFileName(AOutputPath), '');
+  LSafePlatform := SanitizeSegment(APlatform);
+  LSafeConfig := SanitizeSegment(AConfiguration);
+  Result := LDir + LName + '.' + LSafePlatform + '.' + LSafeConfig + LExt;
+
+end;
+
 
 { TDxComplyGenerator }
 
@@ -499,6 +610,8 @@ var
   LArtefact: TArtefactInfo;
   LPasFiles: TList<string>;
   LDllNames: TArray<string>;
+  LConditional: TArray<Boolean>;
+  LSearchPaths: TArray<string>;
   LDllName, LFilePath: string;
   LResolvedUnit: TResolvedUnitInfo;
   I: Integer;
@@ -533,11 +646,22 @@ begin
           LPasFiles.Add(LFilePath);
       end;
 
-    LDllNames := ScanPasFilesForDllReferences(LPasFiles.ToArray);
-
-    // Add discovered DLLs as artefacts
-    for LDllName in LDllNames do
+    SetLength(LSearchPaths, 0);
+    if Assigned(AProjectInfo.SearchPaths) then
     begin
+      SetLength(LSearchPaths, AProjectInfo.SearchPaths.Count);
+      for I := 0 to AProjectInfo.SearchPaths.Count - 1 do
+        LSearchPaths[I] := AProjectInfo.SearchPaths[I];
+    end;
+
+    // The DLL file itself is often not in the build output. Record the
+    // reference anyway: empty hash, size -1. Issue #45.
+    LDllNames := ScanPasFilesForDllReferences(LPasFiles.ToArray, LSearchPaths,
+      LConditional);
+
+    for I := 0 to High(LDllNames) do
+    begin
+      LDllName := LDllNames[I];
       LArtefact := Default(TArtefactInfo);
       LArtefact.FilePath := '';
       LArtefact.RelativePath := LDllName;
@@ -547,6 +671,8 @@ begin
       LArtefact.Origin := '';
       LArtefact.Evidence := TPath.GetExtension(LDllName).ToUpper.TrimLeft(['.']);
       LArtefact.Confidence := 'Source-scan';
+      if I < Length(LConditional) then
+        LArtefact.Conditional := LConditional[I];
 
       AArtefacts.Add(LArtefact);
     end;
@@ -558,20 +684,49 @@ end;
 class function TDxComplyGenerator.ScanPasFilesForDllReferences(
   const APasFilePaths: TArray<string>): TArray<string>;
 var
-  LDllNames: TList<string>;
-  LLines: TStringList;
-  LConstMap: TDictionary<string, string>;
-  LRegExExternal, LRegExLoadLib, LRegExLoadLibIdent, LRegExConstDll: TRegEx;
-  LRegExMatch: TMatch;
-  LFilePath, LLine, LIdent, LUnitName, LLookupKey, LResolved: string;
-  I: Integer;
+  LConditional: TArray<Boolean>;
+  LSearchPaths: TArray<string>;
+begin
+  SetLength(LSearchPaths, 0);
+  Result := ScanPasFilesForDllReferences(APasFilePaths, LSearchPaths, LConditional);
+end;
 
-  procedure AddDllName(const AName: string);
+class function TDxComplyGenerator.ScanPasFilesForDllReferences(
+  const APasFilePaths, ASearchPaths: TArray<string>;
+  out AConditional: TArray<Boolean>): TArray<string>;
+var
+  LDllNames: TList<string>;
+  LConditionalMap: TDictionary<string, Boolean>;
+  LConstMap: TDictionary<string, TList<string>>;
+  LGlobalConstMap: TDictionary<string, TList<string>>;
+  LExpandedFiles: TObjectList<TStringList>;
+  LUnitNames: TList<string>;
+  LRegExExternal, LRegExLoadLib, LRegExLoadLibIdent, LRegExConstDll: TRegEx;
+  LRegExExternalIdent, LRegExInclude: TRegEx;
+  LRegExMatch: TMatch;
+  LMatches: TMatchCollection;
+  LFilePath, LLine: string;
+  K: Integer;
+
+  procedure AddDllName(const AName: string; AConditional: Boolean);
+  var
+    LKey: string;
+    LWasConditional: Boolean;
   begin
-    if AName = '' then
+    LKey := LowerCase(AName);
+    if LKey = '' then
       Exit;
-    if not LDllNames.Contains(LowerCase(AName)) then
-      LDllNames.Add(LowerCase(AName));
+    if not LDllNames.Contains(LKey) then
+      LDllNames.Add(LKey);
+    // A literal or a single const value is a definite reference and
+    // clears an earlier conditional flag for the same file name.
+    if LConditionalMap.TryGetValue(LKey, LWasConditional) then
+    begin
+      if not AConditional then
+        LConditionalMap.AddOrSetValue(LKey, False);
+    end
+    else
+      LConditionalMap.Add(LKey, AConditional);
   end;
 
   function UnitNameOf(const AFilePath: string): string;
@@ -579,48 +734,246 @@ var
     Result := LowerCase(TPath.GetFileNameWithoutExtension(AFilePath));
   end;
 
-  function LoadFileLines(const APath: string): Boolean;
+  procedure RememberConst(const AMap: TDictionary<string, TList<string>>;
+    const AKey, AValue: string);
+  var
+    LValues: TList<string>;
   begin
+    if (AKey = '') or (AValue = '') then
+      Exit;
+    if not AMap.TryGetValue(AKey, LValues) then
+    begin
+      LValues := TList<string>.Create;
+      AMap.Add(AKey, LValues);
+    end;
+    // Keep every assignment. {$IFDEF} branches often declare the same
+    // const twice, and dropping either name hides a DLL the program
+    // may load. Callers that define the const locally still see only
+    // their own values, because the unit-scoped map is consulted first.
+    if LValues.IndexOf(AValue) < 0 then
+      LValues.Add(AValue);
+  end;
+
+  procedure AddResolvedNames(const AValues: TList<string>; AConditional: Boolean);
+  var
+    LValue: string;
+  begin
+    for LValue in AValues do
+      AddDllName(LValue, AConditional);
+  end;
+
+  procedure ResolveIdent(const AUnitName, AIdent: string);
+  var
+    LValues: TList<string>;
+    LLookupKey: string;
+  begin
+    if AIdent = '' then
+      Exit;
+    // Already qualified (Other.IDENT): use as-is. Otherwise look up
+    // within the current unit first.
+    if Pos('.', AIdent) > 0 then
+      LLookupKey := AIdent
+    else
+      LLookupKey := AUnitName + '.' + AIdent;
+    if LConstMap.TryGetValue(LLookupKey, LValues) then
+      AddResolvedNames(LValues, LValues.Count > 1)
+    else if (Pos('.', AIdent) = 0) and
+            LGlobalConstMap.TryGetValue(AIdent, LValues) then
+      // Project-wide fallback for consts declared in a separate unit
+      // (OpenSSL_Consts.pas) and used from a sibling wrapper. Issue #24.
+      // More than one value means the branches were not narrowed, so each
+      // candidate is marked conditional.
+      AddResolvedNames(LValues, LValues.Count > 1);
+  end;
+
+  function ResolveIncludePath(const AFromFile, AIncName: string): string;
+  var
+    LDir: string;
+    LCandidate: string;
+  begin
+    Result := '';
+    if AIncName = '' then
+      Exit;
+    if not TPath.IsRelativePath(AIncName) then
+    begin
+      if TFile.Exists(AIncName) then
+        Result := AIncName;
+      Exit;
+    end;
+
+    // The including file's own directory wins, then the project search path.
+    LCandidate := TPath.Combine(TPath.GetDirectoryName(AFromFile), AIncName);
+    if TFile.Exists(LCandidate) then
+      Exit(LCandidate);
+
+    for LDir in ASearchPaths do
+    begin
+      if Trim(LDir) = '' then
+        Continue;
+      LCandidate := TPath.Combine(LDir, AIncName);
+      if TFile.Exists(LCandidate) then
+        Exit(LCandidate);
+    end;
+  end;
+
+  function IncludeFileName(const AMatch: TMatch): string;
+  var
+    G: Integer;
+  begin
+    Result := '';
+    for G := 1 to AMatch.Groups.Count - 1 do
+      if AMatch.Groups[G].Success and (AMatch.Groups[G].Value <> '') then
+        Exit(AMatch.Groups[G].Value);
+  end;
+
+  procedure LoadExpanded(const APath: string; ADest: TStrings;
+    ASeen: TDictionary<string, Boolean>; ADepth: Integer);
+  var
+    LRaw: TStringList;
+    LIndex: Integer;
+    LWork, LIncName, LResolved, LSeenKey: string;
+    LIncMatch: TMatch;
+  begin
+    if (ADepth > 16) or (APath = '') then
+      Exit;
     try
-      LLines.LoadFromFile(APath, TEncoding.UTF8);
-      Exit(True);
+      LSeenKey := LowerCase(TPath.GetFullPath(APath));
     except
+      Exit;
+    end;
+    if ASeen.ContainsKey(LSeenKey) then
+      Exit;
+    ASeen.Add(LSeenKey, True);
+
+    LRaw := TStringList.Create;
+    try
       try
-        LLines.LoadFromFile(APath);
-        Exit(True);
+        LRaw.LoadFromFile(APath, TEncoding.UTF8);
       except
-        Exit(False);
+        try
+          LRaw.LoadFromFile(APath);
+        except
+          Exit;
+        end;
+      end;
+
+      for LIndex := 0 to LRaw.Count - 1 do
+      begin
+        LWork := LRaw[LIndex];
+        // {$I+}/{$I-} are IO-check switches, not file includes. The
+        // pattern requires whitespace after I or INCLUDE, so those
+        // switches stay in the line and are ignored by the DLL regexes.
+        while True do
+        begin
+          LIncMatch := LRegExInclude.Match(LWork);
+          if not LIncMatch.Success then
+            Break;
+          LIncName := IncludeFileName(LIncMatch);
+          LResolved := ResolveIncludePath(APath, LIncName);
+          LWork := LWork.Substring(0, LIncMatch.Index) +
+            LWork.Substring(LIncMatch.Index + LIncMatch.Length);
+          if LResolved <> '' then
+            LoadExpanded(LResolved, ADest, ASeen, ADepth + 1);
+        end;
+        if Trim(LWork) <> '' then
+          ADest.Add(LWork);
+      end;
+    finally
+      LRaw.Free;
+    end;
+  end;
+
+  procedure FreeConstMap(AMap: TDictionary<string, TList<string>>);
+  var
+    LValues: TList<string>;
+  begin
+    if not Assigned(AMap) then
+      Exit;
+    for LValues in AMap.Values do
+      LValues.Free;
+    AMap.Free;
+  end;
+
+  procedure CollectLiteralsAndConsts(const ALines: TStrings; const AUnitName: string);
+  var
+    LIndex, LMatchIndex: Integer;
+  begin
+    for LIndex := 0 to ALines.Count - 1 do
+    begin
+      LLine := ALines[LIndex];
+
+      LMatches := LRegExExternal.Matches(LLine);
+      for LMatchIndex := 0 to LMatches.Count - 1 do
+        AddDllName(LMatches[LMatchIndex].Groups[1].Value, False);
+
+      LMatches := LRegExLoadLib.Matches(LLine);
+      for LMatchIndex := 0 to LMatches.Count - 1 do
+        AddDllName(LMatches[LMatchIndex].Groups[1].Value, False);
+
+      LRegExMatch := LRegExConstDll.Match(LLine);
+      if LRegExMatch.Success then
+      begin
+        RememberConst(LConstMap,
+          AUnitName + '.' + LowerCase(LRegExMatch.Groups[1].Value),
+          LRegExMatch.Groups[2].Value);
+        RememberConst(LGlobalConstMap,
+          LowerCase(LRegExMatch.Groups[1].Value),
+          LRegExMatch.Groups[2].Value);
       end;
     end;
   end;
 
+  procedure ResolveIdentifierUses(const ALines: TStrings; const AUnitName: string);
+  var
+    LIndex, LMatchIndex: Integer;
+  begin
+    for LIndex := 0 to ALines.Count - 1 do
+    begin
+      LLine := ALines[LIndex];
+
+      LMatches := LRegExLoadLibIdent.Matches(LLine);
+      for LMatchIndex := 0 to LMatches.Count - 1 do
+        ResolveIdent(AUnitName, LowerCase(LMatches[LMatchIndex].Groups[1].Value));
+
+      // external DLLName (identifier, not a string literal). String
+      // literals are collected in the first pass and do not match here
+      // because the next token is a quote.
+      LMatches := LRegExExternalIdent.Matches(LLine);
+      for LMatchIndex := 0 to LMatches.Count - 1 do
+        ResolveIdent(AUnitName, LowerCase(LMatches[LMatchIndex].Groups[1].Value));
+    end;
+  end;
+
 var
-  LGlobalConstMap: TDictionary<string, string>;
+  LExpanded: TStringList;
+  LSeen: TDictionary<string, Boolean>;
+  I: Integer;
+  LFlag: Boolean;
 begin
+  SetLength(AConditional, 0);
   LDllNames := TList<string>.Create;
-  LLines := TStringList.Create;
-  // Maps "unitname.const_name" (lower-case) -> resolved file name. Scoped
-  // per-unit so the same const identifier in two different units does not
-  // collide — issue #24.
-  LConstMap := TDictionary<string, string>.Create;
-  // Maps "const_name" (lower-case, unqualified) -> resolved file name. Used
-  // as a project-wide fallback when an identifier-form loader call cannot be
-  // resolved within the calling unit — typical for 3rd-party libraries that
-  // split DLL-name constants into a separate "OpenSSL_Consts.pas" unit and
-  // call GetModuleHandle/LoadLibrary from a sibling "OpenSSL_Wrapper.pas".
-  // If two units declare the same const name with different values, the last
-  // one scanned wins (acceptable trade-off vs. parsing the uses clause).
-  // Issue #24 follow-up.
-  LGlobalConstMap := TDictionary<string, string>.Create;
+  LConditionalMap := TDictionary<string, Boolean>.Create;
+  // "unitname.const_name" -> every file name assigned to that const.
+  // Scoped per unit so the same identifier in two units does not collide.
+  LConstMap := TDictionary<string, TList<string>>.Create;
+  // Unqualified const name -> file names. Fallback when the calling unit
+  // does not declare the identifier itself. Issue #24.
+  LGlobalConstMap := TDictionary<string, TList<string>>.Create;
+  LExpandedFiles := TObjectList<TStringList>.Create(True);
+  LUnitNames := TList<string>.Create;
   try
     // Patterns:
-    //   external 'filename.dll'  (with optional delayed)
+    //   external 'filename.dll'
+    //   external DLLName
     //   LoadLibrary('filename.dll') / LoadLibraryEx / SafeLoadLibrary /
-    //     GetModuleHandle('filename.dll') / LoadPackage
-    //   const NAME = 'filename.dll'; — captured separately so identifier-form
-    //     calls (e.g. LoadLibrary(LIBEAY_DLL_NAME)) can be resolved.
+    //     GetModuleHandle('filename.dll') / LoadPackage, plus the same
+    //     calls with an identifier argument
+    //   const NAME = 'filename.dll';
+    //   {$I 'file.inc'} / {$INCLUDE file.inc} / (*$I 'file.inc'*)
     LRegExExternal := TRegEx.Create(
       'external\s+''([^'']+\.(dll|bpl))''', [roIgnoreCase]);
+    LRegExExternalIdent := TRegEx.Create(
+      'external\s+([A-Za-z_][A-Za-z0-9_\.]*)', [roIgnoreCase]);
     LRegExLoadLib := TRegEx.Create(
       '(?:LoadLibrary|LoadLibraryEx|LoadLibraryA|LoadLibraryW|SafeLoadLibrary|GetModuleHandle|GetModuleHandleA|GetModuleHandleW|LoadPackage)\s*\(\s*''([^'']+\.(dll|bpl))''',
       [roIgnoreCase]);
@@ -629,80 +982,51 @@ begin
       [roIgnoreCase]);
     // Only match real const declarations: identifier starts the line
     // (after whitespace), optional ': type', '=', single-quoted file name,
-    // then ';'.  Comparisons like `if X = 'foo.dll' then` do not end in
+    // then ';'. Comparisons like `if X = 'foo.dll' then` do not end in
     // ';' on the comparison, so they will not match.
     LRegExConstDll := TRegEx.Create(
       '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?::\s*[A-Za-z_][A-Za-z0-9_]*\s*)?=\s*''([^'']+\.(?:dll|bpl))''\s*;',
       [roIgnoreCase]);
+    LRegExInclude := TRegEx.Create(
+      '\{\$\s*I(?:NCLUDE)?\s+(?:''([^'']+)''|"([^"]+)"|(\S+?))\s*\}' +
+      '|\(\*\$\s*I(?:NCLUDE)?\s+(?:''([^'']+)''|"([^"]+)"|(\S+?))\s*\*\)',
+      [roIgnoreCase]);
 
-    // First pass: collect literal references AND build the const-name map.
     for LFilePath in APasFilePaths do
     begin
-      if not LoadFileLines(LFilePath) then
-        Continue;
-      LUnitName := UnitNameOf(LFilePath);
-      for I := 0 to LLines.Count - 1 do
-      begin
-        LLine := LLines[I];
-
-        LRegExMatch := LRegExExternal.Match(LLine);
-        if LRegExMatch.Success then
-          AddDllName(LRegExMatch.Groups[1].Value);
-
-        LRegExMatch := LRegExLoadLib.Match(LLine);
-        if LRegExMatch.Success then
-          AddDllName(LRegExMatch.Groups[1].Value);
-
-        LRegExMatch := LRegExConstDll.Match(LLine);
-        if LRegExMatch.Success then
-        begin
-          LConstMap.AddOrSetValue(
-            LUnitName + '.' + LowerCase(LRegExMatch.Groups[1].Value),
-            LRegExMatch.Groups[2].Value);
-          LGlobalConstMap.AddOrSetValue(
-            LowerCase(LRegExMatch.Groups[1].Value),
-            LRegExMatch.Groups[2].Value);
-        end;
+      LExpanded := TStringList.Create;
+      LExpandedFiles.Add(LExpanded);
+      LUnitNames.Add(UnitNameOf(LFilePath));
+      LSeen := TDictionary<string, Boolean>.Create;
+      try
+        LoadExpanded(LFilePath, LExpanded, LSeen, 0);
+      finally
+        LSeen.Free;
       end;
     end;
 
-    // Second pass: resolve identifier-form calls against the const map.
-    for LFilePath in APasFilePaths do
-    begin
-      if not LoadFileLines(LFilePath) then
-        Continue;
-      LUnitName := UnitNameOf(LFilePath);
-      for I := 0 to LLines.Count - 1 do
-      begin
-        LLine := LLines[I];
-        LRegExMatch := LRegExLoadLibIdent.Match(LLine);
-        if LRegExMatch.Success then
-        begin
-          LIdent := LowerCase(LRegExMatch.Groups[1].Value);
-          // Already qualified (Other.IDENT) — use as-is.  Otherwise look up
-          // within the current unit only — cross-unit lookups would need
-          // uses-clause information that this scanner does not have.
-          if Pos('.', LIdent) > 0 then
-            LLookupKey := LIdent
-          else
-            LLookupKey := LUnitName + '.' + LIdent;
-          if LConstMap.TryGetValue(LLookupKey, LResolved) then
-            AddDllName(LResolved)
-          else if (Pos('.', LIdent) = 0) and
-                  LGlobalConstMap.TryGetValue(LIdent, LResolved) then
-            // Fall back to a project-wide lookup so consts declared in a
-            // separate "OpenSSL_Consts.pas"-style unit and referenced from a
-            // sibling wrapper unit still resolve. Issue #24 follow-up.
-            AddDllName(LResolved);
-        end;
-      end;
-    end;
+    // First pass: literals and the const map, so identifier uses (including
+    // ones that arrived via an include) can be resolved afterwards.
+    for K := 0 to LExpandedFiles.Count - 1 do
+      CollectLiteralsAndConsts(LExpandedFiles[K], LUnitNames[K]);
+
+    for K := 0 to LExpandedFiles.Count - 1 do
+      ResolveIdentifierUses(LExpandedFiles[K], LUnitNames[K]);
 
     Result := LDllNames.ToArray;
+    SetLength(AConditional, LDllNames.Count);
+    for I := 0 to LDllNames.Count - 1 do
+    begin
+      if not LConditionalMap.TryGetValue(LDllNames[I], LFlag) then
+        LFlag := False;
+      AConditional[I] := LFlag;
+    end;
   finally
-    LGlobalConstMap.Free;
-    LConstMap.Free;
-    LLines.Free;
+    LUnitNames.Free;
+    LExpandedFiles.Free;
+    FreeConstMap(LGlobalConstMap);
+    FreeConstMap(LConstMap);
+    LConditionalMap.Free;
     LDllNames.Free;
   end;
 end;
@@ -742,6 +1066,7 @@ end;
 
 function TDxComplyGenerator.LoadConfig(const AConfigPath: string): TSbomConfig;
 var
+  LRoot: TJSONValue;
   LJson: TJSONObject;
   LContent: TStringList;
   LArray: TJSONArray;
@@ -753,6 +1078,7 @@ var
   LReportFormatStr: string;
   LWarnings: TJSONObject;
   LManifestValue: TJSONValue;
+  LText: string;
   I: Integer;
 begin
   Result := TSbomConfig.Default;
@@ -763,10 +1089,15 @@ begin
   LContent := TStringList.Create;
   try
     LContent.LoadFromFile(AConfigPath, TEncoding.UTF8);
-    LJson := TJSONObject.ParseJSONValue(LContent.Text) as TJSONObject;
+    // Parse into TJSONValue first. Casting with "as TJSONObject" before the
+    // try leaks the value when the root is an array or a string.
+    LRoot := TJSONObject.ParseJSONValue(LContent.Text);
+    if LRoot = nil then
+      Exit;
     try
-      if Assigned(LJson) then
+      if LRoot is TJSONObject then
       begin
+        LJson := TJSONObject(LRoot);
         // Output path
         if LJson.GetValue('output') <> nil then
           Result.OutputPath := LJson.GetValue<string>('output');
@@ -781,6 +1112,39 @@ begin
             Result.Format := sfCycloneDxXml
           else if LFormatStr = 'spdx-json' then
             Result.Format := sfSpdxJson;
+        end;
+
+        // Target platform. Empty values keep the default.
+        // A non-empty value is explicit, not the built-in Win32 default.
+        if LJson.GetValue('platform') <> nil then
+        begin
+          LText := Trim(LJson.GetValue<string>('platform'));
+          if LText <> '' then
+          begin
+            Result.Platform := LText;
+            Result.PlatformExplicit := True;
+          end;
+        end;
+
+        // Build configuration. CLI flag is --config-name (issue #50).
+        // configuration is the other name. configName wins when both are set.
+        if LJson.GetValue('configName') <> nil then
+        begin
+          LText := Trim(LJson.GetValue<string>('configName'));
+          if LText <> '' then
+          begin
+            Result.Configuration := LText;
+            Result.ConfigurationExplicit := True;
+          end;
+        end
+        else if LJson.GetValue('configuration') <> nil then
+        begin
+          LText := Trim(LJson.GetValue<string>('configuration'));
+          if LText <> '' then
+          begin
+            Result.Configuration := LText;
+            Result.ConfigurationExplicit := True;
+          end;
         end;
 
         // Include patterns
@@ -802,9 +1166,9 @@ begin
         end;
 
         // Product info
-        if LJson.GetValue('product') <> nil then
+        if LJson.GetValue('product') is TJSONObject then
         begin
-          LProduct := LJson.GetValue('product') as TJSONObject;
+          LProduct := TJSONObject(LJson.GetValue('product'));
           if LProduct.GetValue('name') <> nil then
             Result.ProductName := LProduct.GetValue<string>('name');
           if LProduct.GetValue('version') <> nil then
@@ -827,13 +1191,10 @@ begin
             else
               Result.DeepEvidenceMode := debWhenMapMissing;
           end;
-          if LDeepEvidence.GetValue('build') <> nil then
-          begin
-            if LDeepEvidence.GetValue<Boolean>('build') then
-              Result.DeepEvidenceMode := debWhenMapMissing
-            else
-              Result.DeepEvidenceMode := debWhenMapMissing;
-          end;
+          // deepEvidence.build used to be read here, but both branches stored
+          // debWhenMapMissing, so the flag could not turn the build off and
+          // it overwrote an explicit mode. The CLI does not compile the
+          // project. Use deepEvidence.mode (always | when-missing) instead.
           if LDeepEvidence.GetValue('delphiVersion') <> nil then
             Result.DeepEvidenceDelphiVersion := LDeepEvidence.GetValue<Integer>('delphiVersion');
           if LDeepEvidence.GetValue('buildScriptPath') <> nil then
@@ -882,6 +1243,10 @@ begin
         if LJson.GetValue('mapDir') <> nil then
           Result.MapFileDir := LJson.GetValue<string>('mapDir');
 
+        // Delphi 7 install override for legacy .dpr/.dpk/.bdsproj scans.
+        if LJson.GetValue('delphi7Root') <> nil then
+          Result.Delphi7Root := LJson.GetValue<string>('delphi7Root');
+
         // Composition evidence inclusion
         if LJson.GetValue('includeCompositionEvidence') <> nil then
           Result.IncludeCompositionEvidence :=
@@ -909,7 +1274,7 @@ begin
         end;
       end;
     finally
-      LJson.Free;
+      LRoot.Free;
     end;
   finally
     LContent.Free;
@@ -992,7 +1357,7 @@ begin
   LBomProperties := TList<TSbomProperty>.Create;
   LComponentProperties := TList<TSbomProperty>.Create;
   try
-    AddBomProperty(PropertyName('document', 'profile'), 'cra-compliance-assessment');
+    AddBomProperty(PropertyName('document', 'profile'), 'build-evidence');
     AddBomProperty(PropertyName('assessment', 'warning-count'), IntToStr(AWarnings.Count));
 
     AddComponentProperty(PropertyName('build', 'map-file'), EffectiveMapFilePath);
@@ -1008,6 +1373,8 @@ begin
       IntToStr(ABuildEvidence.EvidenceItems.Count));
     AddComponentProperty(PropertyName('build', 'search-path-count'),
       IntToStr(ABuildEvidence.SearchPaths.Count));
+    AddComponentProperty(PropertyName('build', 'conditional-defines'),
+      AProjectInfo.ConditionalDefines);
     AddComponentProperty(PropertyName('composition', 'resolved-unit-count'),
       IntToStr(ACompositionEvidence.Units.Count));
     AddConsolidatedUnitEvidenceProperties;
@@ -1232,7 +1599,7 @@ begin
 
   DoProgress('Scanning project...', 10);
 
-  // Scan project — initialize record so the outer finally can safely call Free
+  // Scan project. Initialize the record so the outer finally can safely call Free.
   LProjectInfo := Default(TProjectInfo);
   LBuildEvidence := Default(TBuildEvidence);
   LCompositionEvidence := Default(TCompositionEvidence);
@@ -1242,10 +1609,13 @@ begin
   LManifest := Default(TComponentManifest);
   LManifestJson := '';
   try
+    FProjectScanner.SetDelphi7Root(FConfig.Delphi7Root);
+    FProjectScanner.SetExplicitTargetRequest(FConfig.PlatformExplicit,
+      FConfig.ConfigurationExplicit);
     LProjectInfo := FProjectScanner.Scan(AProjectPath, FConfig.Platform, FConfig.Configuration);
 
-    // Apply MapFileDir override — allows legacy projects to specify where the
-    // MAP file is located when automatic detection from the .dproj fails.
+    // Apply MapFileDir override. Legacy projects look next to the output
+    // binary unless the caller points at another directory.
     if FConfig.MapFileDir <> '' then
       LProjectInfo.MapFilePath := TPath.Combine(FConfig.MapFileDir,
         LProjectInfo.ProjectName + LProjectInfo.EffectiveMapSuffix + '.map');
@@ -1261,6 +1631,15 @@ begin
   try
     ReportWarnings(LProjectInfo.Warnings, LReportedWarnings, 12);
 
+    // Legacy projects are not compiled here. The MAP file must already sit
+    // next to the output binary (or in --map-dir).
+    if LProjectInfo.IsLegacyProject and
+       ((Trim(LProjectInfo.MapFilePath) = '') or not TFile.Exists(LProjectInfo.MapFilePath)) then
+    begin
+      DoProgress('Error: ' + LegacyMapFileMissingMessage(LProjectInfo.MapFilePath), -1);
+      Exit(False);
+    end;
+
     if Trim(FConfig.ManifestFile) <> '' then
     begin
       LManifestPath := ResolveManifestPath(LProjectInfo.ProjectDir, FConfig.ManifestFile);
@@ -1275,6 +1654,16 @@ begin
     end;
 
     DoProgress('Ensuring MAP file...', 15);
+    if LProjectInfo.IsLegacyProject then
+    begin
+      LDeepEvidenceBuildResult := Default(TDeepEvidenceBuildResult);
+      LDeepEvidenceBuildResult.Success := True;
+      LDeepEvidenceBuildResult.Executed := False;
+      LDeepEvidenceBuildResult.Message :=
+        'Legacy project: DX.Comply does not compile it. Using the MAP file from your build.';
+      DoProgress(LDeepEvidenceBuildResult.Message, 18);
+    end
+    else
     try
       LDeepEvidenceBuildResult := EnsureDeepEvidenceBuild(LProjectInfo);
     except
@@ -1295,7 +1684,7 @@ begin
       // warning in that case and clarify that SBOM generation continues.
       if FConfig.ContinueOnDeepEvidenceBuildFailure then
       begin
-        DoProgress('Warning: Skipping optional Deep-Evidence rebuild — ' +
+        DoProgress('Warning: Skipping optional Deep-Evidence rebuild. ' +
           LDeepEvidenceBuildResult.Message, 18);
         if LDeepEvidenceBuildResult.CommandLine <> '' then
           DoProgress('Hint: Deep-Evidence command was: ' +
@@ -1376,6 +1765,8 @@ begin
         LMetadata.ProductName := LProjectInfo.ProjectName;
       if LMetadata.ProductVersion = '' then
         LMetadata.ProductVersion := LProjectInfo.Version;
+      if LMetadata.Supplier = '' then
+        LMetadata.Supplier := LProjectInfo.CompanyName;
 
       if LManifest.Loaded then
       begin
@@ -1391,7 +1782,7 @@ begin
 
       if Result then
       begin
-        DoProgress('Validating SBOM...', 90);
+        DoProgress('Running structural check...', 90);
         LValidation := ValidateSbom(LOutputPath);
 
         LReportData := BuildHumanReadableReportData(LOutputPath, LFormat, LMetadata,
@@ -1406,24 +1797,24 @@ begin
         if LValidation.IsValid then
         begin
           if Length(LGeneratedReportPaths) > 0 then
-            DoProgress(Format('SBOM and %d human-readable report(s) generated and validated: %s',
+            DoProgress(Format('SBOM and %d human-readable report(s) generated. Structural check passed: %s',
               [Length(LGeneratedReportPaths), LOutputPath]), 100)
           else
-            DoProgress(Format('SBOM generated and validated: %s', [LOutputPath]), 100);
+            DoProgress(Format('SBOM generated. Structural check passed: %s', [LOutputPath]), 100);
         end
         else
         begin
           if Length(LGeneratedReportPaths) > 0 then
-            DoProgress(Format('SBOM and human-readable report(s) generated: %s (with validation warnings)',
+            DoProgress(Format('SBOM and human-readable report(s) generated: %s (structural check did not pass)',
               [LOutputPath]), 95)
           else
-            DoProgress(Format('SBOM generated: %s (with validation warnings)', [LOutputPath]), 95);
+            DoProgress(Format('SBOM generated: %s (structural check did not pass)', [LOutputPath]), 95);
           var LErr: string;
           for LErr in LValidation.Errors do
-            DoProgress('Validation error: ' + LErr, -1);
+            DoProgress('Structural check error: ' + LErr, -1);
           var LWarn: string;
           for LWarn in LValidation.Warnings do
-            DoProgress('Validation warning: ' + LWarn, 95);
+            DoProgress('Structural check warning: ' + LWarn, 95);
         end;
       end
       else
@@ -1440,19 +1831,74 @@ begin
   end;
 end;
 
+function TDxComplyGenerator.MergeFileConfig(const ACaller, AFile: TSbomConfig): TSbomConfig;
+begin
+  // Precedence (issue #50):
+  // 1. Built-in defaults, already applied by LoadConfig / TSbomConfig.Default.
+  // 2. Keys present in the config file (AFile).
+  // 3. Caller fields listed in ExplicitOverrides. An explicit CLI option wins.
+  // Fields the caller left at the default are not treated as overrides.
+  Result := AFile;
+
+  if scoOutputPath in ACaller.ExplicitOverrides then
+    Result.OutputPath := ACaller.OutputPath;
+  if scoFormat in ACaller.ExplicitOverrides then
+    Result.Format := ACaller.Format;
+  if scoPlatform in ACaller.ExplicitOverrides then
+    Result.Platform := ACaller.Platform;
+  if scoConfiguration in ACaller.ExplicitOverrides then
+    Result.Configuration := ACaller.Configuration;
+  if scoProductName in ACaller.ExplicitOverrides then
+    Result.ProductName := ACaller.ProductName;
+  if scoProductVersion in ACaller.ExplicitOverrides then
+    Result.ProductVersion := ACaller.ProductVersion;
+  if scoSupplier in ACaller.ExplicitOverrides then
+    Result.Supplier := ACaller.Supplier;
+  if scoIncludePatterns in ACaller.ExplicitOverrides then
+    Result.IncludePatterns := ACaller.IncludePatterns;
+  if scoExcludePatterns in ACaller.ExplicitOverrides then
+    Result.ExcludePatterns := ACaller.ExcludePatterns;
+  if scoMapFileDir in ACaller.ExplicitOverrides then
+    Result.MapFileDir := ACaller.MapFileDir;
+  if scoIncludeCompositionEvidence in ACaller.ExplicitOverrides then
+    Result.IncludeCompositionEvidence := ACaller.IncludeCompositionEvidence;
+  if scoReport in ACaller.ExplicitOverrides then
+  begin
+    // Only the switch and the format come from the CLI. The file keeps its
+    // report output path and include flags, which the CLI cannot set.
+    Result.HumanReadableReport.Enabled := ACaller.HumanReadableReport.Enabled;
+    Result.HumanReadableReport.Format := ACaller.HumanReadableReport.Format;
+  end;
+  if scoScanDirs in ACaller.ExplicitOverrides then
+    Result.ScanDirs := ACaller.ScanDirs;
+  if scoScanTree in ACaller.ExplicitOverrides then
+    Result.ScanTree := ACaller.ScanTree;
+
+  Result.IncludePlatformInOutput := ACaller.IncludePlatformInOutput;
+  Result.ExplicitOverrides := ACaller.ExplicitOverrides;
+
+  if Result.IncludePlatformInOutput and
+     not (scoOutputPath in ACaller.ExplicitOverrides) and
+     (Result.OutputPath <> '') then
+    Result.OutputPath := TSbomConfig.DecorateOutputFileName(
+      Result.OutputPath, Result.Platform, Result.Configuration);
+end;
+
 function TDxComplyGenerator.GenerateFromConfig(const AProjectPath, AConfigPath: string): Boolean;
 var
-  LExplicitManifest: string;
-  LManifestExplicit: Boolean;
+  LCliConfig: TSbomConfig;
 begin
-  // --manifest wins over the file. Other CLI settings keep the existing
-  // --ci behaviour: the config file replaces them.
-  LManifestExplicit := FConfig.ManifestFileExplicit;
-  LExplicitManifest := FConfig.ManifestFile;
-  FConfig := LoadConfig(AConfigPath);
-  if LManifestExplicit then
+  LCliConfig := FConfig;
+  FConfig := MergeFileConfig(LCliConfig, LoadConfig(AConfigPath));
+  if (FConfig.Delphi7Root = '') and (LCliConfig.Delphi7Root <> '') then
+    FConfig.Delphi7Root := LCliConfig.Delphi7Root;
+  if LCliConfig.PlatformExplicit then
+    FConfig.PlatformExplicit := True;
+  if LCliConfig.ConfigurationExplicit then
+    FConfig.ConfigurationExplicit := True;
+  if LCliConfig.ManifestFileExplicit then
   begin
-    FConfig.ManifestFile := LExplicitManifest;
+    FConfig.ManifestFile := LCliConfig.ManifestFile;
     FConfig.ManifestFileExplicit := True;
   end;
   Result := Generate(AProjectPath);

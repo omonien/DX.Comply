@@ -1,16 +1,16 @@
-# DX.Comply — CI/CD Integration Guide
+# DX.Comply: CI/CD Integration Guide
 
 ## Overview
 
 The `dxcomply` CLI can be dropped into any Windows build pipeline that produces
 Delphi build artefacts. It reads a `.dproj` file (or a `.dxcomply.json`
 configuration file in CI mode), combines project metadata with build evidence,
-lists the binary the project builds and other binaries in that output
-directory, hashes the files that exist, and writes a
-standards-compliant SBOM. Subfolders such as `setup\` or `tools\` are not
-walked, so the SBOM no longer picks up unrelated executables.
+lists the binary the project builds and the other binaries in that output
+directory, hashes the files it can open, and writes a
+CycloneDX or SPDX SBOM. Subfolders such as `setup\` or `tools\` are not
+walked.
 
-The CLI tool expects an existing detailed MAP file — it does **not** compile your
+The CLI tool expects an existing detailed MAP file. It does **not** compile your
 project. Your pipeline must build the project with `DCC_MapFile=3` before
 running `dxcomply`. This keeps the CLI lightweight and avoids any dependency on
 build scripts or Delphi installations beyond what your pipeline already provides.
@@ -47,7 +47,7 @@ This is also supported in `.dxcomply.json` via the `mapDir` key.
     path: bom.json
 ```
 
-### Full CI workflow with long-term retention (CRA-ready)
+### Full CI workflow with long-term retention
 
 ```yaml
 name: Build and Generate SBOM
@@ -78,7 +78,7 @@ jobs:
         with:
           name: sbom
           path: bom-*.json
-          retention-days: 3650  # 10 years — required by CRA Article 13
+          retention-days: 3650  # 10 years, the retention period in CRA Article 13
 ```
 
 ---
@@ -99,7 +99,7 @@ generate-sbom:
   artifacts:
     paths:
       - bom.json
-    expire_in: never  # Keep for CRA compliance (10 years)
+    expire_in: never  # Keep the SBOM with the release (CRA Article 13: at least 10 years)
 ```
 
 ---
@@ -115,7 +115,13 @@ store the configuration in `.dxcomply.json` at the repository root.
 {
   "output": "bom.json",
   "format": "cyclonedx-json",
-  "exclude": ["**/*.dcu"],
+  "platform": "Win32",
+  "configName": "Release",
+  "include": ["build/**"],
+  "exclude": [
+    "build/**/Debug/**",
+    "**/*.dcu"
+  ],
   "scanDirs": ["redist"],
   "manifest": "components.json",
   "product": {
@@ -133,37 +139,34 @@ That switch is deprecated and will be removed in a future release.
 
 `include` and `exclude` still filter the files that were scanned. With
 `scanTree`, or a `scanDirs` value that contains `**`, patterns are relative
-to the scanned directory:
+to the scanned directory.
 
-```json
-"include": ["build/**"],
-"exclude": ["build/**/Debug/**", "**/*.dcu"]
-```
+`configName` selects the build configuration used to read the `.dproj` (Debug, Release, or a custom name). `platform` selects the target. Both match the CLI flags `--config-name` and `--platform`.
 
-On the command line the same controls are `--scan-dir=<path>` (repeatable)
-and `--scan-tree`.
-
-Then invoke in CI mode — the config file drives all settings:
+Then invoke in CI mode:
 
 ```
 dxcomply --project=src/MyApp.dproj --ci --config=.dxcomply.json --no-pause
 ```
 
-When `--ci` is given and the config file exists, `GenerateFromConfig` is called
-instead of `Generate`, so command-line format, output, and scan flags are ignored
-in favour of the file contents.
+When `--ci` is given and the config file exists, DX.Comply loads that file and then applies the options you actually passed on the command line. Precedence is:
 
-`manifest` is the path to an optional components file (see the README section
-"Component manifest"). A relative path is resolved from the project directory.
-`--manifest=<file>` still wins when `--ci` is set. A missing or invalid file
-fails the run and names the path and the reason.
+1. Built-in defaults.
+2. Values from `.dxcomply.json`.
+3. Command-line options that appear in the invocation. These win.
+
+A default you did not pass does not override the file. `dxcomply --ci --config-name=Debug` keeps Debug even if the file says `"configName": "Release"`. `dxcomply --ci --platform=Win64` keeps the file's `configName` and replaces only the platform. Without `--ci`, the file is not read. `--config` only changes the path used together with `--ci`.
+
+The line printed after a successful run is the output path after that merge, including a `configName` or `platform` taken from the file.
+
+`manifest` is an optional components file (see the README section "Component manifest"). A relative path is resolved from the project directory. `--manifest` wins over the file. A missing or invalid file fails the run and names the path and the reason. The same file is used for a Delphi 7 `.dpr`: matching uses the units from the MAP file.
 
 ### Multi-platform builds
 
 When the same project is built for several targets in one pipeline (e.g. Win32
 and Win64), each invocation of `dxcomply` will by default write to the same
 `bom.json` and overwrite the previous run. Use `--include-platform-in-output`
-to append `<Platform>.<Config>` to the default base filename — explicit
+to append `<Platform>.<Config>` to the default base filename. Explicit
 `--output` paths are never decorated:
 
 ```yaml
@@ -190,7 +193,7 @@ to append `<Platform>.<Config>` to the default base filename — explicit
 
 ### Deep Evidence in CI
 
-The CLI tool does not compile your project — it relies on the MAP file that your
+The CLI tool does not compile your project. It relies on the MAP file that your
 build step produces. To get full unit-level evidence, ensure your build step
 includes the `DCC_MapFile=3` MSBuild property:
 
@@ -198,8 +201,9 @@ includes the `DCC_MapFile=3` MSBuild property:
 msbuild src/MyApp.dproj /p:Config=Release /p:Platform=Win32 /p:DCC_MapFile=3
 ```
 
-If you use `.dxcomply.json`, the `deepEvidence.build` option is ignored by the
-CLI — the MAP file must already exist before `dxcomply` runs.
+If you use `.dxcomply.json`, `deepEvidence.build` is ignored. Set
+`deepEvidence.mode` to `always` or `when-missing` instead. The CLI still does
+not compile the project: the MAP file must already exist before `dxcomply` runs.
 
 ---
 
@@ -221,10 +225,21 @@ Pipeline steps should check the exit code and fail the job on non-zero values:
 
 ---
 
-## CRA Compliance Notes
+## CRA notes
 
-The EU Cyber Resilience Act (CRA, Article 13) requires manufacturers to maintain
-an SBOM for every released product version for **at least 10 years**.
+The EU Cyber Resilience Act (CRA, Article 13) requires manufacturers to keep
+technical documentation, including an SBOM, for **at least 10 years**. The SBOM
+from DX.Comply is build evidence and a component list. It is a starting point
+for that part of the file. It does not make a product compliant.
+
+The tool's own check of the written file is structural. CycloneDX JSON from the
+example in this repository passes the official CycloneDX 1.5 JSON schema.
+SPDX JSON and CycloneDX XML are not checked against official schemas inside
+the tool.
+
+BSI TR-03183-2 v2.1.0 asks for more than this output, including CycloneDX 1.6
+or later, SHA-512 hashes, a licence and a supplier on each component, and
+recursive dependencies. Matching that profile is on the roadmap.
 
 Practical checklist:
 
@@ -232,7 +247,7 @@ Practical checklist:
 - Store `bom.json` alongside the release artefacts in long-term storage.
 - Set artifact `retention-days: 3650` (GitHub Actions) or `expire_in: never`
   (GitLab CI).
-- Use CycloneDX JSON (`--format=cyclonedx-json`) — it is the format required by
-  most EU conformity assessment toolchains.
+- CycloneDX JSON (`--format=cyclonedx-json`) is the default format.
 - Archive the SBOM together with the installer or package so they remain
   associated even if the CI system is replaced.
+- Vulnerability management and incident reporting are outside the scope of this tool.

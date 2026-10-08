@@ -24,6 +24,7 @@ uses
   System.IOUtils,
   DX.Comply.Engine.Intf,
   DX.Comply.BuildEvidence.Intf,
+  DX.Comply.LegacyProject,
   DX.Comply.MapFile.Reader;
 
 type
@@ -464,7 +465,10 @@ begin
   Result.Paths.MapFilePath := AProjectInfo.MapFilePath;
 
   CopyUniqueValues(AProjectInfo.ProjectSearchPaths, Result.SearchPaths);
-  CollectCompilerOptionEvidence(AProjectInfo, Result);
+  // Legacy scans already merged .dof over .cfg. Reading the .cfg again would
+  // put the losing values back into the search path.
+  if not AProjectInfo.IsLegacyProject then
+    CollectCompilerOptionEvidence(AProjectInfo, Result);
   CopyUniqueValues(AProjectInfo.SearchPaths, Result.SearchPaths);
   CopyUniqueValues(AProjectInfo.GlobalSearchPaths, Result.SearchPaths);
   CopyUniqueValues(AProjectInfo.UnitScopeNames, Result.UnitScopeNames);
@@ -510,16 +514,28 @@ begin
       // public-symbols MAP, not the detailed format DX.Comply requires.
       // Emit an actionable warning so the user knows exactly what to change.
       if Length(LMapUnitNames) = 0 then
-        Result.Warnings.Add(
-          'MAP file found but contains no unit information: ' +
-          AProjectInfo.MapFilePath + '. ' +
-          'Enable detailed MAP output (Project Options > Linker > Map file > Detailed)' +
-          ' or set DCC_MapFile=3 in the .dproj, then rebuild for full composition evidence.');
+      begin
+        if AProjectInfo.IsLegacyProject then
+          Result.Warnings.Add(
+            'MAP file found but contains no unit information: ' +
+            AProjectInfo.MapFilePath + '. ' +
+            'In Delphi 7 open Project Options, Linker, and set Map file to Detailed, ' +
+            'or add -GD to the .cfg, then rebuild.')
+        else
+          Result.Warnings.Add(
+            'MAP file found but contains no unit information: ' +
+            AProjectInfo.MapFilePath + '. ' +
+            'Enable detailed MAP output (Project Options > Linker > Map file > Detailed)' +
+            ' or set DCC_MapFile=3 in the .dproj, then rebuild for full composition evidence.');
+      end;
     end;
 
     if not TFile.Exists(AProjectInfo.MapFilePath) then
     begin
-      Result.Warnings.Add('No detailed MAP file found: ' + AProjectInfo.MapFilePath);
+      if AProjectInfo.IsLegacyProject then
+        Result.Warnings.Add(LegacyMapFileMissingMessage(AProjectInfo.MapFilePath))
+      else
+        Result.Warnings.Add('No detailed MAP file found: ' + AProjectInfo.MapFilePath);
 
       LRsmFilePath := ChangeFileExt(AProjectInfo.MapFilePath, '.rsm');
       if TFile.Exists(LRsmFilePath) then

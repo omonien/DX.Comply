@@ -98,6 +98,7 @@
         <DCCReference Include="DX.Comply.MapFile.Reader.pas"/>
         <DCCReference Include="DX.Comply.UsesClauseParser.pas"/>
         <DCCReference Include="DX.Comply.UnitResolver.pas"/>
+        <DCCReference Include="DX.Comply.LegacyProject.pas"/>
         <DCCReference Include="DX.Comply.ProjectScanner.pas"/>
         <DCCReference Include="DX.Comply.FileScanner.pas"/>
         <DCCReference Include="DX.Comply.HashService.pas"/>

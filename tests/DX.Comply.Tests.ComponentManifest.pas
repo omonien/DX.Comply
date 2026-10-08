@@ -133,6 +133,9 @@ type
 
 implementation
 
+uses
+  DX.Comply.Tests.Paths;
+
 function TComponentManifestTests.ParseManifest(const AJson: string): TComponentManifest;
 var
   LError: string;
@@ -471,6 +474,9 @@ begin
   LKind := ClassifyLicence('Commercial', LValue);
   Assert.AreEqual(Ord(lkName), Ord(LKind));
   Assert.AreEqual('Commercial', LValue);
+  LKind := ClassifyLicence('Proprietary', LValue);
+  Assert.AreEqual(Ord(lkName), Ord(LKind));
+  Assert.AreEqual('Proprietary', LValue);
   LKind := ClassifyLicence('', LValue);
   Assert.AreEqual(Ord(lkNone), Ord(LKind));
 end;
@@ -527,7 +533,7 @@ begin
   LManifest := ParseManifest(
     '[{"name":"Indy","version":"10","vendor":"Indy Project","licence":"BSD-3-Clause",' +
     '"type":"library","units_exact":["IdHTTP"]}]');
-  Assert.AreEqual(1, Length(LManifest.Components));
+  Assert.AreEqual(NativeInt(1), NativeInt(Length(LManifest.Components)));
   Assert.AreEqual('Indy', LManifest.Components[0].Name);
   Assert.IsTrue(Length(LManifest.Warnings) > 0, 'A bare array should be noted');
 end;
@@ -702,9 +708,7 @@ var
   LGen: TDxComplyGenerator;
   LMessages: TStringList;
 begin
-  LProject := TPath.GetFullPath(TPath.Combine(TPath.GetDirectoryName(ParamStr(0)),
-    '..' + PathDelim + '..' + PathDelim + '..' + PathDelim +
-    'src' + PathDelim + 'DX.Comply.Engine.dproj'));
+  LProject := TPath.Combine(RepoRoot, 'src' + PathDelim + 'DX.Comply.Engine.dproj');
   Assert.IsTrue(TFile.Exists(LProject),
     'The engine project must be available for this test: ' + LProject);
 
@@ -800,13 +804,21 @@ begin
 
     LDependencies := LJson.GetValue('dependencies') as TJSONArray;
     LRoot := FindDependency(LDependencies, 'TestApp');
+    Assert.IsTrue(DependsOnContains(LRoot, 'comp-0'),
+      'The project depends on the program that was built');
+    Assert.IsFalse(DependsOnContains(LRoot, 'manifest-0'),
+      'Libraries hang off the program, not the project');
+    Assert.IsFalse(DependsOnContains(LRoot, 'comp-1'),
+      'A matched unit is not linked from the project');
+
+    LRoot := FindDependency(LDependencies, 'comp-0');
     Assert.IsTrue(DependsOnContains(LRoot, 'manifest-0'));
     Assert.IsTrue(DependsOnContains(LRoot, 'manifest-1'));
     Assert.IsTrue(DependsOnContains(LRoot, 'manifest-2'));
     Assert.IsFalse(DependsOnContains(LRoot, 'comp-1'),
-      'A matched unit is linked from its library, not from the application');
-    Assert.IsTrue(DependsOnContains(LRoot, 'comp-5'), 'Own code stays on the application');
-    Assert.IsTrue(DependsOnContains(LRoot, 'comp-6'), 'An unmatched unit stays on the application');
+      'A matched unit is linked from its library, not from the program');
+    Assert.IsTrue(DependsOnContains(LRoot, 'comp-5'), 'Own code stays on the program');
+    Assert.IsTrue(DependsOnContains(LRoot, 'comp-6'), 'An unmatched unit stays on the program');
 
     LLibrary := FindDependency(LDependencies, 'manifest-0');
     Assert.IsTrue(DependsOnContains(LLibrary, 'comp-1'));
@@ -838,7 +850,7 @@ begin
   LErrors := '';
   for I := 0 to High(LSequence) do
     LErrors := LErrors + LSequence[I] + sLineBreak;
-  Assert.AreEqual(0, Length(LSequence), LErrors);
+  Assert.AreEqual(NativeInt(0), NativeInt(Length(LSequence)), LErrors);
 
   LStart := Pos('bom-ref="manifest-0"', LContent);
   LEnd := Pos('</component>', LContent, LStart);
@@ -867,6 +879,7 @@ var
   LJson, LPackage, LRef: TJSONObject;
   LPackages, LRelationships, LRefs, LExtracted: TJSONArray;
   I: Integer;
+  LUnitId: string;
   LDescribesLibrary, LDependsOnUnit: Boolean;
 begin
   AddUnit('OtlTask.pas');
@@ -911,6 +924,10 @@ begin
     Assert.IsNotNull(FindComponent(LPackages, 'MainForm.pas'),
       'Own-code units stay in the package list');
 
+    LPackage := FindComponent(LPackages, 'OtlTask.pas');
+    Assert.IsNotNull(LPackage, 'The matched unit stays in the package list');
+    LUnitId := LPackage.GetValue<string>('SPDXID');
+
     LRelationships := LJson.GetValue('relationships') as TJSONArray;
     LDescribesLibrary := False;
     LDependsOnUnit := False;
@@ -921,7 +938,8 @@ begin
         (Pos('SPDXRef-Package-Manifest-0-', LRef.GetValue<string>('relatedSpdxElement')) = 1) then
         LDescribesLibrary := True;
       if (LRef.GetValue<string>('relationshipType') = 'DEPENDS_ON') and
-        (LRef.GetValue<string>('relatedSpdxElement') = 'SPDXRef-Package-OtlTask.pas') then
+        (Pos('SPDXRef-Package-Manifest-0-', LRef.GetValue<string>('spdxElementId')) = 1) and
+        (LRef.GetValue<string>('relatedSpdxElement') = LUnitId) then
         LDependsOnUnit := True;
     end;
     Assert.IsTrue(LDescribesLibrary, 'The document must describe the library package');

@@ -1,11 +1,11 @@
 ﻿/// <summary>
 /// DX.Comply.Report.HtmlWriter
-/// Generates human-readable compliance reports in HTML format.
+/// Generates human-readable SBOM reports in HTML format.
 /// </summary>
 ///
 /// <remarks>
-/// The HTML report presents the same normalized report payload as the Markdown writer,
-/// but with cards, badges and readable tables for auditor-friendly consumption.
+/// The HTML report presents the same report payload as the Markdown writer,
+/// with cards, badges and readable tables.
 /// </remarks>
 ///
 /// <copyright>
@@ -143,11 +143,17 @@ end;
 
 procedure THtmlReportWriter.AddValidation(Lines: TStrings; const AData: TComplianceReportData);
 var
+  LBadgeClass: string;
   LEntry: string;
 begin
-  Lines.Add('<section><h2>Validation</h2>');
+  if AData.ValidationResult.IsValid then
+    LBadgeClass := 'passed'
+  else
+    LBadgeClass := 'failed';
+
+  Lines.Add('<section><h2>Structural check</h2>');
   Lines.Add(Format('<p><span class="badge %s">%s</span></p>', [
-    LowerCase(ValidationStatusText(AData)),
+    LBadgeClass,
     EscapeHtml(ValidationStatusText(AData))]));
   if Length(AData.ValidationResult.Errors) > 0 then
   begin
@@ -256,9 +262,9 @@ begin
     else
       AddSummaryCard(Lines, 'Warnings', IntToStr(LWarningsCount), 'warn');
     if AData.ValidationResult.IsValid then
-      AddSummaryCard(Lines, 'Validation', ValidationStatusText(AData), 'good')
+      AddSummaryCard(Lines, 'Structural check', ValidationStatusText(AData), 'good')
     else
-      AddSummaryCard(Lines, 'Validation', ValidationStatusText(AData), 'bad');
+      AddSummaryCard(Lines, 'Structural check', ValidationStatusText(AData), 'bad');
     Lines.Add('</div>');
     Lines.Add('<section><h2>Project Overview</h2><div class="table-wrap"><table><tbody>');
     Lines.Add('<tr><th>Version</th><td>' + EscapeHtml(SafeText(AData.Metadata.ProductVersion, SafeText(AData.ProjectInfo.Version))) + '</td></tr>');
