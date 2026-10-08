@@ -55,6 +55,17 @@ type
     /// net.developer-experts.dx-comply:conditional.
     /// </summary>
     Conditional: Boolean;
+    /// <summary>
+    /// Unit names from the interface and implementation uses clauses.
+    /// Empty when the source was not read, or when the clause is empty.
+    /// </summary>
+    UsedUnitNames: TArray<string>;
+    /// <summary>
+    /// True when UsedUnitNames was filled from a .pas, including an empty
+    /// clause, or when the resolver decided there is no Pascal source.
+    /// False means the writer may read a .pas once.
+    /// </summary>
+    UsesCached: Boolean;
   end;
 
   /// <summary>

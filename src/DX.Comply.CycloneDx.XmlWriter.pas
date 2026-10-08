@@ -8,6 +8,7 @@
 /// - Full metadata section with tool information
 /// - Component list with hashes (SHA-256 and SHA-512 when the file could be opened)
 /// - Dependency graph grouped by deliverable, runtime packages, external DLLs and linked units
+/// - Direct uses edges between units whose Pascal source was read
 /// - Schema validation support
 ///
 /// The XML output conforms to the CycloneDX 1.6 XSD schema:
@@ -32,6 +33,7 @@ uses
   System.IOUtils,
   System.Generics.Collections,
   System.DateUtils,
+  DX.Comply.DependencyGraph,
   DX.Comply.Engine.Intf;
 
 type
@@ -56,9 +58,12 @@ type
     procedure AddElement(const ATag, AValue: string);
     procedure AddPropertyElements(const AProperties: TArray<TSbomProperty>);
     procedure BuildMetadata(const AMetadata: TSbomMetadata; const AProjectInfo: TProjectInfo);
-    procedure BuildComponent(const AArtefact: TArtefactInfo; const AIndex: Integer);
-    procedure BuildComponents(const AArtefacts: TArtefactList; const AMetadata: TSbomMetadata);
-    procedure BuildDependencies(const AArtefacts: TArtefactList; const AProjectBomRef: string);
+    procedure BuildComponent(const AArtefact: TArtefactInfo; const AIndex: Integer;
+      AUnresolvedSource: Boolean);
+    procedure BuildComponents(const AArtefacts: TArtefactList; const AMetadata: TSbomMetadata;
+      const AGraph: TUsesDependencyGraph);
+    procedure BuildDependencies(const AArtefacts: TArtefactList; const AProjectBomRef: string;
+      const AGraph: TUsesDependencyGraph);
   public
     function Write(const AOutputPath: string;
       const AMetadata: TSbomMetadata;
@@ -229,7 +234,7 @@ begin
 end;
 
 procedure TCycloneDxXmlWriter.BuildComponent(const AArtefact: TArtefactInfo;
-  const AIndex: Integer);
+  const AIndex: Integer; AUnresolvedSource: Boolean);
 var
   LComponentType: string;
   LBomRef: string;
@@ -291,7 +296,7 @@ begin
   LFileName := BsiComponentFileName(AArtefact.RelativePath);
   if (AArtefact.FileSize >= 0) or (Trim(AArtefact.Origin) <> '') or
      (Trim(AArtefact.Evidence) <> '') or (Trim(AArtefact.Confidence) <> '') or
-     AArtefact.Conditional or (LFileName <> '') then
+     AArtefact.Conditional or (LFileName <> '') or AUnresolvedSource then
   begin
     OpenTag('properties');
     if AArtefact.FileSize >= 0 then
@@ -339,6 +344,9 @@ begin
       AddLine('<property name="bsi:component:structured">' +
         BsiStructuredValue(LFileName) + '</property>');
     end;
+    if AUnresolvedSource then
+      AddLine('<property name="' + cUnresolvedDependenciesProperty + '">' +
+        cUnresolvedDependenciesValue + '</property>');
     CloseTag('properties');
   end;
 
@@ -346,13 +354,13 @@ begin
 end;
 
 procedure TCycloneDxXmlWriter.BuildComponents(const AArtefacts: TArtefactList;
-  const AMetadata: TSbomMetadata);
+  const AMetadata: TSbomMetadata; const AGraph: TUsesDependencyGraph);
 var
   I: Integer;
 begin
   OpenTag('components');
   for I := 0 to AArtefacts.Count - 1 do
-    BuildComponent(AArtefacts[I], I);
+    BuildComponent(AArtefacts[I], I, AGraph.Status[I] = uusMissingSource);
   // Library rows from a component manifest. Element order is owned by
   // DX.Comply.ComponentManifest so this writer stays a thin hook.
   if AMetadata.ComponentManifestJson <> '' then
@@ -362,7 +370,7 @@ begin
 end;
 
 procedure TCycloneDxXmlWriter.BuildDependencies(const AArtefacts: TArtefactList;
-  const AProjectBomRef: string);
+  const AProjectBomRef: string; const AGraph: TUsesDependencyGraph);
 var
   I: Integer;
   LGroup: Integer;
@@ -392,6 +400,9 @@ begin
     CloseTag('dependency');
   end;
 
+  // FIndentLevel is the child level of <dependencies>. The helper indents
+  // from the dependencies element itself.
+  WriteUsesDependenciesXml(FLines, FIndentLevel - 1, AGraph);
   CloseTag('dependencies');
 end;
 
@@ -401,6 +412,9 @@ function TCycloneDxXmlWriter.Write(const AOutputPath: string;
   const AProjectInfo: TProjectInfo): Boolean;
 var
   LOutputDir: string;
+  LGraph: TUsesDependencyGraph;
+  LLibraries, LIncomplete, LComplete: TArray<string>;
+  LRef: string;
 begin
   Result := False;
   if AOutputPath = '' then
@@ -421,23 +435,38 @@ begin
     OpenTag('bom', 'xmlns="' + cNamespace + '" version="1" serialNumber="urn:uuid:' +
       GenerateUuid + '"');
 
+    LGraph := BuildUsesDependencyGraph(AArtefacts);
     BuildMetadata(AMetadata, AProjectInfo);
-    BuildComponents(AArtefacts, AMetadata);
+    BuildComponents(AArtefacts, AMetadata, LGraph);
     if AMetadata.ComponentManifestJson <> '' then
       AppendManifestDependenciesXml(FLines, AMetadata.ComponentManifestJson,
-        AArtefacts, AProjectInfo.ProjectName, FIndentLevel)
+        AArtefacts, AProjectInfo.ProjectName, FIndentLevel, LGraph)
     else
-      BuildDependencies(AArtefacts, AProjectInfo.ProjectName);
+      BuildDependencies(AArtefacts, AProjectInfo.ProjectName, LGraph);
 
-    if Trim(AProjectInfo.ProjectName) <> '' then
+    LLibraries := ManifestLibraryBomRefs(AMetadata.ComponentManifestJson, AArtefacts);
+    BuildCompositionRefLists(AProjectInfo.ProjectName, LGraph, LLibraries,
+      LIncomplete, LComplete);
+    if Length(LIncomplete) > 0 then
     begin
       OpenTag('compositions');
       OpenTag('composition');
       AddElement('aggregate', 'incomplete');
       OpenTag('dependencies');
-      AddLine('<dependency ref="' + EscapeXml(AProjectInfo.ProjectName) + '"/>');
+      for LRef in LIncomplete do
+        AddLine('<dependency ref="' + EscapeXml(LRef) + '"/>');
       CloseTag('dependencies');
       CloseTag('composition');
+      if Length(LComplete) > 0 then
+      begin
+        OpenTag('composition');
+        AddElement('aggregate', 'complete');
+        OpenTag('dependencies');
+        for LRef in LComplete do
+          AddLine('<dependency ref="' + EscapeXml(LRef) + '"/>');
+        CloseTag('dependencies');
+        CloseTag('composition');
+      end;
       CloseTag('compositions');
     end;
 

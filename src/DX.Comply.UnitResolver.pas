@@ -4,9 +4,9 @@
 /// </summary>
 ///
 /// <remarks>
-/// This resolver intentionally keeps the first slice small. It builds the
-/// composition evidence envelope, propagates metadata and warnings, and leaves
-/// the unit list empty until the actual unit-closure logic is implemented.
+/// Resolves units from the MAP file, and from uses clauses when the MAP is
+/// missing or the platform is not Win32 or Win64. A readable .pas is parsed
+/// once here and the uses names are stored on the resolved unit.
 /// </remarks>
 ///
 /// <copyright>
@@ -98,6 +98,11 @@ type
     /// Computes SHA-256 and SHA-512 hashes for the resolved file path.
     /// </summary>
     procedure ComputeHashes(var AResolvedUnit: TResolvedUnitInfo);
+    /// <summary>
+    /// Reads the uses clause of a resolved .pas once. A DCU is marked cached
+    /// with an empty name list so writers do not open it.
+    /// </summary>
+    procedure CacheUsedUnits(var AResolvedUnit: TResolvedUnitInfo);
   public
     /// <summary>
     /// Returns True for classic-compiler platforms (Win32, Win64) that produce MAP files.
@@ -117,6 +122,7 @@ type
 implementation
 
 uses
+  System.Classes,
   System.IOUtils,
   System.DateUtils,
   System.StrUtils,
@@ -149,6 +155,40 @@ begin
 
   AResolvedUnit.SecondaryHashSha256 := FHashService.ComputeSha256(AResolvedUnit.ResolvedPath);
   AResolvedUnit.PrimaryHashSha512 := FHashService.ComputeSha512(AResolvedUnit.ResolvedPath);
+end;
+
+procedure TUnitResolver.CacheUsedUnits(var AResolvedUnit: TResolvedUnitInfo);
+var
+  LPath: string;
+  LLines: TStringList;
+  LText: string;
+begin
+  AResolvedUnit.UsesCached := True;
+  AResolvedUnit.UsedUnitNames := nil;
+  LPath := AResolvedUnit.ResolvedPath;
+  if (LPath = '') or not SameText(TPath.GetExtension(LPath), '.pas') then
+    Exit;
+  if not TFile.Exists(LPath) then
+    Exit;
+
+  LLines := TStringList.Create;
+  try
+    try
+      LLines.LoadFromFile(LPath, TEncoding.UTF8);
+    except
+      try
+        LLines.LoadFromFile(LPath);
+      except
+        // The writer may try once more. A failed read is not an empty clause.
+        AResolvedUnit.UsesCached := False;
+        Exit;
+      end;
+    end;
+    LText := LLines.Text;
+  finally
+    LLines.Free;
+  end;
+  AResolvedUnit.UsedUnitNames := TUsesClauseParser.ExtractUsedUnits(LText);
 end;
 
 destructor TUnitResolver.Destroy;
@@ -399,6 +439,7 @@ begin
     LResolvedUnit := ResolveMapDerivedUnit(AProjectInfo,
       ABuildEvidence, LEvidenceItem.UnitName, LEvidenceItem.FilePath);
     ComputeHashes(LResolvedUnit);
+    CacheUsedUnits(LResolvedUnit);
     ACompositionEvidence.Units.Add(LResolvedUnit);
   end;
 end;
@@ -545,6 +586,7 @@ begin
     LResolvedUnit := ResolveUnitBySearchPaths(AProjectInfo, ABuildEvidence,
       LUnitName, besUsesClause);
     ComputeHashes(LResolvedUnit);
+    CacheUsedUnits(LResolvedUnit);
     ACompositionEvidence.Units.Add(LResolvedUnit);
   end;
 end;

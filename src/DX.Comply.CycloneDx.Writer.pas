@@ -8,6 +8,7 @@
 /// - Full metadata section with tool information
 /// - Component list with hashes (SHA-256 and SHA-512 when the file could be opened)
 /// - Dependency graph grouped by deliverable, runtime packages, external DLLs and linked units
+/// - Direct uses edges between units whose Pascal source was read
 /// - Schema validation support
 ///
 /// CycloneDX 1.6 specification: https://cyclonedx.org/specification/overview/
@@ -46,7 +47,8 @@ type
     function GenerateUuid: string;
     function BuildMetadata(const AMetadata: TSbomMetadata; const AProjectInfo: TProjectInfo): TJSONObject;
     function BuildProperties(const AProperties: TArray<TSbomProperty>): TJSONArray;
-    function BuildComponent(const AArtefact: TArtefactInfo; const AIndex: Integer): TJSONObject;
+    function BuildComponent(const AArtefact: TArtefactInfo; const AIndex: Integer;
+      AUnresolvedSource: Boolean): TJSONObject;
     function BuildDependencies(const AArtefacts: TArtefactList; const AProjectBomRef: string): TJSONArray;
   public
     // ISbomWriter
@@ -62,6 +64,7 @@ implementation
 
 uses
   DX.Comply.ComponentManifest,
+  DX.Comply.DependencyGraph,
   DX.Comply.VersionInfo;
 
 { TCycloneDxJsonWriter }
@@ -197,7 +200,7 @@ begin
 end;
 
 function TCycloneDxJsonWriter.BuildComponent(const AArtefact: TArtefactInfo;
-  const AIndex: Integer): TJSONObject;
+  const AIndex: Integer; AUnresolvedSource: Boolean): TJSONObject;
 var
   LComponent, LHashes, LRef, LRefHash: TJSONObject;
   LHashArray, LProperties, LRefs, LRefHashes: TJSONArray;
@@ -335,6 +338,8 @@ begin
     AddProperty('bsi:component:archive', BsiArchiveValue(LFileName));
     AddProperty('bsi:component:structured', BsiStructuredValue(LFileName));
   end;
+  if AUnresolvedSource then
+    AddProperty(cUnresolvedDependenciesProperty, cUnresolvedDependenciesValue);
 
   if LProperties.Count > 0 then
     LComponent.AddPair('properties', LProperties)
@@ -404,6 +409,7 @@ var
   LComponents: TJSONArray;
   LDependencies: TJSONArray;
   LOutput: TStringList;
+  LGraph: TUsesDependencyGraph;
   I: Integer;
 begin
   Result := False;
@@ -430,34 +436,32 @@ begin
     LMetadataObj := BuildMetadata(AMetadata, AProjectInfo);
     LRoot.AddPair('metadata', LMetadataObj);
 
+    // Uses edges are built once. Component properties and compositions share
+    // that result, so an uncached .pas is not parsed twice.
+    LGraph := BuildUsesDependencyGraph(AArtefacts);
+
     // Components
     LComponents := TJSONArray.Create;
     for I := 0 to AArtefacts.Count - 1 do
-      LComponents.Add(BuildComponent(AArtefacts[I], I));
+      LComponents.Add(BuildComponent(AArtefacts[I], I,
+        LGraph.Status[I] = uusMissingSource));
     LRoot.AddPair('components', LComponents);
 
     // Dependencies. A component manifest groups matched units under one
-    // library and links those units from that library.
+    // library and links those units from that library. Uses edges are added
+    // after that rewrite so they are not folded into the program.
     LDependencies := BuildDependencies(AArtefacts, AProjectInfo.ProjectName);
     if AMetadata.ComponentManifestJson <> '' then
       ApplyManifestCycloneDxJson(AMetadata.ComponentManifestJson, AArtefacts,
         LComponents, LDependencies, AProjectInfo.ProjectName);
+    AppendUsesDependenciesJson(LDependencies, LGraph);
     LRoot.AddPair('dependencies', LDependencies);
 
-    // Direct dependencies are what the build shows. TR-03183-2 requires the
-    // completeness of that list to be stated. Recursive resolution is not
-    // done here, so the aggregate is incomplete.
-    if Trim(AProjectInfo.ProjectName) <> '' then
-    begin
-      var LCompositions := TJSONArray.Create;
-      var LComposition := TJSONObject.Create;
-      var LCompositionDeps := TJSONArray.Create;
-      LComposition.AddPair('aggregate', 'incomplete');
-      LCompositionDeps.Add(AProjectInfo.ProjectName);
-      LComposition.AddPair('dependencies', LCompositionDeps);
-      LCompositions.Add(LComposition);
-      LRoot.AddPair('compositions', LCompositions);
-    end;
+    // Completeness is per component. A unit whose uses names all resolve is
+    // complete. The program, a runtime package, a DLL, and a unit with no
+    // source stay incomplete. See docs/BSI-TR-03183-2.md.
+    WriteCompositionsJson(LRoot, AProjectInfo.ProjectName, LGraph,
+      ManifestLibraryBomRefs(AMetadata.ComponentManifestJson, AArtefacts));
 
     // Write to file
     LOutput := TStringList.Create;

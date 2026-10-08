@@ -106,6 +106,7 @@
         <DCCReference Include="DX.Comply.Tests.ComponentManifest.pas"/>
         <DCCReference Include="DX.Comply.Tests.BsiTr03183.pas"/>
         <DCCReference Include="DX.Comply.Tests.UsesClauseParser.pas"/>
+        <DCCReference Include="DX.Comply.Tests.DependencyGraph.pas"/>
         <DCCReference Include="DX.Comply.Tests.VersionInfo.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
