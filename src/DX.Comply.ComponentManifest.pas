@@ -210,6 +210,12 @@ function MatchManifestUnit(const AManifest: TComponentManifest;
   const AUnitName: string): TManifestMatch;
 
 /// <summary>
+/// Unit name of a unit-evidence artefact, from its file name.
+/// Empty when the artefact is not unit evidence.
+/// </summary>
+function ArtefactUnitName(const AArtefact: TArtefactInfo): string;
+
+/// <summary>
 /// Groups unit-evidence artefacts that match a library row.
 /// </summary>
 function BuildManifestPlan(const AManifest: TComponentManifest;
