@@ -52,6 +52,12 @@ type
     /// </summary>
     [Test]
     procedure Resolve_BlankMetadataUsesModule;
+
+    /// <summary>
+    /// The About caption uses the module version and does not invent 1.0.0.0.
+    /// </summary>
+    [Test]
+    procedure VersionCaption_UsesModuleVersionOrUnavailable;
   end;
 
 implementation
@@ -91,6 +97,29 @@ begin
     'A blank metadata tool version must fall back to the running module');
   Assert.AreEqual(GetDxComplyToolVersion, ResolveDxComplyToolVersion('   '),
     'Whitespace must not count as an explicit tool version');
+end;
+
+procedure TVersionInfoTests.VersionCaption_UsesModuleVersionOrUnavailable;
+var
+  LCaption: string;
+  LModuleVersion: string;
+begin
+  Assert.AreEqual('Version unavailable', FormatDXComplyVersionCaption('', 'Olaf Monien'),
+    'A missing product version must not be replaced with 1.0.0.0');
+  Assert.AreEqual('Version unavailable', FormatDXComplyVersionCaption('   ', ''),
+    'Whitespace is not a product version');
+
+  LModuleVersion := GetModuleProductVersion(HInstance);
+  LCaption := FormatDXComplyVersionCaption(LModuleVersion, 'Olaf Monien');
+  if LModuleVersion = '' then
+    Assert.AreEqual('Version unavailable', LCaption,
+      'The caption must stay unavailable when this module has no product version')
+  else
+  begin
+    Assert.AreEqual('Version ' + LModuleVersion + ' · Olaf Monien', LCaption,
+      'The caption must show the module product version');
+    Assert.Contains(LCaption, LModuleVersion);
+  end;
 end;
 
 initialization

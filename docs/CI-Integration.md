@@ -15,14 +15,18 @@ project. Your pipeline must build the project with `DCC_MapFile=3` before
 running `dxcomply`. This keeps the CLI lightweight and avoids any dependency on
 build scripts or Delphi installations beyond what your pipeline already provides.
 
+`dxcomply.exe` is not installed by GetIt. Copy it from the release ZIP or the
+installer `bin` folder, or build `src/CLI/DX.Comply.CLI.dproj`, and call that
+executable from the pipeline.
+
 The `--no-pause` flag suppresses the interactive "Press Enter to quit" prompt
 and is **required** in all automated pipeline steps.
 
 If the MAP file is not located in the default output directory derived from the
 `.dproj`, use `--map-dir` to point `dxcomply` at the correct directory:
 
-```bash
-dxcomply --project=src/MyApp.dproj --map-dir=build/Win32/Release --output=bom.json --no-pause
+```cmd
+dxcomply --project=src\MyApp.dproj --map-dir=build\Win32\Release --output=bom.json --no-pause
 ```
 
 This is also supported in `.dxcomply.json` via the `mapDir` key.
@@ -197,8 +201,8 @@ The CLI tool does not compile your project. It relies on the MAP file that your
 build step produces. To get full unit-level evidence, ensure your build step
 includes the `DCC_MapFile=3` MSBuild property:
 
-```bash
-msbuild src/MyApp.dproj /p:Config=Release /p:Platform=Win32 /p:DCC_MapFile=3
+```cmd
+msbuild src\MyApp.dproj /p:Config=Release /p:Platform=Win32 /p:DCC_MapFile=3
 ```
 
 If you use `.dxcomply.json`, `deepEvidence.build` is ignored. Set

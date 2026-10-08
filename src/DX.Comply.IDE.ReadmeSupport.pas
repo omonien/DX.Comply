@@ -6,7 +6,8 @@
 /// <remarks>
 /// The options page uses this unit to render a local, dependency-free README
 /// preview inside a classic TWebBrowser host without relying on external tools
-/// or network services.
+/// or network services. README.md is embedded in the IDE package. A file next
+/// to the repository is used only when that resource is not linked.
 /// </remarks>
 ///
 /// <copyright>
@@ -29,7 +30,8 @@ uses
   System.IOUtils,
   System.RegularExpressions,
   System.SysUtils,
-  DX.Comply.IDE.PathSupport;
+  DX.Comply.IDE.PathSupport,
+  DX.Comply.IDE.Resources;
 
 function EscapeHtml(const AValue: string): string;
 begin
@@ -93,13 +95,23 @@ end;
 
 function LoadDXComplyReadmeMarkdown: string;
 var
+  LFromResource: string;
   LReadmePath: string;
 begin
+  // Installed packages (GetIt, installer) have no repository tree.
+  // The embedded README is the copy the info page shows. The file is only
+  // a fallback for a development checkout that was built without the resource.
+  if TryLoadDXComplyResourceText(HInstance, cDXComplyReadmeResource, LFromResource) and
+    (Trim(LFromResource) <> '') then
+    Exit(LFromResource);
+
   LReadmePath := FindDXComplyRepositoryFile('README.md');
   if LReadmePath = '' then
     Exit('# DX.Comply' + sLineBreak + sLineBreak +
       'README.md could not be located from the installed package path.');
   Result := TFile.ReadAllText(LReadmePath, TEncoding.UTF8);
+  if Result.StartsWith(#$FEFF) then
+    Delete(Result, 1, 1);
 end;
 
 function ConvertMarkdownToHtmlDocument(const AMarkdown, ATitle: string): string;

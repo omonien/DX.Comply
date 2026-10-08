@@ -120,6 +120,10 @@
         <DCCReference Include="DX.Comply.IDE.Logger.pas"/>
         <DCCReference Include="DX.Comply.IDE.AboutDialog.pas"/>
         <DCCReference Include="DX.Comply.IDE.PathSupport.pas"/>
+        <DCCReference Include="DX.Comply.IDE.Resources.pas"/>
+        <RcCompile Include="DX.Comply.IDE.Resources.rc">
+            <ExcludedFromBuild>true</ExcludedFromBuild>
+        </RcCompile>
         <DCCReference Include="DX.Comply.IDE.ReadmeSupport.pas"/>
         <DCCReference Include="DX.Comply.IDE.BuildConfirmationDialog.pas"/>
         <DCCReference Include="DX.Comply.IDE.ProgressDialog.pas"/>

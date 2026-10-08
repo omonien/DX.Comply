@@ -1,0 +1,3 @@
+DXCOMPLYREADME RCDATA "..\\README.md"
+DXCOMPLYICONBMP RCDATA "..\\assets\\DX.Comply.Icon.bmp"
+DXCOMPLYICONPNG RCDATA "..\\assets\\DX.Comply.Icon.png"

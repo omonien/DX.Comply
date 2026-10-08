@@ -31,7 +31,6 @@ interface
 
 uses
   System.SysUtils,
-  System.StrUtils,
   System.Classes,
   System.IOUtils,
   System.UITypes,
@@ -62,17 +61,49 @@ type
     FOptionsPage: INTAAddInOptions;
     FProjectMenuItem: TMenuItem;
     FProjectMenuSeparator: TMenuItem;
+    FMenuRetryTimer: TTimer;
+    FMenuRetryCount: Integer;
+    FIdeNotifierIndex: Integer;
+    FIdeNotifier: IOTAIDENotifier;
     /// <summary>
     /// Attempts one injection of the DX.Comply menu items into the Project menu.
-    /// Returns True when the items were inserted, False when the menu was not
-    /// yet available (e.g. during early IDE start-up with GetIt packages).
+    /// The Project menu is found by the component name ProjectMenu only.
+    /// Returns True when the items are present, False when the menu is not
+    /// ready yet. Does not raise.
     /// </summary>
     function TryInjectProjectMenuItems: Boolean;
     /// <summary>
+    /// Finds an existing DX.Comply Project menu entry so a retry cannot add a second one.
+    /// </summary>
+    function FindOwnProjectMenuItem(AProjectMenu: TMenuItem): TMenuItem;
+    /// <summary>
+    /// Keeps an entry that is already on the Project menu and remembers its separator.
+    /// </summary>
+    procedure AdoptProjectMenuItem(AProjectMenu, AItem: TMenuItem);
+    /// <summary>
+    /// Stops the startup retry timer after the menu entry exists or the wait ends.
+    /// </summary>
+    procedure DisableMenuRetryTimer;
+    /// <summary>
+    /// Starts a one-second timer that retries menu injection for about 30 seconds.
+    /// </summary>
+    procedure StartMenuRetryTimer;
+    /// <summary>
+    /// Timer callback. Retries injection until it succeeds or the retry limit is reached.
+    /// </summary>
+    procedure MenuRetryTimerTick(Sender: TObject);
+    /// <summary>
+    /// Registers an IDE notifier that retries injection after startup notifications.
+    /// </summary>
+    procedure RegisterIdeMenuNotifier;
+    /// <summary>
+    /// Removes the IDE notifier before the wizard is destroyed.
+    /// </summary>
+    procedure UnregisterIdeMenuNotifier;
+    /// <summary>
     /// Injects the DX.Comply menu items into the main Project menu.
-    /// If the Project menu is not yet available (GetIt timing), schedules a
-    /// single deferred retry on the main thread via TThread.ForceQueue.
-    /// Called once from the constructor.
+    /// When the menu is not ready yet, retries on a timer and on later IDE
+    /// notifications. Called once from the constructor. Does not raise.
     /// </summary>
     procedure AddProjectMenuItems;
     /// <summary>
@@ -194,7 +225,8 @@ uses
   DX.Comply.IDE.Options,
   DX.Comply.IDE.OptionsFrame,
   DX.Comply.IDE.PathSupport,
-  DX.Comply.IDE.ProgressDialog;
+  DX.Comply.IDE.ProgressDialog,
+  DX.Comply.IDE.Resources;
 
 var
   /// <summary>
@@ -207,9 +239,86 @@ var
   /// in finalization. Initialised to -1 so that a failed registration is detectable.
   /// </summary>
   GAboutBoxIndex: Integer = -1;
+  /// <summary>
+  /// Wizard the IDE notifier may call. Niled before the wizard is freed so a
+  /// late notification cannot touch a destroyed object. The notifier does not
+  /// keep an interface reference to the wizard.
+  /// </summary>
+  GMenuNotifierWizard: TDxComplyWizard = nil;
 
 const
   cProjectMenuCaption = 'DX.Comply - SBOM';
+  /// <summary>
+  /// Component name of the IDE Project menu. Language independent.
+  /// The German IDE captions this menu Projekt, so the caption is never used.
+  /// </summary>
+  cProjectMenuComponentName = 'ProjectMenu';
+  cDXComplyProjectMenuItemName = 'DXComplySBOMMenu';
+  cDXComplyProjectMenuSeparatorName = 'DXComplySBOMMenuSeparator';
+  cMenuRetryIntervalMs = 1000;
+  cMenuRetryLimit = 30;
+
+type
+  /// <summary>
+  /// IDE notifier that retries Project menu injection after the package has loaded.
+  /// AddWizard does not deliver FileNotification, so this is a separate object.
+  /// </summary>
+  TDxComplyIdeMenuNotifier = class(TInterfacedObject, IOTANotifier, IOTAIDENotifier)
+  protected
+    procedure AfterSave;
+    procedure BeforeSave;
+    procedure Destroyed;
+    procedure Modified;
+    procedure FileNotification(NotifyCode: TOTAFileNotification;
+      const FileName: string; var Cancel: Boolean);
+    procedure BeforeCompile(const Project: IOTAProject; var Cancel: Boolean); overload;
+    procedure AfterCompile(Succeeded: Boolean); overload;
+  end;
+
+procedure TryInjectMenuFromNotifier;
+begin
+  if not Assigned(GMenuNotifierWizard) then
+    Exit;
+  try
+    GMenuNotifierWizard.TryInjectProjectMenuItems;
+  except
+    // Never crash the IDE from a notification.
+  end;
+end;
+
+procedure TDxComplyIdeMenuNotifier.AfterSave;
+begin
+end;
+
+procedure TDxComplyIdeMenuNotifier.BeforeSave;
+begin
+end;
+
+procedure TDxComplyIdeMenuNotifier.Destroyed;
+begin
+  GMenuNotifierWizard := nil;
+end;
+
+procedure TDxComplyIdeMenuNotifier.Modified;
+begin
+end;
+
+procedure TDxComplyIdeMenuNotifier.FileNotification(NotifyCode: TOTAFileNotification;
+  const FileName: string; var Cancel: Boolean);
+begin
+  TryInjectMenuFromNotifier;
+end;
+
+procedure TDxComplyIdeMenuNotifier.BeforeCompile(const Project: IOTAProject;
+  var Cancel: Boolean);
+begin
+  TryInjectMenuFromNotifier;
+end;
+
+procedure TDxComplyIdeMenuNotifier.AfterCompile(Succeeded: Boolean);
+begin
+  TryInjectMenuFromNotifier;
+end;
 
 { TDxComplyWizard }
 
@@ -219,15 +328,150 @@ begin
   FOptionsPage := nil;
   FProjectMenuItem := nil;
   FProjectMenuSeparator := nil;
+  FMenuRetryTimer := nil;
+  FMenuRetryCount := 0;
+  FIdeNotifierIndex := -1;
+  FIdeNotifier := nil;
   RegisterOptionsPage;
   AddProjectMenuItems;
 end;
 
 destructor TDxComplyWizard.Destroy;
 begin
+  UnregisterIdeMenuNotifier;
+  if Assigned(FMenuRetryTimer) then
+  begin
+    FMenuRetryTimer.Enabled := False;
+    FreeAndNil(FMenuRetryTimer);
+  end;
   RemoveProjectMenuItems;
   UnregisterOptionsPage;
   inherited;
+end;
+
+function TDxComplyWizard.FindOwnProjectMenuItem(AProjectMenu: TMenuItem): TMenuItem;
+var
+  I: Integer;
+begin
+  Result := nil;
+  if not Assigned(AProjectMenu) then
+    Exit;
+
+  for I := 0 to AProjectMenu.Count - 1 do
+    if SameText(AProjectMenu.Items[I].Name, cDXComplyProjectMenuItemName) then
+      Exit(AProjectMenu.Items[I]);
+
+  // Builds before the stable component name used this fixed English caption.
+  // This is our entry, not the Project menu. The Project menu caption is never read.
+  for I := 0 to AProjectMenu.Count - 1 do
+    if AProjectMenu.Items[I].Caption = cProjectMenuCaption then
+      Exit(AProjectMenu.Items[I]);
+end;
+
+procedure TDxComplyWizard.AdoptProjectMenuItem(AProjectMenu, AItem: TMenuItem);
+var
+  LIndex: Integer;
+  LPrevious: TMenuItem;
+begin
+  FProjectMenuItem := AItem;
+  if not SameText(AItem.Name, cDXComplyProjectMenuItemName) then
+    AItem.Name := cDXComplyProjectMenuItemName;
+
+  FProjectMenuSeparator := nil;
+  LIndex := AItem.MenuIndex;
+  if LIndex <= 0 then
+    Exit;
+
+  LPrevious := AProjectMenu.Items[LIndex - 1];
+  if LPrevious.Caption <> '-' then
+    Exit;
+  if (LPrevious.Name <> '') and
+    not SameText(LPrevious.Name, cDXComplyProjectMenuSeparatorName) then
+    Exit;
+
+  FProjectMenuSeparator := LPrevious;
+  if not SameText(LPrevious.Name, cDXComplyProjectMenuSeparatorName) then
+    LPrevious.Name := cDXComplyProjectMenuSeparatorName;
+end;
+
+procedure TDxComplyWizard.DisableMenuRetryTimer;
+begin
+  if Assigned(FMenuRetryTimer) then
+    FMenuRetryTimer.Enabled := False;
+end;
+
+procedure TDxComplyWizard.StartMenuRetryTimer;
+begin
+  if Assigned(FProjectMenuItem) then
+    Exit;
+
+  if not Assigned(FMenuRetryTimer) then
+  begin
+    FMenuRetryTimer := TTimer.Create(nil);
+    FMenuRetryTimer.Enabled := False;
+    FMenuRetryTimer.Interval := cMenuRetryIntervalMs;
+    FMenuRetryTimer.OnTimer := MenuRetryTimerTick;
+  end;
+
+  FMenuRetryCount := 0;
+  FMenuRetryTimer.Enabled := True;
+end;
+
+procedure TDxComplyWizard.MenuRetryTimerTick(Sender: TObject);
+begin
+  try
+    Inc(FMenuRetryCount);
+    if TryInjectProjectMenuItems or (FMenuRetryCount >= cMenuRetryLimit) then
+      DisableMenuRetryTimer;
+  except
+    DisableMenuRetryTimer;
+  end;
+end;
+
+procedure TDxComplyWizard.RegisterIdeMenuNotifier;
+var
+  LServices: IOTAServices;
+begin
+  if (FIdeNotifierIndex >= 0) or Assigned(FIdeNotifier) then
+    Exit;
+  if not Supports(BorlandIDEServices, IOTAServices, LServices) then
+    Exit;
+
+  try
+    GMenuNotifierWizard := Self;
+    FIdeNotifier := TDxComplyIdeMenuNotifier.Create;
+    FIdeNotifierIndex := LServices.AddNotifier(FIdeNotifier);
+    if FIdeNotifierIndex < 0 then
+    begin
+      FIdeNotifier := nil;
+      if GMenuNotifierWizard = Self then
+        GMenuNotifierWizard := nil;
+    end;
+  except
+    FIdeNotifierIndex := -1;
+    FIdeNotifier := nil;
+    if GMenuNotifierWizard = Self then
+      GMenuNotifierWizard := nil;
+  end;
+end;
+
+procedure TDxComplyWizard.UnregisterIdeMenuNotifier;
+var
+  LServices: IOTAServices;
+begin
+  if GMenuNotifierWizard = Self then
+    GMenuNotifierWizard := nil;
+
+  if FIdeNotifierIndex >= 0 then
+  begin
+    try
+      if Supports(BorlandIDEServices, IOTAServices, LServices) then
+        LServices.RemoveNotifier(FIdeNotifierIndex);
+    except
+    end;
+    FIdeNotifierIndex := -1;
+  end;
+  FIdeNotifier := nil;
 end;
 
 function TDxComplyWizard.TryInjectProjectMenuItems: Boolean;
@@ -235,39 +479,55 @@ var
   LNTASvc: INTAServices;
   LMainMenu: TMainMenu;
   LProjectMenu: TMenuItem;
+  LExistingItem: TMenuItem;
   LSubMenuItem: TMenuItem;
   I: Integer;
+  LCreated: Boolean;
 begin
   Result := False;
+  LCreated := False;
   try
+    if Assigned(FProjectMenuItem) then
+    begin
+      DisableMenuRetryTimer;
+      Exit(True);
+    end;
+
     if not Supports(BorlandIDEServices, INTAServices, LNTASvc) then
       Exit;
 
     LMainMenu := LNTASvc.GetMainMenu;
-    if not Assigned(LMainMenu) then
+    if not Assigned(LMainMenu) or not Assigned(LMainMenu.Items) then
       Exit;
 
-    // Locate the top-level 'Project' menu. The Name property is language-independent,
-    // whereas Caption is localized (e.g., "Projekt" in German, "Projet" in French).
+    // Name is language independent. Caption is Projekt in a German IDE and is ignored.
     LProjectMenu := nil;
     for I := 0 to LMainMenu.Items.Count - 1 do
-    begin
-      if ContainsText(LMainMenu.Items[I].Name, 'Project') then
+      if SameText(LMainMenu.Items[I].Name, cProjectMenuComponentName) then
       begin
         LProjectMenu := LMainMenu.Items[I];
         Break;
       end;
-    end;
 
     if not Assigned(LProjectMenu) then
-      Exit; // IDE not yet fully initialized. The caller may schedule a retry.
+      Exit;
 
-    // Separator before our entry for visual grouping.
+    LExistingItem := FindOwnProjectMenuItem(LProjectMenu);
+    if Assigned(LExistingItem) then
+    begin
+      AdoptProjectMenuItem(LProjectMenu, LExistingItem);
+      DisableMenuRetryTimer;
+      Exit(True);
+    end;
+
     FProjectMenuSeparator := TMenuItem.Create(nil);
+    LCreated := True;
+    FProjectMenuSeparator.Name := cDXComplyProjectMenuSeparatorName;
     FProjectMenuSeparator.Caption := '-';
     LProjectMenu.Add(FProjectMenuSeparator);
 
     FProjectMenuItem := TMenuItem.Create(nil);
+    FProjectMenuItem.Name := cDXComplyProjectMenuItemName;
     FProjectMenuItem.Caption := cProjectMenuCaption;
     AssignProjectMenuBitmap;
 
@@ -287,56 +547,75 @@ begin
     FProjectMenuItem.Add(LSubMenuItem);
 
     LProjectMenu.Add(FProjectMenuItem);
+    DisableMenuRetryTimer;
     Result := True;
   except
-    // Never crash the IDE during menu manipulation.
+    if LCreated then
+      RemoveProjectMenuItems;
+    Result := False;
   end;
 end;
 
 procedure TDxComplyWizard.AddProjectMenuItems;
 begin
-  // When a package is installed via GetIt the IDE may not have finished
-  // constructing its main menu by the time the package initialization runs.
-  // If the first attempt finds no Project menu we schedule a single deferred
-  // retry on the main thread so the entry still appears after IDE start-up.
-  if not TryInjectProjectMenuItems then
-    TThread.ForceQueue(nil,
-      procedure
-      begin
-        TryInjectProjectMenuItems;
-      end);
+  // GetIt can load this package before the IDE has built the main menu.
+  // Retry on a timer for about 30 seconds and on later IDE notifications.
+  try
+    RegisterIdeMenuNotifier;
+    if not TryInjectProjectMenuItems then
+      StartMenuRetryTimer;
+  except
+  end;
 end;
 
 procedure TDxComplyWizard.AssignProjectMenuBitmap;
 var
   LBitmapPath: string;
+  LBytes: TBytes;
   LMenuBitmap: TBitmap;
   LSourceBitmap: TBitmap;
+  LSourceStream: TBytesStream;
   LMenuBitmapSize: Integer;
 begin
   if not Assigned(FProjectMenuItem) then
     Exit;
 
-  LBitmapPath := FindDXComplyAssetFile('DX.Comply.Icon.bmp');
-  if LBitmapPath = '' then
-    Exit;
-
   LSourceBitmap := TBitmap.Create;
   LMenuBitmap := TBitmap.Create;
   try
-    LSourceBitmap.LoadFromFile(LBitmapPath);
-    LMenuBitmapSize := GetSystemMetrics(SM_CXMENUCHECK);
-    if LMenuBitmapSize <= 0 then
-      LMenuBitmapSize := 16;
+    try
+      if not TryLoadDXComplyResourceBytes(HInstance, cDXComplyIconBmpResource, LBytes) then
+      begin
+        LBitmapPath := FindDXComplyAssetFile('DX.Comply.Icon.bmp');
+        if LBitmapPath = '' then
+          Exit;
+        LSourceBitmap.LoadFromFile(LBitmapPath);
+      end
+      else
+      begin
+        LSourceStream := TBytesStream.Create(LBytes);
+        try
+          LSourceBitmap.LoadFromStream(LSourceStream);
+        finally
+          LSourceStream.Free;
+        end;
+      end;
 
-    LMenuBitmap.SetSize(LMenuBitmapSize, LMenuBitmapSize);
-    LMenuBitmap.PixelFormat := pf24bit;
-    LMenuBitmap.Canvas.Brush.Color := clWhite;
-    LMenuBitmap.Canvas.FillRect(Rect(0, 0, LMenuBitmap.Width,
-      LMenuBitmap.Height));
-    LMenuBitmap.Canvas.StretchDraw(Rect(0, 0, LMenuBitmap.Width,
-      LMenuBitmap.Height), LSourceBitmap);
-    FProjectMenuItem.Bitmap.Assign(LMenuBitmap);
+      LMenuBitmapSize := GetSystemMetrics(SM_CXMENUCHECK);
+      if LMenuBitmapSize <= 0 then
+        LMenuBitmapSize := 16;
+
+      LMenuBitmap.SetSize(LMenuBitmapSize, LMenuBitmapSize);
+      LMenuBitmap.PixelFormat := pf24bit;
+      LMenuBitmap.Canvas.Brush.Color := clWhite;
+      LMenuBitmap.Canvas.FillRect(Rect(0, 0, LMenuBitmap.Width,
+        LMenuBitmap.Height));
+      LMenuBitmap.Canvas.StretchDraw(Rect(0, 0, LMenuBitmap.Width,
+        LMenuBitmap.Height), LSourceBitmap);
+      FProjectMenuItem.Bitmap.Assign(LMenuBitmap);
+    except
+      // A missing bitmap must not remove the menu entry or crash the IDE.
+    end;
   finally
     LMenuBitmap.Free;
     LSourceBitmap.Free;

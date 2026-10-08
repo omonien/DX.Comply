@@ -68,8 +68,10 @@ uses
   System.SysUtils,
   Winapi.ShellAPI,
   Winapi.Windows,
+  Vcl.Imaging.pngimage,
   DX.Comply.IDE.Logger,
   DX.Comply.IDE.PathSupport,
+  DX.Comply.IDE.Resources,
   DX.Comply.VersionInfo;
 
 type
@@ -108,9 +110,8 @@ begin
   if Result.CompanyName = '' then
     Result.CompanyName := 'Olaf Monien';
 
+  // Empty when the BPL has no version resource. Do not invent 1.0.0.0.
   Result.ProductVersion := GetModuleProductVersion(HInstance);
-  if Result.ProductVersion = '' then
-    Result.ProductVersion := '1.0.0.0';
 end;
 
 procedure TFormDXComplyAboutDialog.ConfigureLinkLabel(ALabel: TLabel;
@@ -131,9 +132,8 @@ begin
   BodyLabel.Caption := cAboutBodyText;
 
   LVersionInfo := ReadCurrentPackageVersionInfo;
-  VersionLabel.Caption := Format('Version %s · %s', [
-    LVersionInfo.ProductVersion,
-    LVersionInfo.CompanyName]);
+  VersionLabel.Caption := FormatDXComplyVersionCaption(LVersionInfo.ProductVersion,
+    LVersionInfo.CompanyName);
 
   ConfigureLinkLabel(RepositoryLinkLabel, cRepositoryUrl);
   ConfigureLinkLabel(CycloneDxLinkLabel, cCycloneDxUrl);
@@ -160,7 +160,42 @@ end;
 procedure TFormDXComplyAboutDialog.LoadHeaderGraphic;
 var
   LAssetPath: string;
+  LBytes: TBytes;
+  LPng: TPngImage;
+  LStream: TBytesStream;
 begin
+  try
+    if TryLoadDXComplyResourceBytes(HInstance, cDXComplyIconBmpResource, LBytes) then
+    begin
+      LStream := TBytesStream.Create(LBytes);
+      try
+        HeaderIconImage.Picture.Bitmap.LoadFromStream(LStream);
+        Exit;
+      finally
+        LStream.Free;
+      end;
+    end;
+  except
+    // Try the PNG resource, then a file in a development checkout.
+  end;
+
+  try
+    if TryLoadDXComplyResourceBytes(HInstance, cDXComplyIconPngResource, LBytes) then
+    begin
+      LStream := TBytesStream.Create(LBytes);
+      LPng := TPngImage.Create;
+      try
+        LPng.LoadFromStream(LStream);
+        HeaderIconImage.Picture.Assign(LPng);
+        Exit;
+      finally
+        LPng.Free;
+        LStream.Free;
+      end;
+    end;
+  except
+  end;
+
   LAssetPath := FindDXComplyAssetFile(cHeaderBitmapFileName);
   if LAssetPath = '' then
     LAssetPath := FindDXComplyAssetFile(cHeaderPngFileName);
