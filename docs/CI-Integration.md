@@ -236,14 +236,11 @@ technical documentation, including an SBOM, for **at least 10 years**. The SBOM
 from DX.Comply is build evidence and a component list. It is a starting point
 for that part of the file. It does not make a product compliant.
 
-The tool's own check of the written file is structural. The checked-in
-`docs/examples/AlienInvasion.bom.json` is a CycloneDX 1.5 document from an
-earlier AlienInvasion run. It was not regenerated as 1.6. The reference sample
-is now ConwaysLifeFMX from https://github.com/Embarcadero/RADStudio13Demos.git,
-project `Object Pascal/RTL/Parallel Library/FMX/ConwaysLifeFMX.dproj`, built
-Release/Win32 with a map file. The example SBOM is regenerated from that demo
-and will replace `docs/examples/AlienInvasion.bom.json` as
-`docs/examples/ConwaysLifeFMX.cdx.json`. That file is not committed yet.
+The tool's own check of the written file is structural. The checked-in example
+is `docs/examples/ConwaysLifeFMX.cdx.json`, CycloneDX 1.6, from ConwaysLifeFMX
+in https://github.com/Embarcadero/RADStudio13Demos.git, project
+`Object Pascal/RTL/Parallel Library/FMX/ConwaysLifeFMX.dproj`, built
+Release/Win32 with a map file. It replaces the earlier AlienInvasion example.
 SPDX JSON and CycloneDX XML are not checked against official schemas inside
 the tool.
 
