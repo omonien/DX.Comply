@@ -61,6 +61,8 @@ type
     FScanDirs: TArray<string>;
     FScanTree: Boolean;
     FDelphi7Root: string;
+    FManifestFile: string;
+    FManifestExplicit: Boolean;
     FParseError: string;
     /// <summary>
     /// Parses the --report value (markdown | html | both | none) and updates
@@ -141,6 +143,10 @@ type
     property ScanTree: Boolean read FScanTree;
     /// <summary>Delphi 7 installation directory from --delphi7-root.</summary>
     property Delphi7Root: string read FDelphi7Root;
+    /// <summary>Path from --manifest. Empty when the flag was not passed.</summary>
+    property ManifestFile: string read FManifestFile;
+    /// <summary>True when --manifest was passed. That path wins over the config file.</summary>
+    property ManifestExplicit: Boolean read FManifestExplicit;
     property ParseError: string read FParseError;
   end;
 
@@ -413,6 +419,16 @@ begin
         end;
         Include(FExplicitOverrides, scoScanTree);
       end
+      else if LKey = 'manifest' then
+      begin
+        if Trim(LValue) = '' then
+        begin
+          FParseError := 'Invalid value for --manifest: path is empty.';
+          Exit(False);
+        end;
+        FManifestFile := LValue;
+        FManifestExplicit := True;
+      end
       else
       begin
         FParseError := 'Unknown option: --' + LKey;
@@ -481,6 +497,11 @@ begin
   Writeln('  --scan-tree                   Deprecated: recursively scan the output');
   Writeln('                                directory, as older versions did.');
   Writeln('                                Kept for one release. Prefer --scan-dir.');
+  Writeln('  --manifest=<file>             Component manifest (components.json)');
+  Writeln('                                Groups third-party units into libraries');
+  Writeln('                                with supplier, licence, version, type');
+  Writeln('                                and PURL. Relative to the project directory.');
+  Writeln('                                Overrides the manifest key in .dxcomply.json');
   Writeln('  --map-dir=<path>              Directory containing the pre-built MAP file');
   Writeln('  --delphi7-root=<path>         Delphi 7 install directory (RootDir).');
   Writeln('                                Optional. Used to resolve library units');
@@ -505,6 +526,7 @@ begin
   Writeln;
   Writeln('Examples:');
   Writeln('  dxcomply --project=src\MyApp.dproj --format=cyclonedx-json --output=bom.json');
+  Writeln('  dxcomply --project=src\MyApp.dproj --manifest=components.json --no-pause');
   Writeln('  dxcomply --project=src\MyApp.dpr --delphi7-root=C:\Delphi7 --no-pause');
   Writeln('  dxcomply --project=src\MyApp.dproj --ci --config=.dxcomply.json --no-pause');
   Writeln('  dxcomply --project=src\MyApp.dproj --ci --config-name=Debug --no-pause');
@@ -548,6 +570,8 @@ begin
   Result.MapFileDir                  := FMapDir;
   Result.Delphi7Root                 := FDelphi7Root;
   Result.IncludeCompositionEvidence  := not FNoCompositionEvidence;
+  Result.ManifestFile                := FManifestFile;
+  Result.ManifestFileExplicit        := FManifestExplicit;
   Result.ExplicitOverrides           := FExplicitOverrides;
   Result.IncludePlatformInOutput     := FIncludePlatformInOutput;
 

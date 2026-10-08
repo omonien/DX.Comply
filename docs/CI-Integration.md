@@ -123,6 +123,7 @@ store the configuration in `.dxcomply.json` at the repository root.
     "**/*.dcu"
   ],
   "scanDirs": ["redist"],
+  "manifest": "components.json",
   "product": {
     "name": "My Application",
     "version": "2.1.0",
@@ -157,6 +158,8 @@ When `--ci` is given and the config file exists, DX.Comply loads that file and t
 A default you did not pass does not override the file. `dxcomply --ci --config-name=Debug` keeps Debug even if the file says `"configName": "Release"`. `dxcomply --ci --platform=Win64` keeps the file's `configName` and replaces only the platform. Without `--ci`, the file is not read. `--config` only changes the path used together with `--ci`.
 
 The line printed after a successful run is the output path after that merge, including a `configName` or `platform` taken from the file.
+
+`manifest` is an optional components file (see the README section "Component manifest"). A relative path is resolved from the project directory. `--manifest` wins over the file. A missing or invalid file fails the run and names the path and the reason. The same file is used for a Delphi 7 `.dpr`: matching uses the units from the MAP file.
 
 ### Multi-platform builds
 

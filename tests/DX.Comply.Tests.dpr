@@ -45,6 +45,7 @@ uses
   DX.Comply.Tests.IDE.ReadmeSupport in 'DX.Comply.Tests.IDE.ReadmeSupport.pas',
   DX.Comply.Tests.Engine in 'DX.Comply.Tests.Engine.pas',
   DX.Comply.Tests.CLI.Options in 'DX.Comply.Tests.CLI.Options.pas',
+  DX.Comply.Tests.ComponentManifest in 'DX.Comply.Tests.ComponentManifest.pas',
   DX.Comply.Tests.UsesClauseParser in 'DX.Comply.Tests.UsesClauseParser.pas',
   DX.Comply.Tests.VersionInfo in 'DX.Comply.Tests.VersionInfo.pas';
 

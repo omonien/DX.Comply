@@ -95,6 +95,16 @@ type
     ProductVersion: string;
     /// <summary>Supplier name.</summary>
     Supplier: string;
+    /// <summary>
+    /// Optional component manifest (components.json). Empty means no enrichment.
+    /// A relative path is resolved from the project directory.
+    /// </summary>
+    ManifestFile: string;
+    /// <summary>
+    /// True when ManifestFile was set by an explicit --manifest flag.
+    /// That value wins over the manifest key in .dxcomply.json.
+    /// </summary>
+    ManifestFileExplicit: Boolean;
     /// <summary>Target platform.</summary>
     Platform: string;
     /// <summary>
@@ -314,6 +324,7 @@ type
 implementation
 
 uses
+  DX.Comply.ComponentManifest,
   DX.Comply.LegacyProject,
   DX.Comply.Report.Support,
   DX.Comply.VersionInfo;
@@ -337,6 +348,8 @@ begin
   Result.ProductName := '';
   Result.ProductVersion := '';
   Result.Supplier := '';
+  Result.ManifestFile := '';
+  Result.ManifestFileExplicit := False;
   SetLength(Result.IncludePatterns, 0);
   SetLength(Result.ExcludePatterns, 0);
   Result.IncludeCompositionEvidence := True;
@@ -1064,6 +1077,7 @@ var
   LReport: TJSONObject;
   LReportFormatStr: string;
   LWarnings: TJSONObject;
+  LManifestValue: TJSONValue;
   LText: string;
   I: Integer;
 begin
@@ -1248,6 +1262,16 @@ begin
 
         if LJson.GetValue('scanTree') <> nil then
           Result.ScanTree := LJson.GetValue<Boolean>('scanTree');
+
+        // Component manifest. A non-string value is ignored here; the IDE
+        // reader reports that case. Relative paths stay relative until
+        // generation, which resolves them from the project directory.
+        if LJson.GetValue('manifest') <> nil then
+        begin
+          LManifestValue := LJson.GetValue('manifest');
+          if (LManifestValue is TJSONString) or (LManifestValue is TJSONNumber) then
+            Result.ManifestFile := Trim(LManifestValue.Value);
+        end;
       end;
     finally
       LRoot.Free;
@@ -1325,6 +1349,8 @@ begin
   Result.ProductName := AConfig.ProductName;
   Result.ProductVersion := AConfig.ProductVersion;
   Result.Supplier := AConfig.Supplier;
+  Result.SupplierUrl := '';
+  Result.ComponentManifestJson := '';
   Result.Timestamp := DateToISO8601(Now, False);
   Result.ToolName := 'DX.Comply';
   Result.ToolVersion := GetDxComplyToolVersion;
@@ -1555,6 +1581,12 @@ var
   LReportedWarnings: TList<string>;
   LReportData: TComplianceReportData;
   LValidation: TValidationResult;
+  LManifest: TComponentManifest;
+  LManifestJson: string;
+  LManifestPath: string;
+  LManifestError: string;
+  LDormantWarnings: TArray<string>;
+  LWarningIndex: Integer;
 begin
   Result := False;
 
@@ -1574,6 +1606,8 @@ begin
   LDeepEvidenceBuildResult := Default(TDeepEvidenceBuildResult);
   LValidation := TValidationResult.CreateValid;
   LReportedWarnings := TList<string>.Create;
+  LManifest := Default(TComponentManifest);
+  LManifestJson := '';
   try
     FProjectScanner.SetDelphi7Root(FConfig.Delphi7Root);
     FProjectScanner.SetExplicitTargetRequest(FConfig.PlatformExplicit,
@@ -1604,6 +1638,19 @@ begin
     begin
       DoProgress('Error: ' + LegacyMapFileMissingMessage(LProjectInfo.MapFilePath), -1);
       Exit(False);
+    end;
+
+    if Trim(FConfig.ManifestFile) <> '' then
+    begin
+      LManifestPath := ResolveManifestPath(LProjectInfo.ProjectDir, FConfig.ManifestFile);
+      if not TryLoadComponentManifest(LManifestPath, LManifest, LManifestJson, LManifestError) then
+      begin
+        DoProgress('Error: Invalid component manifest "' + LManifestPath + '": ' +
+          LManifestError, -1);
+        Exit(False);
+      end;
+      for LWarningIndex := 0 to High(LManifest.Warnings) do
+        DoProgress('Warning: ' + LManifestPath + ': ' + LManifest.Warnings[LWarningIndex], 13);
     end;
 
     DoProgress('Ensuring MAP file...', 15);
@@ -1720,6 +1767,16 @@ begin
         LMetadata.ProductVersion := LProjectInfo.Version;
       if LMetadata.Supplier = '' then
         LMetadata.Supplier := LProjectInfo.CompanyName;
+
+      if LManifest.Loaded then
+      begin
+        LDormantWarnings := DormantComponentWarnings(LManifest,
+          BuildManifestPlan(LManifest, LArtefacts));
+        for LWarningIndex := 0 to High(LDormantWarnings) do
+          DoProgress('Warning: ' + LManifestPath + ': ' + LDormantWarnings[LWarningIndex], 68);
+        ApplyManifestPublisher(LManifest, LMetadata);
+        LMetadata.ComponentManifestJson := LManifestJson;
+      end;
 
       Result := FSbomWriter.Write(LOutputPath, LMetadata, LArtefacts, LProjectInfo);
 
@@ -1839,6 +1896,11 @@ begin
     FConfig.PlatformExplicit := True;
   if LCliConfig.ConfigurationExplicit then
     FConfig.ConfigurationExplicit := True;
+  if LCliConfig.ManifestFileExplicit then
+  begin
+    FConfig.ManifestFile := LCliConfig.ManifestFile;
+    FConfig.ManifestFileExplicit := True;
+  end;
   Result := Generate(AProjectPath);
 end;
 

@@ -103,6 +103,7 @@
         <DCCReference Include="DX.Comply.Tests.IDE.ReadmeSupport.pas"/>
         <DCCReference Include="DX.Comply.Tests.Engine.pas"/>
         <DCCReference Include="DX.Comply.Tests.CLI.Options.pas"/>
+        <DCCReference Include="DX.Comply.Tests.ComponentManifest.pas"/>
         <DCCReference Include="DX.Comply.Tests.UsesClauseParser.pas"/>
         <DCCReference Include="DX.Comply.Tests.VersionInfo.pas"/>
         <BuildConfiguration Include="Base">

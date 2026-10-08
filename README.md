@@ -230,6 +230,7 @@ Add a `.dxcomply.json` to your project folder and pass `--ci` so the CLI loads i
   "include": ["build/**"],
   "exclude": ["build/**/Debug/**", "**/*.dcu"],
   "scanDirs": ["redist"],
+  "manifest": "components.json",
   "product": {
     "name": "My Application",
     "version": "2.1.0",
@@ -252,13 +253,37 @@ When `--ci` is set and the file exists, values are merged in this order:
 2. Keys present in `.dxcomply.json`.
 3. Command-line options you actually pass. Those win over the file.
 
-An option you leave off the command line does not override the file, even though that option has a default. `dxcomply --ci --config-name=Debug` uses Debug even when the file says `"configName": "Release"`. `dxcomply --ci` with no `--config-name` uses the file's `configName`, or `Release` when the key is absent. The same rule applies to `--platform`, `--format`, `--output`, `--product`, `--version`, `--supplier`, `--report`, `--include`, `--exclude`, `--map-dir`, and `--no-composition-evidence`.
+An option you leave off the command line does not override the file, even though that option has a default. `dxcomply --ci --config-name=Debug` uses Debug even when the file says `"configName": "Release"`. `dxcomply --ci` with no `--config-name` uses the file's `configName`, or `Release` when the key is absent. The same rule applies to `--platform`, `--format`, `--output`, `--product`, `--version`, `--supplier`, `--report`, `--include`, `--exclude`, `--map-dir`, `--manifest`, and `--no-composition-evidence`.
 
 If you pass `--include` or `--exclude`, that list replaces the file's list. `--report` overrides the file's enabled flag and format, and leaves the file's report output path as it is.
 
 Without `--ci`, the file is not read. `--config=<path>` only chooses which file `--ci` loads (the default path is `.dxcomply.json`).
 
 `deepEvidence.mode` may be `always` or `when-missing`. The old `deepEvidence.build` boolean is ignored.
+
+
+## Component manifest
+
+An optional components file adds one library component for each matched row and fills in supplier, licence, version, type, and package URL. The format is the DelphiSBOM schema 1.0, so a file written for that tool works here unchanged. A sample is in [docs/samples/components.sample.json](docs/samples/components.sample.json).
+
+```bash
+dxcomply --project=MyApp.dproj --manifest=components.json --no-pause
+```
+
+The same path can live in `.dxcomply.json` as `"manifest"`. A relative path is resolved from the project directory. Without `--ci`, the CLI does not read `.dxcomply.json`, so pass `--manifest` on the command line. With `--ci`, the file supplies `manifest` unless you also pass `--manifest`. The flag wins. The IDE expert reads the same key from the project folder and has no extra options field.
+
+The units come from the MAP file, including a Delphi 7 `.dpr` with its `.dof` and `.cfg`. Each row matches those units by `units_exact` and/or `units_prefix` (case-insensitive). The unit name is tried as written and again with one known scope prefix removed (`System.`, `Vcl.`, `Winapi.`, and the other Delphi scopes). An exact hit beats `own_code_units`, those beat a prefix, and a library prefix beats `own_code_prefixes`. The first matching row wins inside one rule kind.
+
+`own_code_units` and `own_code_prefixes` mark the project's own units. Those units stay in the evidence. They are not dropped, and they are not attributed to a third-party library. Unmatched units stay as they are: one component each, linked from the program that was built.
+
+A matched unit stays as its own evidence component (hash, origin, `file:` package URL). The SBOM adds one library component for the row (`name`, `version`, `type`, supplier and author from `vendor`, optional `vendor_url`). The program that was built depends on that library, and the library depends on the matched units. Other binaries stay linked from that program. This is written for CycloneDX JSON, CycloneDX XML, and SPDX 2.3 JSON.
+
+`licence` (British spelling) is an SPDX identifier such as `MIT` (written as `license.id`), an SPDX expression such as `MPL-1.1 OR LGPL-2.1-or-later` (written as `expression`), or any other text such as `Commercial` or `Proprietary` (written as `license.name`). `licence_url` is optional and is omitted for expressions. `license` and `license_url` are accepted as aliases. `type` is `library`, `framework`, or `application`.
+
+There is no required `purl` field. When it is absent, DX.Comply writes `pkg:delphi/<name>@<version>` with the name and version percent-encoded. `pkg:delphi` is not a registered package-url type. Scanned files keep the existing `file:` locator. Set `purl` on a row when you want a different locator.
+
+A file that cannot be read (missing, not JSON, or not an object or array) stops generation. The message names the file and the reason. Missing fields, a short prefix, or an unrecognised licence name are warnings, and the SBOM is still written. A row with match rules that hits no unit is reported as a warning. The root `supplier` is the application publisher. It is used only when `--supplier` and `product.supplier` are both empty.
+
 
 ---
 
@@ -284,7 +309,7 @@ The CRA requires (Annex I, Part II):
 
 **You do NOT submit the SBOM anywhere.** You generate it per release, archive it, and make it available only if a market surveillance authority formally requests it.
 
-> DX.Comply lists the units, packages and DLL names it can see from the build, with hashes where it could open the file. You still need a supplier, a version and a licence for third-party components (a manifest for that is planned; see issue #20), and the rest of the CRA technical file: the vulnerability handling process, the disclosure policy, how updates are delivered, and the risk assessment. Vulnerability management and incident reporting are outside the scope of this tool.
+> DX.Comply lists the units, packages and DLL names it can see from the build, with hashes where it could open the file. A components file can fill supplier, version and licence on the libraries it matches. Units that do not match a row still have none of those. You still need the rest of the CRA technical file: the vulnerability handling process, the disclosure policy, how updates are delivered, and the risk assessment. Vulnerability management and incident reporting are outside the scope of this tool.
 
 ---
 
@@ -317,6 +342,7 @@ No internet connection is required. All processing is local.
 | [CI Integration](docs/CI-Integration.md) | Command-line usage, GitHub Actions examples, CI configuration |
 | [Legacy Support](docs/LegacySupport.md) | MAP files from older Delphi versions, and which project files the CLI accepts |
 | [Example SBOM (JSON)](docs/examples/AlienInvasion.bom.json) | Full CycloneDX 1.5 SBOM generated from the AlienInvasion sample |
+| [Component manifest sample](docs/samples/components.sample.json) | Optional components.json (supplier, licence, version, type, package URL) |
 | [Example HTML Report](docs/examples/AlienInvasion.bom.report.html) | Human-readable SBOM report for the same project |
 
 ---

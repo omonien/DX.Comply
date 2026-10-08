@@ -110,6 +110,7 @@
         <DCCReference Include="DX.Comply.Report.HtmlWriter.pas"/>
         <DCCReference Include="DX.Comply.Spdx.Writer.pas"/>
         <DCCReference Include="DX.Comply.Schema.Validator.pas"/>
+        <DCCReference Include="DX.Comply.ComponentManifest.pas"/>
         <DCCReference Include="DX.Comply.Engine.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>

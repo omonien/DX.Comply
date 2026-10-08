@@ -195,6 +195,15 @@ type
     ProductVersion: string;
     /// <summary>Supplier/manufacturer name.</summary>
     Supplier: string;
+    /// <summary>
+    /// Optional URL for the supplier. Written on metadata.component when set.
+    /// </summary>
+    SupplierUrl: string;
+    /// <summary>
+    /// Raw components.json text. Empty when no component manifest is in use.
+    /// Writers read this to group matched units under library components.
+    /// </summary>
+    ComponentManifestJson: string;
     /// <summary>Timestamp of SBOM generation (ISO 8601).</summary>
     Timestamp: string;
     /// <summary>Tool name that generated the SBOM.</summary>

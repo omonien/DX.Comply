@@ -80,6 +80,7 @@ implementation
 
 uses
   System.Hash,
+  DX.Comply.ComponentManifest,
   DX.Comply.VersionInfo;
 
 { TSpdxJsonWriter }
@@ -521,9 +522,13 @@ begin
       LPackages.Add(BuildPackage(AArtefacts[I], LPackageIds[I], AMetadata.Supplier));
     LRoot.AddPair('packages', LPackages);
 
-    // Relationships
+    // Relationships. Manifest libraries use the same package IDs.
     LRoot.AddPair('relationships', BuildRelationships(AArtefacts, LPackageIds,
       LDocumentSpdxId, AProjectInfo.ProjectName));
+    if AMetadata.ComponentManifestJson <> '' then
+      ApplyManifestSpdx(AMetadata.ComponentManifestJson, AArtefacts, LPackages,
+        LRoot.GetValue('relationships') as TJSONArray, LPackageIds,
+        LDocumentSpdxId, LRoot);
 
     // Write to file
     LOutput := TStringList.Create;

@@ -1,0 +1,56 @@
+﻿{
+  "schema_version": "1.0",
+  "last_updated": "2026-03-26",
+  "supplier": {
+    "name": "Your Company Name",
+    "url": "https://example.com"
+  },
+  "components": [
+    {
+      "name": "OmniThreadLibrary",
+      "version": "3.7.8",
+      "vendor": "Primo Gabrijelcic",
+      "vendor_url": "https://github.com/gabr42/OmniThreadLibrary",
+      "licence": "BSD-3-Clause",
+      "licence_url": "https://opensource.org/licenses/BSD-3-Clause",
+      "type": "library",
+      "units_prefix": ["Otl"],
+      "units_exact": ["GpLists", "GpStuff"],
+      "notes": "High-performance threading library for Delphi"
+    },
+    {
+      "name": "Spring4D",
+      "version": "2.0",
+      "vendor": "Spring4D Team",
+      "vendor_url": "https://bitbucket.org/sglienke/spring4d",
+      "licence": "Apache-2.0",
+      "licence_url": "https://www.apache.org/licenses/LICENSE-2.0",
+      "type": "framework",
+      "units_prefix": ["Spring"],
+      "notes": "Dependency injection and collections framework"
+    },
+    {
+      "name": "SynEdit",
+      "version": "3.0",
+      "vendor": "SynEdit Contributors",
+      "vendor_url": "https://github.com/SynEdit/SynEdit",
+      "licence": "MPL-1.1 OR LGPL-2.1-or-later",
+      "type": "library",
+      "units_prefix": ["SynEdit", "SynHighlighter"],
+      "notes": "An SPDX expression is emitted as licenses[].expression"
+    },
+    {
+      "name": "TMS VCL UI Pack",
+      "version": "13.0",
+      "vendor": "tmssoftware.com",
+      "vendor_url": "https://www.tmssoftware.com",
+      "licence": "Commercial",
+      "type": "library",
+      "units_prefix": ["AdvGrid", "AdvEdit"],
+      "purl": "pkg:generic/tms-vcl-ui-pack@13.0",
+      "notes": "Optional purl overrides the generated pkg:delphi locator. Commercial is emitted as license.name"
+    }
+  ],
+  "own_code_units": ["MainForm", "AppSettings"],
+  "own_code_prefixes": ["app"]
+}

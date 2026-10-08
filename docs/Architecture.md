@@ -49,6 +49,7 @@ Every SBOM generation follows the same pipeline, regardless of whether it was tr
 |------|---------------|
 | `DX.Comply.Engine.pas` | `TDxComplyGenerator` facade. Orchestrates the full pipeline |
 | `DX.Comply.Engine.Intf.pas` | Shared types: `TProjectInfo`, `TArtefactInfo`, `TSbomMetadata` |
+| `DX.Comply.ComponentManifest.pas` | Optional components.json: match units to libraries, licences, and package URLs |
 | `DX.Comply.ProjectScanner.pas` | Regex-based `.dproj` parser. Extracts paths, toolchain, version, DllSuffix |
 | `DX.Comply.BuildOrchestrator.pas` | Plan construction and script-based build execution (used by CLI fallback) |
 | `DX.Comply.BuildEvidence.Reader.pas` | Reads MAP files, compiler CFG/RSP files; collects evidence items |
@@ -100,6 +101,8 @@ Each resolved unit is emitted as a CycloneDX `component` with `type: "library"`,
 - `net.developer-experts.dx-comply:origin` property (e.g. "Embarcadero RTL")
 - `net.developer-experts.dx-comply:evidence` property (e.g. "DCU", "PAS", "MAP")
 - `net.developer-experts.dx-comply:confidence` property (e.g. "Strong", "Heuristic")
+
+When `--manifest` or the `manifest` key points at a components file, matched units stay in the document and are linked from one library component (name, version, supplier, licence, package URL, type). The program that was built depends on that library. Own-code rules keep those units with the program. The units come from the MAP file, so a Delphi 7 `.dpr` uses the same list. Matching and licence classification live in `DX.Comply.ComponentManifest.pas`. The CycloneDX and SPDX writers call that unit.
 
 ## Test suite
 
