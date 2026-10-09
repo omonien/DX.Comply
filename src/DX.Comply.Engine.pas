@@ -1611,6 +1611,7 @@ var
   LManifestError: string;
   LDormantWarnings: TArray<string>;
   LWarningIndex: Integer;
+  LNote: string;
 begin
   Result := False;
 
@@ -1659,6 +1660,13 @@ begin
   end;
 
   try
+    // Output-directory variant notes. Not warnings, so the CLI prints them
+    // only with --verbose.
+    if Assigned(LProjectInfo.ProgressNotes) then
+      for LNote in LProjectInfo.ProgressNotes do
+        if Trim(LNote) <> '' then
+          DoProgress(LNote, 11);
+
     ReportWarnings(LProjectInfo.Warnings, LReportedWarnings, 12);
 
     // Legacy projects are not compiled here. The MAP file must already sit

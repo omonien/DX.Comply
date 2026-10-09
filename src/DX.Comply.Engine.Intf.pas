@@ -179,6 +179,15 @@ type
     Toolchain: TDelphiToolchainInfo;
     /// <summary>Warnings collected while scanning the project metadata.</summary>
     Warnings: TList<string>;
+    /// <summary>
+    /// One progress line for an output directory whose path used
+    /// $(ProductVersion) (or $(BDSVersion) / $(BDSVER)), or that still
+    /// contained an unresolved $(...) token after expansion.
+    /// Ordinary $(Platform) and $(Config) paths are not listed.
+    /// The generator forwards each line as progress. The CLI prints
+    /// progress lines only with --verbose.
+    /// </summary>
+    ProgressNotes: TList<string>;
     /// <summary>Initializes the record with a new TList instance.</summary>
     class function Create: TProjectInfo; static;
     /// <summary>Frees internal resources. Call this when done with the record.</summary>
@@ -463,6 +472,7 @@ begin
   Result.RuntimePackages := TList<string>.Create;
   Result.ExplicitUnitReferences := TProjectUnitReferenceList.Create;
   Result.Warnings := TList<string>.Create;
+  Result.ProgressNotes := TList<string>.Create;
 end;
 
 procedure TProjectInfo.Free;
@@ -507,6 +517,12 @@ begin
   begin
     Warnings.Free;
     Warnings := nil;
+  end;
+
+  if Assigned(ProgressNotes) then
+  begin
+    ProgressNotes.Free;
+    ProgressNotes := nil;
   end;
 end;
 

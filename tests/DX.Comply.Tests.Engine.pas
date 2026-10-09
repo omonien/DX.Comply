@@ -169,10 +169,17 @@ type
 
     /// <summary>
     /// Generated SBOM must include runtime-package components when the
-    /// project declares runtime packages in the .dproj.
+    /// project links with runtime packages (UsePackages true).
     /// </summary>
     [Test]
     procedure Generate_ValidProject_ContainsRuntimePackageComponents;
+
+    /// <summary>
+    /// $(ProductVersion) output directories are written to the SBOM as the
+    /// directory that exists, with no leftover $(...) token.
+    /// </summary>
+    [Test]
+    procedure Generate_ProductVersionOutput_WritesResolvedPath;
 
     /// <summary>
     /// Generated SBOM must include external-reference components when
@@ -342,6 +349,7 @@ type
 implementation
 
 uses
+  Winapi.Windows,
   DX.Comply.Tests.Paths;
 
 { TEngineTests }
@@ -963,38 +971,74 @@ end;
 
 procedure TEngineTests.Generate_ValidProject_ContainsRuntimePackageComponents;
 var
-  LConfig: TSbomConfig;
-  LGen: TDxComplyGenerator;
-  LContent: string;
-  LJson: TJSONObject;
+  LComponent: TJSONObject;
   LComponents: TJSONArray;
-  LComponent, LProp: TJSONObject;
-  LProperties: TJSONArray;
+  LConfig: TSbomConfig;
+  LContent: string;
   LFoundRuntimePackage: Boolean;
+  LGen: TDxComplyGenerator;
+  LJson: TJSONObject;
+  LProject: string;
+  LProp: TJSONObject;
+  LProperties: TJSONArray;
+  LRoot: string;
   I, J: Integer;
 begin
+  // The engine .dproj lists DCC_UsePackage and does not set UsePackages, so
+  // it must not contribute runtime packages. This fixture links rtl.
+  LRoot := TPath.Combine(FTempDir, 'rtlpkg');
+  TDirectory.CreateDirectory(LRoot);
+  TDirectory.CreateDirectory(TPath.Combine(LRoot, 'out'));
+  TFile.WriteAllText(TPath.Combine(LRoot, 'RtApp.dpr'),
+    'program RtApp;' + sLineBreak + 'begin' + sLineBreak + 'end.' + sLineBreak,
+    TEncoding.UTF8);
+  TFile.WriteAllText(TPath.Combine(LRoot, 'RtApp.dproj'),
+    '<?xml version="1.0" encoding="utf-8"?>' + sLineBreak +
+    '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">' + sLineBreak +
+    '  <PropertyGroup>' + sLineBreak +
+    '    <MainSource>RtApp.dpr</MainSource>' + sLineBreak +
+    '    <AppType>Console</AppType>' + sLineBreak +
+    '    <TargetedPlatforms>1</TargetedPlatforms>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '  <PropertyGroup Condition="''$(Base)''!=''''">' + sLineBreak +
+    '    <DCC_ExeOutput>.\out</DCC_ExeOutput>' + sLineBreak +
+    '    <UsePackages>true</UsePackages>' + sLineBreak +
+    '    <DCC_UsePackage>rtl</DCC_UsePackage>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '</Project>' + sLineBreak, TEncoding.UTF8);
+  // Not a valid PE, so the import filter keeps the UsePackages list.
+  // The map file skips the Deep-Evidence build.
+  TFile.WriteAllBytes(TPath.Combine(LRoot, 'out', 'RtApp.exe'),
+    TBytes.Create($4D, $5A, $01));
+  TFile.WriteAllText(TPath.Combine(LRoot, 'out', 'RtApp.map'), 'map', TEncoding.UTF8);
+  LProject := TPath.Combine(LRoot, 'RtApp.dproj');
+
   LConfig := TSbomConfig.Default;
   LConfig.OutputPath := FOutputFile;
-  LConfig.Configuration := 'Debug';
+  LConfig.Configuration := 'Release';
   LConfig.Platform := 'Win32';
+  LConfig.IncludeCompositionEvidence := False;
 
   LGen := TDxComplyGenerator.Create(LConfig);
   try
     LGen.OnProgress := OnProgress;
-    // Use the engine dproj which has runtime packages
-    Assert.IsTrue(LGen.Generate(FEngineDprojPath, FOutputFile, sfCycloneDxJson),
-      'Generate must succeed');
+    Assert.IsTrue(LGen.Generate(LProject, FOutputFile, sfCycloneDxJson),
+      'Generate must succeed. Progress: ' + FProgressMessages.Text);
 
     LContent := TFile.ReadAllText(FOutputFile, TEncoding.UTF8);
     LJson := TJSONObject.ParseJSONValue(LContent) as TJSONObject;
     try
       LComponents := LJson.GetValue('components') as TJSONArray;
       Assert.IsNotNull(LComponents, 'SBOM must contain components');
+      Assert.AreEqual(NativeInt(1), NativeInt(CountComponents(LJson, 'rtl.bpl')),
+        'The linked runtime package must be a component');
 
       LFoundRuntimePackage := False;
       for I := 0 to LComponents.Count - 1 do
       begin
         LComponent := LComponents.Items[I] as TJSONObject;
+        if not SameText(LComponent.GetValue<string>('name', ''), 'rtl.bpl') then
+          Continue;
         LProperties := LComponent.GetValue('properties') as TJSONArray;
         if not Assigned(LProperties) then
           Continue;
@@ -1008,17 +1052,149 @@ begin
             Break;
           end;
         end;
-        if LFoundRuntimePackage then
-          Break;
       end;
 
       Assert.IsTrue(LFoundRuntimePackage,
-        'SBOM must contain at least one runtime-package component with evidence=BPL');
+        'SBOM must contain a runtime-package component with evidence=BPL');
     finally
       LJson.Free;
     end;
   finally
     LGen.Free;
+  end;
+end;
+
+procedure TEngineTests.Generate_ProductVersionOutput_WritesResolvedPath;
+var
+  LBdsRoot: string;
+  LComponent: TJSONObject;
+  LConfig: TSbomConfig;
+  LDcpDir: string;
+  LDcuDir: string;
+  LExeDir: string;
+  LGen: TDxComplyGenerator;
+  LJson: TJSONObject;
+  LMeta: TJSONObject;
+  LPreviousBds: string;
+  LProject: string;
+  LProperties: TJSONArray;
+  LRoot: string;
+  LBplDir: string;
+
+  function FindPropertyValue(const AProperties: TJSONArray; const AName: string): string;
+  var
+    I: Integer;
+    LProperty: TJSONObject;
+  begin
+    Result := '';
+    if not Assigned(AProperties) then
+      Exit;
+    for I := 0 to AProperties.Count - 1 do
+    begin
+      if not (AProperties.Items[I] is TJSONObject) then
+        Continue;
+      LProperty := TJSONObject(AProperties.Items[I]);
+      if SameText(LProperty.GetValue<string>('name', ''), AName) then
+        Exit(LProperty.GetValue<string>('value', ''));
+    end;
+  end;
+
+  procedure ExpectResolved(const AValue, AFolder: string);
+  var
+    LSuffix: string;
+  begin
+    LSuffix := '\' + AFolder;
+    Assert.IsTrue((Length(AValue) >= Length(LSuffix)) and
+      (Copy(AValue, Length(AValue) - Length(LSuffix) + 1, Length(LSuffix)) = LSuffix),
+      AFolder + ' must be the resolved directory, but was: ' + AValue);
+    Assert.IsTrue(Pos('$(', AValue) = 0,
+      AFolder + ' must contain no $( token: ' + AValue);
+  end;
+begin
+  LPreviousBds := System.SysUtils.GetEnvironmentVariable('BDS');
+  LRoot := TPath.Combine(FTempDir, 'pv');
+  TDirectory.CreateDirectory(LRoot);
+  LBdsRoot := TPath.Combine(FTempDir, 'bds', '37.0');
+  ForceDirectories(LBdsRoot);
+  LExeDir := TPath.Combine(LRoot, 'Compiled', 'BIN_IDE_Win32_Release');
+  LDcuDir := TPath.Combine(LRoot, 'Compiled', 'DCU_IDE_Win32_Release');
+  LDcpDir := TPath.Combine(LRoot, 'Compiled', 'DCP_IDE_Win32_Release');
+  LBplDir := TPath.Combine(LRoot, 'Compiled', 'BPL_IDE_Win32_Release');
+  ForceDirectories(LExeDir);
+  ForceDirectories(LDcuDir);
+  ForceDirectories(LDcpDir);
+  ForceDirectories(LBplDir);
+  try
+    Winapi.Windows.SetEnvironmentVariable(PChar('BDS'), PChar(LBdsRoot));
+    TFile.WriteAllText(TPath.Combine(LRoot, 'PvApp.dpr'),
+      'program PvApp;' + sLineBreak + 'begin' + sLineBreak + 'end.' + sLineBreak,
+      TEncoding.UTF8);
+    TFile.WriteAllText(TPath.Combine(LExeDir, 'PvApp.map'), 'map', TEncoding.UTF8);
+    LProject := TPath.Combine(LRoot, 'PvApp.dproj');
+    TFile.WriteAllText(LProject,
+      '<?xml version="1.0" encoding="utf-8"?>' + sLineBreak +
+      '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">' + sLineBreak +
+      '  <PropertyGroup>' + sLineBreak +
+      '    <MainSource>PvApp.dpr</MainSource>' + sLineBreak +
+      '    <AppType>Console</AppType>' + sLineBreak +
+      '    <TargetedPlatforms>1</TargetedPlatforms>' + sLineBreak +
+      '  </PropertyGroup>' + sLineBreak +
+      '  <PropertyGroup Condition="''$(Base)''!=''''">' + sLineBreak +
+      '    <DCC_ExeOutput>.\Compiled\BIN_IDE$(ProductVersion)_$(Platform)_$(Config)</DCC_ExeOutput>' + sLineBreak +
+      '    <DCC_DcuOutput>.\Compiled\DCU_IDE$(ProductVersion)_$(Platform)_$(Config)</DCC_DcuOutput>' + sLineBreak +
+      '    <DCC_DcpOutput>.\Compiled\DCP_IDE$(BDSVER)_$(Platform)_$(Config)</DCC_DcpOutput>' + sLineBreak +
+      '    <DCC_BplOutput>.\Compiled\BPL_IDE$(BDSVersion)_$(Platform)_$(Config)</DCC_BplOutput>' + sLineBreak +
+      '  </PropertyGroup>' + sLineBreak +
+      '</Project>' + sLineBreak, TEncoding.UTF8);
+
+    LConfig := TSbomConfig.Default;
+    LConfig.OutputPath := FOutputFile;
+    LConfig.Configuration := 'Release';
+    LConfig.Platform := 'Win32';
+    LConfig.IncludeCompositionEvidence := False;
+
+    FProgressMessages.Clear;
+    LGen := TDxComplyGenerator.Create(LConfig);
+    try
+      LGen.OnProgress := OnProgress;
+      Assert.IsTrue(LGen.Generate(LProject, FOutputFile, sfCycloneDxJson),
+        'Generate must succeed. Progress: ' + FProgressMessages.Text);
+    finally
+      LGen.Free;
+    end;
+
+    LJson := TJSONObject.ParseJSONValue(
+      TFile.ReadAllText(FOutputFile, TEncoding.UTF8)) as TJSONObject;
+    try
+      LMeta := LJson.GetValue('metadata') as TJSONObject;
+      LComponent := LMeta.GetValue('component') as TJSONObject;
+      LProperties := LComponent.GetValue('properties') as TJSONArray;
+      ExpectResolved(FindPropertyValue(LProperties,
+        'net.developer-experts.dx-comply:build.output-dir'),
+        'BIN_IDE_Win32_Release');
+      ExpectResolved(FindPropertyValue(LProperties,
+        'net.developer-experts.dx-comply:build.dcu-output-dir'),
+        'DCU_IDE_Win32_Release');
+      ExpectResolved(FindPropertyValue(LProperties,
+        'net.developer-experts.dx-comply:build.dcp-output-dir'),
+        'DCP_IDE_Win32_Release');
+      ExpectResolved(FindPropertyValue(LProperties,
+        'net.developer-experts.dx-comply:build.bpl-output-dir'),
+        'BPL_IDE_Win32_Release');
+    finally
+      LJson.Free;
+    end;
+
+    Assert.IsTrue(Pos('left empty', FProgressMessages.Text) > 0,
+      'Verbose progress must say the empty ProductVersion directory was used: ' +
+      FProgressMessages.Text);
+    Assert.IsTrue(Pos('DCC_ExeOutput', FProgressMessages.Text) > 0,
+      'Verbose progress must name the output directory: ' + FProgressMessages.Text);
+  finally
+    if LPreviousBds = '' then
+      Winapi.Windows.SetEnvironmentVariable(PChar('BDS'), nil)
+    else
+      Winapi.Windows.SetEnvironmentVariable(PChar('BDS'), PChar(LPreviousBds));
   end;
 end;
 
@@ -1647,6 +1823,7 @@ begin
   if AWithOutputDir then
     LXml := LXml + '    <DCC_ExeOutput>.\output</DCC_ExeOutput>' + sLineBreak;
   LXml := LXml +
+    '    <UsePackages>true</UsePackages>' + sLineBreak +
     '    <DCC_UsePackage>rtl</DCC_UsePackage>' + sLineBreak +
     '  </PropertyGroup>' + sLineBreak +
     '</Project>';

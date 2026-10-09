@@ -18,7 +18,7 @@
 /// - Multi-platform projects (Win32, Win64, macOS, etc.)
 /// - Config hierarchy mapping (Debug/Release to Cfg_N)
 /// - .dproj, .groupproj, .dpk, .dpr, and .bdsproj file extensions
-/// - MSBuild variable replacement ($(Platform), $(Config), $(MSBuildProjectName))
+/// - MSBuild variable replacement ($(Platform), $(Config), $(ProductVersion), $(MSBuildProjectName))
 /// - Missing/empty PropertyGroups with defensive fallbacks
 /// - Forward/backslash normalization
 /// </remarks>
@@ -67,6 +67,11 @@ type
     /// Optional Delphi 7 root passed in before Scan. Empty uses the registry.
     /// </summary>
     FDelphi7Root: string;
+    /// <summary>
+    /// BDS version used for $(ProductVersion), for example 37.0.
+    /// Set at the start of each scan. Empty when no install is found.
+    /// </summary>
+    FBdsProductVersion: string;
     FPlatformExplicit: Boolean;
     FConfigurationExplicit: Boolean;
     /// <summary>
@@ -101,9 +106,21 @@ type
     /// </summary>
     function GetPropertyValue(const AName: string; const ADefault: string = ''): string;
     /// <summary>
-    /// Extracts runtime packages from the DCC_UsePackage / RuntimePackage element.
+    /// Extracts runtime packages from DCC_UsePackage when UsePackages is true.
+    /// A readable PE output keeps only packages named in its import table.
     /// </summary>
-    function ExtractRuntimePackages: TList<string>;
+    function ExtractRuntimePackages(const AOutputFilePath, ADllSuffix: string): TList<string>;
+    /// <summary>
+    /// True when UsePackages resolves to true for the active config and platform.
+    /// </summary>
+    function LinksWithRuntimePackages: Boolean;
+    /// <summary>
+    /// Replaces known MSBuild tokens, then environment variables.
+    /// When AEmptyProductVersion is true, $(ProductVersion) and its aliases
+    /// become empty instead of the detected BDS version.
+    /// </summary>
+    function ExpandMsBuildPath(const APath, AProjectName: string;
+      AEmptyProductVersion: Boolean): string;
     /// <summary>
     /// Replaces MSBuild variable tokens with actual platform/config values.
     /// </summary>
@@ -112,6 +129,12 @@ type
     /// Resolves a configured build path to a normalized absolute path.
     /// </summary>
     function ResolveBuildPath(const ARawPath, AProjectDir, AProjectName: string): string;
+    /// <summary>
+    /// Resolves an output directory, preferring a candidate that exists on disk.
+    /// ANotes receives one progress line when the raw path contains a token.
+    /// </summary>
+    function ResolveOutputDirectory(const ARawPath, AProjectDir, AProjectName,
+      ALabel: string; const ANotes: TList<string>): string;
     /// <summary>
     /// Returns .exe, .dll, or .bpl for the project output the .dproj names.
     /// </summary>
@@ -249,7 +272,438 @@ type
       AConfigurationExplicit: Boolean);
   end;
 
+/// <summary>
+/// BDS version DX.Comply records for the detected Delphi install,
+/// for example 37.0. Empty when no install is found.
+/// $(ProductVersion), $(BDSVersion), and $(BDSVER) expand to this value.
+/// </summary>
+function DetectBdsProductVersion: string;
+
+/// <summary>
+/// Reads DLL names from a PE import directory (PE32 and PE32+).
+/// Returns False when the file is missing, unreadable, or not a valid PE.
+/// ANames is empty on failure. A valid PE with no imports returns True and
+/// an empty list. Never raises.
+/// </summary>
+function TryReadPeImportNames(const AFilePath: string;
+  out ANames: TArray<string>): Boolean;
+
 implementation
+
+function ReadLatestInstalledBdsVersion: string;
+var
+  LMajor: Integer;
+  LMaxMajor: Integer;
+  LRegistry: TRegistry;
+  LVersionName: string;
+  LVersionNames: TStringList;
+  procedure CollectVersions(const AAccess: REGSAM);
+  begin
+    LRegistry.Access := KEY_READ or AAccess;
+    if not LRegistry.OpenKeyReadOnly('\SOFTWARE\Embarcadero\BDS') then
+      Exit;
+    try
+      LRegistry.GetKeyNames(LVersionNames);
+    finally
+      LRegistry.CloseKey;
+    end;
+  end;
+begin
+  Result := '';
+  LMaxMajor := -1;
+  LRegistry := TRegistry.Create;
+  LVersionNames := TStringList.Create;
+  try
+    LRegistry.RootKey := HKEY_LOCAL_MACHINE;
+    CollectVersions(KEY_WOW64_32KEY);
+    CollectVersions(KEY_WOW64_64KEY);
+
+    for LVersionName in LVersionNames do
+    begin
+      LMajor := StrToIntDef(LVersionName.Split(['.'])[0], -1);
+      if LMajor > LMaxMajor then
+      begin
+        LMaxMajor := LMajor;
+        Result := LVersionName;
+      end;
+    end;
+  finally
+    LVersionNames.Free;
+    LRegistry.Free;
+  end;
+end;
+
+function DetectBdsProductVersion: string;
+var
+  LBdsPath: string;
+begin
+  Result := '';
+  LBdsPath := Trim(GetEnvironmentVariable('BDS'));
+  if (LBdsPath <> '') and TDirectory.Exists(LBdsPath) then
+  begin
+    Result := TPath.GetFileName(ExcludeTrailingPathDelimiter(
+      TPath.GetFullPath(LBdsPath)));
+    Exit;
+  end;
+  Result := ReadLatestInstalledBdsVersion;
+end;
+
+function TryReadU16At(AStream: TStream; AOffset: Int64; out AValue: Word): Boolean;
+var
+  LBytes: array[0..1] of Byte;
+begin
+  Result := False;
+  AValue := 0;
+  if (AStream = nil) or (AOffset < 0) or (AStream.Size < 2) or
+     (AOffset > AStream.Size - 2) then
+    Exit;
+  try
+    AStream.Position := AOffset;
+    if AStream.Read(LBytes[0], 2) <> 2 then
+      Exit;
+  except
+    Exit;
+  end;
+  AValue := Word(LBytes[0]) or (Word(LBytes[1]) shl 8);
+  Result := True;
+end;
+
+function TryReadU32At(AStream: TStream; AOffset: Int64; out AValue: Cardinal): Boolean;
+var
+  LBytes: array[0..3] of Byte;
+begin
+  Result := False;
+  AValue := 0;
+  if (AStream = nil) or (AOffset < 0) or (AStream.Size < 4) or
+     (AOffset > AStream.Size - 4) then
+    Exit;
+  try
+    AStream.Position := AOffset;
+    if AStream.Read(LBytes[0], 4) <> 4 then
+      Exit;
+  except
+    Exit;
+  end;
+  AValue := Cardinal(LBytes[0]) or (Cardinal(LBytes[1]) shl 8) or
+    (Cardinal(LBytes[2]) shl 16) or (Cardinal(LBytes[3]) shl 24);
+  Result := True;
+end;
+
+function TryReadAsciiZ(AStream: TStream; AOffset: Int64; out AText: string): Boolean;
+const
+  cMaxNameLength = 512;
+var
+  LByte: Byte;
+  LCount: Integer;
+begin
+  Result := False;
+  AText := '';
+  if (AStream = nil) or (AOffset < 0) or (AOffset >= AStream.Size) then
+    Exit;
+
+  LCount := 0;
+  while LCount < cMaxNameLength do
+  begin
+    if AOffset + LCount >= AStream.Size then
+      Exit;
+    try
+      AStream.Position := AOffset + LCount;
+      if AStream.Read(LByte, 1) <> 1 then
+        Exit;
+    except
+      Exit;
+    end;
+    if LByte = 0 then
+    begin
+      Result := True;
+      Exit;
+    end;
+    // Import names are ANSI DLL file names. Anything else is not trusted.
+    if (LByte < 32) or (LByte > 126) then
+      Exit;
+    AText := AText + Chr(LByte);
+    Inc(LCount);
+  end;
+end;
+
+type
+  TPeSectionSpan = record
+    VirtualAddress: Cardinal;
+    SizeOfRawData: Cardinal;
+    PointerToRawData: Cardinal;
+  end;
+
+function RvaToFileOffset(const ASections: TArray<TPeSectionSpan>; ARva: Cardinal;
+  out AOffset: Int64): Boolean;
+var
+  LSection: TPeSectionSpan;
+  LStart: Int64;
+  LEnd: Int64;
+begin
+  Result := False;
+  AOffset := 0;
+  for LSection in ASections do
+  begin
+    if LSection.SizeOfRawData = 0 then
+      Continue;
+    LStart := Int64(LSection.VirtualAddress);
+    LEnd := LStart + Int64(LSection.SizeOfRawData);
+    if (Int64(ARva) >= LStart) and (Int64(ARva) < LEnd) then
+    begin
+      AOffset := Int64(LSection.PointerToRawData) + (Int64(ARva) - LStart);
+      if AOffset < 0 then
+        Exit;
+      Result := True;
+      Exit;
+    end;
+  end;
+end;
+
+function ReadPeImportNamesFromStream(AStream: TStream; out ANames: TArray<string>): Boolean;
+const
+  cDosMagic = $5A4D;
+  cPeSignature = $00004550;
+  cPe32Magic = $010B;
+  cPe32PlusMagic = $020B;
+  cMaxSections = 96;
+  cMaxImports = 4096;
+var
+  LNames: TList<string>;
+  LSections: TArray<TPeSectionSpan>;
+  LMagic: Word;
+  LOptMagic: Word;
+  LSectionCount: Word;
+  LOptSize: Word;
+  LLfanew: Cardinal;
+  LPeSig: Cardinal;
+  LNumberOfRva: Cardinal;
+  LImportRva: Cardinal;
+  LImportSize: Cardinal;
+  LNameRva: Cardinal;
+  LOriginalFirstThunk: Cardinal;
+  LFirstThunk: Cardinal;
+  LSectionVa: Cardinal;
+  LSectionRawSize: Cardinal;
+  LSectionRawPtr: Cardinal;
+  LCoff: Int64;
+  LOpt: Int64;
+  LSectionTable: Int64;
+  LImportOffset: Int64;
+  LNameOffset: Int64;
+  LDescriptor: Int64;
+  LNumberOffset: Integer;
+  LDataOffset: Integer;
+  LRemain: Cardinal;
+  LGuard: Integer;
+  I: Integer;
+  LDllName: string;
+begin
+  Result := False;
+  SetLength(ANames, 0);
+  if AStream = nil then
+    Exit;
+
+  LNames := TList<string>.Create;
+  try
+    try
+      if not TryReadU16At(AStream, 0, LMagic) or (LMagic <> cDosMagic) then
+        Exit;
+      if not TryReadU32At(AStream, $3C, LLfanew) then
+        Exit;
+      if (LLfanew < $40) or (Int64(LLfanew) > AStream.Size) then
+        Exit;
+      if not TryReadU32At(AStream, LLfanew, LPeSig) or (LPeSig <> cPeSignature) then
+        Exit;
+
+      LCoff := Int64(LLfanew) + 4;
+      if not TryReadU16At(AStream, LCoff + 2, LSectionCount) then
+        Exit;
+      if not TryReadU16At(AStream, LCoff + 16, LOptSize) then
+        Exit;
+      if (LSectionCount > cMaxSections) or (LOptSize < 24) then
+        Exit;
+
+      LOpt := LCoff + 20;
+      if not TryReadU16At(AStream, LOpt, LOptMagic) then
+        Exit;
+      if LOptMagic = cPe32Magic then
+      begin
+        LNumberOffset := 92;
+        LDataOffset := 96;
+      end
+      else if LOptMagic = cPe32PlusMagic then
+      begin
+        LNumberOffset := 108;
+        LDataOffset := 112;
+      end
+      else
+        Exit;
+
+      // The import entry is data directory index 1 (8 bytes at LDataOffset + 8).
+      if LOptSize < LDataOffset + 16 then
+        Exit;
+      if not TryReadU32At(AStream, LOpt + LNumberOffset, LNumberOfRva) then
+        Exit;
+      if LNumberOfRva < 2 then
+      begin
+        Result := True;
+        Exit;
+      end;
+      if not TryReadU32At(AStream, LOpt + LDataOffset + 8, LImportRva) then
+        Exit;
+      if not TryReadU32At(AStream, LOpt + LDataOffset + 12, LImportSize) then
+        Exit;
+      if (LImportRva = 0) or (LImportSize = 0) then
+      begin
+        Result := True;
+        Exit;
+      end;
+      if LImportSize < 20 then
+        Exit;
+
+      LSectionTable := LOpt + LOptSize;
+      SetLength(LSections, LSectionCount);
+      for I := 0 to LSectionCount - 1 do
+      begin
+        if not TryReadU32At(AStream, LSectionTable + Int64(I) * 40 + 12, LSectionVa) then
+          Exit;
+        if not TryReadU32At(AStream, LSectionTable + Int64(I) * 40 + 16, LSectionRawSize) then
+          Exit;
+        if not TryReadU32At(AStream, LSectionTable + Int64(I) * 40 + 20, LSectionRawPtr) then
+          Exit;
+        LSections[I].VirtualAddress := LSectionVa;
+        LSections[I].SizeOfRawData := LSectionRawSize;
+        LSections[I].PointerToRawData := LSectionRawPtr;
+      end;
+
+      if not RvaToFileOffset(LSections, LImportRva, LImportOffset) then
+        Exit;
+
+      LRemain := LImportSize;
+      LGuard := 0;
+      LDescriptor := LImportOffset;
+      while (LRemain >= 20) and (LGuard < cMaxImports) do
+      begin
+        if not TryReadU32At(AStream, LDescriptor, LOriginalFirstThunk) then
+          Exit;
+        if not TryReadU32At(AStream, LDescriptor + 12, LNameRva) then
+          Exit;
+        if not TryReadU32At(AStream, LDescriptor + 16, LFirstThunk) then
+          Exit;
+        if (LOriginalFirstThunk = 0) and (LNameRva = 0) and (LFirstThunk = 0) then
+          Break;
+
+        if LNameRva <> 0 then
+        begin
+          if not RvaToFileOffset(LSections, LNameRva, LNameOffset) then
+            Exit;
+          if not TryReadAsciiZ(AStream, LNameOffset, LDllName) then
+            Exit;
+          if (LDllName <> '') and not LNames.Contains(LDllName) then
+            LNames.Add(LDllName);
+        end;
+
+        LDescriptor := LDescriptor + 20;
+        Dec(LRemain, 20);
+        Inc(LGuard);
+      end;
+
+      ANames := LNames.ToArray;
+      Result := True;
+    except
+      Result := False;
+      SetLength(ANames, 0);
+    end;
+  finally
+    LNames.Free;
+  end;
+end;
+
+function TryReadPeImportNames(const AFilePath: string; out ANames: TArray<string>): Boolean;
+var
+  LStream: TFileStream;
+begin
+  Result := False;
+  SetLength(ANames, 0);
+  if Trim(AFilePath) = '' then
+    Exit;
+  try
+    if not TFile.Exists(AFilePath) then
+      Exit;
+    LStream := TFileStream.Create(AFilePath, fmOpenRead or fmShareDenyNone);
+    try
+      Result := ReadPeImportNamesFromStream(LStream, ANames);
+      if not Result then
+        SetLength(ANames, 0);
+    finally
+      LStream.Free;
+    end;
+  except
+    Result := False;
+    SetLength(ANames, 0);
+  end;
+end;
+
+function IsDecimalSuffix(const AValue: string): Boolean;
+var
+  LChar: Char;
+begin
+  Result := AValue <> '';
+  for LChar in AValue do
+    if not CharInSet(LChar, ['0'..'9']) then
+      Exit(False);
+end;
+
+function ImportDllBaseName(const AImport: string): string;
+var
+  LNormalized: string;
+  LSep: Integer;
+begin
+  LNormalized := StringReplace(AImport, '/', '\', [rfReplaceAll]);
+  LSep := LastDelimiter('\', LNormalized);
+  Result := Copy(LNormalized, LSep + 1, MaxInt);
+end;
+
+function RuntimePackageImported(const APackageName, ADllSuffix: string;
+  const AImports: TArray<string>): Boolean;
+var
+  LImport: string;
+  LFileName: string;
+  LPackage: string;
+  LRest: string;
+  LSuffix: string;
+begin
+  Result := False;
+  LPackage := LowerCase(Trim(APackageName));
+  if LPackage = '' then
+    Exit;
+
+  // An unresolved $(...) suffix is not a file-name suffix.
+  LSuffix := Trim(ADllSuffix);
+  if Pos('$', LSuffix) > 0 then
+    LSuffix := '';
+  LSuffix := LowerCase(LSuffix);
+
+  for LImport in AImports do
+  begin
+    LFileName := LowerCase(ImportDllBaseName(LImport));
+    if not LFileName.EndsWith('.bpl') then
+      Continue;
+    if not LFileName.StartsWith(LPackage) then
+      Continue;
+    // Delphi lists "rtl" and imports rtl370.bpl (or rtl.bpl). The digits are
+    // the compiler package version. Delphi 12 uses 290 while its BDS version
+    // is 23.0, so any numeric suffix is accepted, plus a resolved DllSuffix.
+    LRest := Copy(LFileName, Length(LPackage) + 1,
+      Length(LFileName) - Length(LPackage) - Length('.bpl'));
+    if LRest = '' then
+      Exit(True);
+    if (LSuffix <> '') and (LRest = LSuffix) then
+      Exit(True);
+    if IsDecimalSuffix(LRest) then
+      Exit(True);
+  end;
+end;
 
 { TProjectScanner }
 
@@ -345,6 +799,7 @@ constructor TProjectScanner.Create;
 begin
   inherited Create;
   FWarnings := TList<string>.Create;
+  FBdsProductVersion := '';
 end;
 
 destructor TProjectScanner.Destroy;
@@ -414,46 +869,8 @@ begin
 end;
 
 function TProjectScanner.DetectLatestInstalledBdsVersion: string;
-var
-  LMajor: Integer;
-  LMaxMajor: Integer;
-  LRegistry: TRegistry;
-  LVersionName: string;
-  LVersionNames: TStringList;
-  procedure CollectVersions(const AAccess: REGSAM);
-  begin
-    LRegistry.Access := KEY_READ or AAccess;
-    if not LRegistry.OpenKeyReadOnly('\SOFTWARE\Embarcadero\BDS') then
-      Exit;
-    try
-      LRegistry.GetKeyNames(LVersionNames);
-    finally
-      LRegistry.CloseKey;
-    end;
-  end;
 begin
-  Result := '';
-  LMaxMajor := -1;
-  LRegistry := TRegistry.Create;
-  LVersionNames := TStringList.Create;
-  try
-    LRegistry.RootKey := HKEY_LOCAL_MACHINE;
-    CollectVersions(KEY_WOW64_32KEY);
-    CollectVersions(KEY_WOW64_64KEY);
-
-    for LVersionName in LVersionNames do
-    begin
-      LMajor := StrToIntDef(LVersionName.Split(['.'])[0], -1);
-      if LMajor > LMaxMajor then
-      begin
-        LMaxMajor := LMajor;
-        Result := LVersionName;
-      end;
-    end;
-  finally
-    LVersionNames.Free;
-    LRegistry.Free;
-  end;
+  Result := ReadLatestInstalledBdsVersion;
 end;
 
 function TProjectScanner.DetectToolchainInfo: TDelphiToolchainInfo;
@@ -463,18 +880,14 @@ var
 begin
   Result := Default(TDelphiToolchainInfo);
 
+  // Same version string $(ProductVersion) expands to.
+  LVersion := DetectBdsProductVersion;
   LBdsPath := Trim(GetEnvironmentVariable('BDS'));
   if (LBdsPath <> '') and TDirectory.Exists(LBdsPath) then
-  begin
-    Result.RootDir := ExcludeTrailingPathDelimiter(TPath.GetFullPath(LBdsPath));
-    Result.Version := TPath.GetFileName(Result.RootDir);
-  end
+    Result.RootDir := ExcludeTrailingPathDelimiter(TPath.GetFullPath(LBdsPath))
   else
-  begin
-    LVersion := DetectLatestInstalledBdsVersion;
     Result.RootDir := GetBdsRootDirForVersion(LVersion);
-    Result.Version := LVersion;
-  end;
+  Result.Version := LVersion;
 
   if Result.RootDir = '' then
     Exit;
@@ -1017,15 +1430,35 @@ begin
   end;
 end;
 
-function TProjectScanner.ExtractRuntimePackages: TList<string>;
+function TProjectScanner.LinksWithRuntimePackages: Boolean;
+var
+  LValue: string;
+begin
+  // Missing UsePackages means the IDE default, which is false. The same
+  // property precedence as DCC_ExeOutput applies (Base, platform, config).
+  LValue := Trim(GetPropertyValue('UsePackages', ''));
+  Result := SameText(LValue, 'true') or SameText(LValue, '1');
+end;
+
+function TProjectScanner.ExtractRuntimePackages(const AOutputFilePath,
+  ADllSuffix: string): TList<string>;
 var
   LPackages: TList<string>;
+  LKept: TList<string>;
   LBlock, LPackageStr: string;
   LBlocks: TArray<string>;
   LPackageArray: TArray<string>;
+  LImports: TArray<string>;
+  LPlatformPackages: string;
+  LPackageName: string;
   I: Integer;
 begin
   LPackages := TList<string>.Create;
+
+  // Delphi writes the default package list into every .dproj. Those packages
+  // are linked only when UsePackages is true for this config and platform.
+  if not LinksWithRuntimePackages then
+    Exit(LPackages);
 
   // DCC_UsePackage in base PropertyGroup
   LBlock := GetPropertyGroupContent('$(Base)');
@@ -1039,7 +1472,7 @@ begin
     LBlocks := GetPropertyGroupContents('$(Base_' + FCurrentPlatform + ')');
     for I := 0 to High(LBlocks) do
     begin
-      var LPlatformPackages := GetElementValue(LBlocks[I], 'DCC_UsePackage');
+      LPlatformPackages := GetElementValue(LBlocks[I], 'DCC_UsePackage');
       if LPlatformPackages <> '' then
       begin
         if LPackageStr <> '' then
@@ -1066,6 +1499,24 @@ begin
     end;
   end;
 
+  // A readable PE keeps only packages whose BPL is actually imported.
+  // A missing or malformed file keeps the UsePackages list.
+  if (AOutputFilePath = '') or not TFile.Exists(AOutputFilePath) then
+    Exit(LPackages);
+  if not TryReadPeImportNames(AOutputFilePath, LImports) then
+    Exit(LPackages);
+
+  LKept := TList<string>.Create;
+  try
+    for LPackageName in LPackages do
+      if RuntimePackageImported(LPackageName, ADllSuffix, LImports) then
+        LKept.Add(LPackageName);
+    LPackages.Clear;
+    for LPackageName in LKept do
+      LPackages.Add(LPackageName);
+  finally
+    LKept.Free;
+  end;
   Result := LPackages;
 end;
 
@@ -1099,14 +1550,16 @@ begin
   AddDelimitedValues(LNamespaceValue, Result, '', '', False);
 end;
 
-function TProjectScanner.NormalizePath(const APath, AProjectName: string): string;
+function TProjectScanner.ExpandMsBuildPath(const APath, AProjectName: string;
+  AEmptyProductVersion: Boolean): string;
 var
   LPath: string;
+  LProductVersion: string;
 
   // Expands any remaining $(VarName) placeholders by consulting Windows
   // environment variables. Delphi's "User System Overrides" propagate to the
   // build via environment variables, so this resolves project-specific tokens
-  // such as $(DVER) — issue #27.
+  // such as $(DVER). See issue #27.
   function ExpandEnvironmentTokens(const AInput: string): string;
   var
     LIdx, LStart, LEnd: Integer;
@@ -1127,8 +1580,8 @@ var
       // Limitation: GetEnvironmentVariable returns '' both for an undefined
       // variable AND for one that is defined but empty. We cannot
       // distinguish the two cases without the lower-level Win32 API.
-      // Treating both as "leave the token intact" is the safer choice —
-      // substituting an empty string would silently collapse path
+      // Treating both as "leave the token intact" is the safer choice.
+      // Substituting an empty string would silently collapse path
       // segments and produce invalid paths. See issue #27.
       if LValue <> '' then
       begin
@@ -1138,9 +1591,33 @@ var
         LIdx := LStart + Length(LValue);
       end
       else
-        // Unknown or empty token — leave it intact and advance past it
+        // Unknown or empty token. Leave it intact and advance past it.
         LIdx := LEnd + 1;
     end;
+  end;
+
+  function CollapseSeparators(const AInput: string): string;
+  var
+    LPrefix: string;
+    LBody: string;
+    LPrev: string;
+  begin
+    // A leading \\ is a UNC prefix and must survive collapsing.
+    if AInput.StartsWith('\\') then
+    begin
+      LPrefix := '\\';
+      LBody := Copy(AInput, 3, MaxInt);
+    end
+    else
+    begin
+      LPrefix := '';
+      LBody := AInput;
+    end;
+    repeat
+      LPrev := LBody;
+      LBody := StringReplace(LBody, '\\', '\', [rfReplaceAll]);
+    until LBody = LPrev;
+    Result := LPrefix + LBody;
   end;
 
 begin
@@ -1151,15 +1628,206 @@ begin
   LPath := StringReplace(LPath, '$(Configuration)', FCurrentConfig, [rfIgnoreCase, rfReplaceAll]);
   LPath := StringReplace(LPath, '$(MSBuildProjectName)', AProjectName, [rfIgnoreCase, rfReplaceAll]);
   LPath := StringReplace(LPath, '$(ProjectName)', AProjectName, [rfIgnoreCase, rfReplaceAll]);
+  // $(ProductVersion) is the BDS version the IDE substitutes (37.0 on Delphi 13).
+  // A command-line build with no rsvars leaves it empty. BDSVER and BDSVersion
+  // are the same value. Replace the longer alias before $(BDSVER).
+  if AEmptyProductVersion or (FBdsProductVersion <> '') then
+  begin
+    if AEmptyProductVersion then
+      LProductVersion := ''
+    else
+      LProductVersion := FBdsProductVersion;
+    LPath := StringReplace(LPath, '$(ProductVersion)', LProductVersion, [rfIgnoreCase, rfReplaceAll]);
+    LPath := StringReplace(LPath, '$(BDSVersion)', LProductVersion, [rfIgnoreCase, rfReplaceAll]);
+    LPath := StringReplace(LPath, '$(BDSVER)', LProductVersion, [rfIgnoreCase, rfReplaceAll]);
+  end;
   // Resolve user-defined $(VarName) placeholders against environment variables.
   if Pos('$(', LPath) > 0 then
     LPath := ExpandEnvironmentTokens(LPath);
   // Normalize path separators
   LPath := StringReplace(LPath, '/', '\', [rfReplaceAll]);
-  // Remove trailing backslash
-  if (LPath <> '') and (LPath[Length(LPath)] = '\') then
+  LPath := CollapseSeparators(LPath);
+  // Remove trailing backslash, but keep a drive root such as C:\
+  if (Length(LPath) > 1) and (LPath[Length(LPath)] = '\') and
+     not LPath.EndsWith(':\') then
     LPath := Copy(LPath, 1, Length(LPath) - 1);
   Result := LPath;
+end;
+
+function TProjectScanner.NormalizePath(const APath, AProjectName: string): string;
+begin
+  Result := ExpandMsBuildPath(APath, AProjectName, False);
+end;
+
+function ContainsProductVersionToken(const APath: string): Boolean;
+var
+  LUpper: string;
+begin
+  LUpper := UpperCase(APath);
+  Result := (Pos('$(PRODUCTVERSION)', LUpper) > 0) or
+    (Pos('$(BDSVERSION)', LUpper) > 0) or
+    (Pos('$(BDSVER)', LUpper) > 0);
+end;
+
+function StripMsBuildTokens(const APath: string): string;
+var
+  LStart: Integer;
+  LEnd: Integer;
+begin
+  Result := APath;
+  LStart := Pos('$(', Result);
+  while LStart > 0 do
+  begin
+    LEnd := PosEx(')', Result, LStart + 2);
+    if LEnd = 0 then
+      Break;
+    Result := Copy(Result, 1, LStart - 1) + Copy(Result, LEnd + 1, MaxInt);
+    LStart := PosEx('$(', Result, LStart);
+  end;
+end;
+
+function TProjectScanner.ResolveOutputDirectory(const ARawPath, AProjectDir,
+  AProjectName, ALabel: string; const ANotes: TList<string>): string;
+var
+  LRaw: string;
+  LExpanded: string;
+  LEmptyProduct: string;
+  LStripped: string;
+  LCandidateA: string;
+  LCandidateB: string;
+  LCandidateC: string;
+  LFailedA: Boolean;
+  LFailedB: Boolean;
+  LFailedC: Boolean;
+  LChosenFailed: Boolean;
+  LHasProductToken: Boolean;
+  LReason: string;
+
+  function TryToAbsolute(const APath: string; out AFullPath: string): Boolean;
+  var
+    LPath: string;
+  begin
+    Result := True;
+    LPath := APath;
+    if (LPath <> '') and TPath.IsRelativePath(LPath) then
+    begin
+      try
+        LPath := TPath.Combine(AProjectDir, LPath);
+      except
+        Result := False;
+      end;
+    end;
+    try
+      AFullPath := TPath.GetFullPath(LPath);
+    except
+      AFullPath := LPath;
+      Result := False;
+    end;
+  end;
+
+  function DirectoryExistsSafe(const APath: string): Boolean;
+  begin
+    Result := False;
+    if Trim(APath) = '' then
+      Exit;
+    try
+      Result := TDirectory.Exists(APath);
+    except
+      Result := False;
+    end;
+  end;
+
+  function CleanStripped(const APath: string): string;
+  var
+    LPrefix: string;
+    LBody: string;
+    LPrev: string;
+  begin
+    Result := StringReplace(APath, '/', '\', [rfReplaceAll]);
+    if Result.StartsWith('\\') then
+    begin
+      LPrefix := '\\';
+      LBody := Copy(Result, 3, MaxInt);
+    end
+    else
+    begin
+      LPrefix := '';
+      LBody := Result;
+    end;
+    repeat
+      LPrev := LBody;
+      LBody := StringReplace(LBody, '\\', '\', [rfReplaceAll]);
+    until LBody = LPrev;
+    Result := LPrefix + LBody;
+    if (Length(Result) > 1) and (Result[Length(Result)] = '\') and
+       not Result.EndsWith(':\') then
+      Result := Copy(Result, 1, Length(Result) - 1);
+  end;
+
+begin
+  Result := '';
+  LRaw := Trim(ARawPath);
+  if LRaw = '' then
+    Exit;
+
+  // A: known properties expanded, unknown tokens left.
+  // B: A with every remaining $(...) token removed.
+  // C: same as A, but $(ProductVersion) and its aliases are empty.
+  // The first directory that exists wins. A, then B, then C. Otherwise A is kept.
+  LExpanded := ExpandMsBuildPath(LRaw, AProjectName, False);
+  LHasProductToken := ContainsProductVersionToken(LRaw) and (FBdsProductVersion <> '');
+  if LHasProductToken then
+    LEmptyProduct := ExpandMsBuildPath(LRaw, AProjectName, True)
+  else
+    LEmptyProduct := '';
+  LStripped := CleanStripped(StripMsBuildTokens(LExpanded));
+
+  LFailedA := not TryToAbsolute(LExpanded, LCandidateA);
+  if LHasProductToken then
+    LFailedC := not TryToAbsolute(LEmptyProduct, LCandidateC)
+  else
+  begin
+    LFailedC := False;
+    LCandidateC := '';
+  end;
+  LFailedB := not TryToAbsolute(LStripped, LCandidateB);
+
+  if DirectoryExistsSafe(LCandidateA) then
+  begin
+    Result := LCandidateA;
+    LChosenFailed := LFailedA;
+    LReason := 'expanded properties; the directory exists';
+  end
+  else if DirectoryExistsSafe(LCandidateB) and not SameText(LCandidateB, LCandidateA) then
+  begin
+    Result := LCandidateB;
+    LChosenFailed := LFailedB;
+    LReason := 'unresolved $(...) removed; that directory exists';
+  end
+  else if LHasProductToken and DirectoryExistsSafe(LCandidateC) and
+     not SameText(LCandidateC, LCandidateA) and
+     not SameText(LCandidateC, LCandidateB) then
+  begin
+    Result := LCandidateC;
+    LChosenFailed := LFailedC;
+    LReason := '$(ProductVersion) left empty; that directory exists';
+  end
+  else
+  begin
+    Result := LCandidateA;
+    LChosenFailed := LFailedA;
+    LReason := 'expanded properties; no candidate directory exists';
+  end;
+
+  if LChosenFailed then
+    FWarnings.Add('Could not resolve output path: ' + Result);
+
+  // One line, and only when a product-version token or an unresolved token
+  // was involved. Ordinary $(Platform) and $(Config) paths stay quiet.
+  // The CLI prints the line only with --verbose.
+  if Assigned(ANotes) and (ContainsProductVersionToken(LRaw) or
+     (Pos('$(', LExpanded) > 0) or not SameText(Result, LCandidateA)) then
+    ANotes.Add(ALabel + ' resolved to ' + Result + ' (' + LReason + ').');
 end;
 
 function TProjectScanner.ResolveUnitReferencePath(const APath, AProjectDir,
@@ -1631,6 +2299,7 @@ begin
   FWarnings.Clear;
   Result := TProjectInfo.Create;
   try
+    FBdsProductVersion := DetectBdsProductVersion;
     Result.ProjectPath := AProjectPath;
     // Resolve the project directory from an absolute path so it is never empty.
     // A project path without a directory part (e.g. "MyProj.dproj" passed on a
@@ -1714,15 +2383,16 @@ begin
     if (LVersionStr <> '') and (Pos('.', LVersionStr) > 0) then
       Result.Version := LVersionStr;
 
-    // Extract output directory — try multiple common elements
-    LExeOutputDir := ResolveBuildPath(GetPropertyValue('DCC_ExeOutput', ''),
-      Result.ProjectDir, Result.ProjectName);
-    LBplOutputDir := ResolveBuildPath(GetPropertyValue('DCC_BplOutput', ''),
-      Result.ProjectDir, Result.ProjectName);
-    LDcpOutputDir := ResolveBuildPath(GetPropertyValue('DCC_DcpOutput', ''),
-      Result.ProjectDir, Result.ProjectName);
-    LDcuOutputDir := ResolveBuildPath(GetPropertyValue('DCC_DcuOutput', ''),
-      Result.ProjectDir, Result.ProjectName);
+    // Extract output directory. Try the expanded path, then the same path
+    // with unknown tokens removed, then a path with $(ProductVersion) empty.
+    LExeOutputDir := ResolveOutputDirectory(GetPropertyValue('DCC_ExeOutput', ''),
+      Result.ProjectDir, Result.ProjectName, 'DCC_ExeOutput', Result.ProgressNotes);
+    LBplOutputDir := ResolveOutputDirectory(GetPropertyValue('DCC_BplOutput', ''),
+      Result.ProjectDir, Result.ProjectName, 'DCC_BplOutput', Result.ProgressNotes);
+    LDcpOutputDir := ResolveOutputDirectory(GetPropertyValue('DCC_DcpOutput', ''),
+      Result.ProjectDir, Result.ProjectName, 'DCC_DcpOutput', Result.ProgressNotes);
+    LDcuOutputDir := ResolveOutputDirectory(GetPropertyValue('DCC_DcuOutput', ''),
+      Result.ProjectDir, Result.ProjectName, 'DCC_DcuOutput', Result.ProgressNotes);
 
     Result.BplOutputDir := LBplOutputDir;
     Result.DcpOutputDir := LDcpOutputDir;
@@ -1777,10 +2447,12 @@ begin
       Result.UnitScopeNames.Free;
     Result.UnitScopeNames := ExtractUnitScopeNames;
 
-    // Extract runtime packages
+    // Extract runtime packages. UsePackages gates the list. A readable output
+    // binary then keeps only packages named in the PE import directory.
     if Assigned(Result.RuntimePackages) then
       Result.RuntimePackages.Free;
-    Result.RuntimePackages := ExtractRuntimePackages;
+    Result.RuntimePackages := ExtractRuntimePackages(Result.OutputFilePath,
+      Result.DllSuffix);
 
     for LWarning in FWarnings do
       Result.Warnings.Add(LWarning);
