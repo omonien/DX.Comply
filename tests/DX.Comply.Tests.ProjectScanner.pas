@@ -1460,7 +1460,7 @@ begin
     '  <PropertyGroup Condition="''$(Base)''!=''''">' + sLineBreak +
     '    <DCC_ExeOutput>.\out</DCC_ExeOutput>' + sLineBreak +
     '    <UsePackages>true</UsePackages>' + sLineBreak +
-    '    <DCC_UsePackage>rtl;vcl</DCC_UsePackage>' + sLineBreak +
+    '    <DCC_UsePackage>rtl;vcl;vclimg;LockBox</DCC_UsePackage>' + sLineBreak +
     '  </PropertyGroup>' + sLineBreak +
     '</Project>' + sLineBreak;
 end;
@@ -1475,7 +1475,8 @@ begin
   try
     ForceDirectories(TPath.Combine(LTempDir, 'out'));
     TFile.WriteAllBytes(TPath.Combine(LTempDir, 'out', 'PeApp.exe'),
-      BuildImportPe(False, ['rtl370.bpl', 'kernel32.dll']));
+      BuildImportPe(False, ['rtl370.bpl', 'vclimg370.bpl', 'LockBox.bpl',
+        'kernel32.dll']));
     TFile.WriteAllText(TPath.Combine(LTempDir, 'PeApp.dproj'),
       UsePackagesDproj, TEncoding.UTF8);
     LScanner := TProjectScanner.Create;
@@ -1485,12 +1486,16 @@ begin
       Assert.IsTrue(TFile.Exists(LProjectInfo.OutputFilePath),
         'The synthetic exe must be the resolved output file: ' +
         LProjectInfo.OutputFilePath);
-      Assert.AreEqual(NativeInt(1), NativeInt(LProjectInfo.RuntimePackages.Count),
-        'Only the BPL named in the import directory is kept');
+      Assert.AreEqual(NativeInt(3), NativeInt(LProjectInfo.RuntimePackages.Count),
+        'Only BPLs named in the import directory are kept');
       Assert.IsTrue(LProjectInfo.RuntimePackages.Contains('rtl'),
         'rtl370.bpl must keep the rtl package');
+      Assert.IsTrue(LProjectInfo.RuntimePackages.Contains('vclimg'),
+        'vclimg370.bpl must keep the vclimg package');
+      Assert.IsTrue(LProjectInfo.RuntimePackages.Contains('LockBox'),
+        'LockBox.bpl must keep the package with no version suffix');
       Assert.IsFalse(LProjectInfo.RuntimePackages.Contains('vcl'),
-        'vcl is declared but not imported');
+        'vcl must not match vclimg370.bpl');
     finally
       LProjectInfo.Free;
     end;
@@ -1517,10 +1522,12 @@ begin
     LProjectInfo := LScanner.Scan(TPath.Combine(LTempDir, 'PeApp.dproj'),
       'Win32', 'Release');
     try
-      Assert.AreEqual(NativeInt(2), NativeInt(LProjectInfo.RuntimePackages.Count),
+      Assert.AreEqual(NativeInt(4), NativeInt(LProjectInfo.RuntimePackages.Count),
         'A file that is not a valid PE must keep the UsePackages list');
       Assert.IsTrue(LProjectInfo.RuntimePackages.Contains('rtl'));
       Assert.IsTrue(LProjectInfo.RuntimePackages.Contains('vcl'));
+      Assert.IsTrue(LProjectInfo.RuntimePackages.Contains('vclimg'));
+      Assert.IsTrue(LProjectInfo.RuntimePackages.Contains('LockBox'));
     finally
       LProjectInfo.Free;
     end;

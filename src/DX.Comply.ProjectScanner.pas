@@ -183,10 +183,6 @@ type
     /// </summary>
     function ReadIdeLibrarySearchPath(const ABdsVersion, APlatform: string): string;
     /// <summary>
-    /// Detects the latest installed Delphi version from the registry.
-    /// </summary>
-    function DetectLatestInstalledBdsVersion: string;
-    /// <summary>
     /// Detects Delphi toolchain metadata for the current machine.
     /// </summary>
     function DetectToolchainInfo: TDelphiToolchainInfo;
@@ -866,11 +862,6 @@ begin
     // Fall back to searching for properties with the config name in conditions
     Result := AConfigName;
   end;
-end;
-
-function TProjectScanner.DetectLatestInstalledBdsVersion: string;
-begin
-  Result := ReadLatestInstalledBdsVersion;
 end;
 
 function TProjectScanner.DetectToolchainInfo: TDelphiToolchainInfo;
