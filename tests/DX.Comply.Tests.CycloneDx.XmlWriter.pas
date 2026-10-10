@@ -113,6 +113,13 @@ type
     [Test]
     procedure Write_MetadataElementOrder_MatchesSchema;
 
+    /// <summary>
+    /// The product licence sits between version and properties on the
+    /// metadata component. An empty licence writes no licenses element.
+    /// </summary>
+    [Test]
+    procedure Write_RootLicence_BetweenVersionAndProperties;
+
     /// <summary>Component hashes must precede purl.</summary>
     [Test]
     procedure Write_ComponentElementOrder_HashesBeforePurl;
@@ -137,6 +144,8 @@ begin
   FMetadata.ProductName := 'TestProduct';
   FMetadata.ProductVersion := '1.0.0';
   FMetadata.Supplier := 'Test GmbH';
+  FMetadata.SupplierUrl := '';
+  FMetadata.Licence := '';
   FMetadata.Timestamp := '2026-02-24T10:00:00+01:00';
   FMetadata.ToolName := 'DX.Comply';
   FMetadata.ToolVersion := '';
@@ -240,7 +249,8 @@ var
 begin
   FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo);
   LContent := LoadOutputContent;
-  Assert.IsTrue(Pos('<timestamp>2026-02-24T10:00:00+01:00</timestamp>', LContent) > 0);
+  // The +01:00 input is written as UTC with a Z suffix.
+  Assert.IsTrue(Pos('<timestamp>2026-02-24T09:00:00Z</timestamp>', LContent) > 0);
 end;
 
 procedure TCycloneDxXmlWriterTests.Write_ContainsToolInfo;
@@ -381,6 +391,51 @@ begin
     'The written document must satisfy the CycloneDX 1.6 element order');
 end;
 
+procedure TCycloneDxXmlWriterTests.Write_RootLicence_BetweenVersionAndProperties;
+var
+  LComponent, LContent, LMetadata: string;
+  LComponentEnd, LComponentStart, LMetaEnd, LMetaStart: Integer;
+  LLicencesAt, LPropertiesAt, LVersionAt: Integer;
+begin
+  FMetadata.Supplier := 'Test GmbH';
+  FMetadata.Licence := 'MIT';
+  SetLength(FMetadata.ComponentProperties, 1);
+  FMetadata.ComponentProperties[0] := TSbomProperty.Create(
+    'net.developer-experts.dx-comply:build.configuration', 'Release');
+  Assert.IsTrue(FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LContent := LoadOutputContent;
+
+  LMetaStart := Pos('<metadata>', LContent);
+  LMetaEnd := Pos('</metadata>', LContent);
+  Assert.IsTrue((LMetaStart > 0) and (LMetaEnd > LMetaStart),
+    'The document must contain a metadata element');
+  LMetadata := Copy(LContent, LMetaStart, LMetaEnd - LMetaStart);
+  LComponentStart := Pos('<component ', LMetadata);
+  LComponentEnd := Pos('</component>', LMetadata);
+  Assert.IsTrue((LComponentStart > 0) and (LComponentEnd > LComponentStart),
+    'metadata must contain a component element');
+  LComponent := Copy(LMetadata, LComponentStart,
+    LComponentEnd - LComponentStart + Length('</component>'));
+
+  LVersionAt := Pos('<version>', LComponent);
+  LLicencesAt := Pos('<licenses>', LComponent);
+  LPropertiesAt := Pos('<properties>', LComponent);
+  Assert.IsTrue(LVersionAt > 0, 'The metadata component must have a version');
+  Assert.IsTrue(LLicencesAt > LVersionAt, 'licenses must follow version');
+  Assert.IsTrue(LPropertiesAt > LLicencesAt, 'properties must follow licenses');
+  Assert.IsTrue(Pos('<id>MIT</id>', LComponent) > LLicencesAt);
+  Assert.IsTrue(Pos('<license acknowledgement="concluded">', LComponent) <
+    Pos('<license acknowledgement="declared">', LComponent));
+  Assert.AreEqual(0, Integer(Length(CycloneDxXmlSequenceErrors(LContent))),
+    'A root licence must keep the CycloneDX 1.6 element order');
+
+  FMetadata.Licence := '';
+  Assert.IsTrue(FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LContent := LoadOutputContent;
+  Assert.AreEqual(0, Pos('<licenses>', LContent),
+    'An empty licence writes no licenses element');
+end;
+
 procedure TCycloneDxXmlWriterTests.Write_ComponentElementOrder_HashesBeforePurl;
 var
   LComponents: string;
@@ -410,7 +465,7 @@ const
     '<timestamp>2026-02-24T10:00:00+01:00</timestamp>' +
     '<properties><property name="dx:profile">cra</property></properties>' +
     '<tools><tool><vendor>Olaf Monien</vendor><name>DX.Comply</name>' +
-    '<version>1.3.0.0</version></tool></tools>' +
+    '<version>2.0.0.0</version></tool></tools>' +
     '<component type="application" bom-ref="App"><name>App</name></component>' +
     '</metadata>' +
     '<components><component type="application" bom-ref="comp-0">' +

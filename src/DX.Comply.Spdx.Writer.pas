@@ -18,7 +18,8 @@
 /// creationInfo.created is UTC YYYY-MM-DDThh:mm:ssZ. Package external
 /// references use a percent-encoded pkg:generic PURL so the locator has no
 /// whitespace (issue #40). licenseConcluded and licenseDeclared are
-/// NOASSERTION. supplier uses Organization: when metadata supplies a name.
+/// NOASSERTION, except the built program when a product licence is set.
+/// supplier uses Organization: when metadata supplies a name.
 ///
 /// SPDX JSON is part of the MIT-licensed tool, the same as the CycloneDX writers.
 /// </remarks>
@@ -58,12 +59,10 @@ type
     function NormalizeSpdxPath(const APath: string): string;
     function BuildPackageSpdxId(const ARelativePath: string): string;
     function CollectPackageSpdxIds(const AArtefacts: TArtefactList): TArray<string>;
-    function FormatSpdxCreated(const ATimestamp: string): string;
-    function TryParseSpdxTimestamp(const ATimestamp: string; out AUtc: TDateTime): Boolean;
     function BuildGenericPurl(const ARelativePath: string): string;
     function BuildCreationInfo(const AMetadata: TSbomMetadata): TJSONObject;
     function BuildPackage(const AArtefact: TArtefactInfo; const ASpdxId,
-      ASupplier: string): TJSONObject;
+      ASupplier, ALicence: string): TJSONObject;
     function BuildRelationships(const AArtefacts: TArtefactList;
       const APackageIds: TArray<string>;
       const ADocumentSpdxId, AProjectName: string): TJSONArray;
@@ -181,128 +180,6 @@ begin
   end;
 end;
 
-function TSpdxJsonWriter.TryParseSpdxTimestamp(const ATimestamp: string;
-  out AUtc: TDateTime): Boolean;
-var
-  LText: string;
-  LYear, LMonth, LDay, LHour, LMinute, LSecond: Integer;
-  LPos: Integer;
-  LOffsetMinutes: Integer;
-  LSign: Integer;
-  LRemain: Integer;
-  LOffHour: Integer;
-  LOffMinute: Integer;
-begin
-  Result := False;
-  AUtc := 0;
-  LText := Trim(ATimestamp);
-  // YYYY-MM-DDThh:mm:ss
-  if Length(LText) < 19 then
-    Exit;
-  if (LText[5] <> '-') or (LText[8] <> '-') then
-    Exit;
-  if (LText[11] <> 'T') and (LText[11] <> 't') then
-    Exit;
-  if (LText[14] <> ':') or (LText[17] <> ':') then
-    Exit;
-  if not TryStrToInt(Copy(LText, 1, 4), LYear) then
-    Exit;
-  if not TryStrToInt(Copy(LText, 6, 2), LMonth) then
-    Exit;
-  if not TryStrToInt(Copy(LText, 9, 2), LDay) then
-    Exit;
-  if not TryStrToInt(Copy(LText, 12, 2), LHour) then
-    Exit;
-  if not TryStrToInt(Copy(LText, 15, 2), LMinute) then
-    Exit;
-  if not TryStrToInt(Copy(LText, 18, 2), LSecond) then
-    Exit;
-  if (LMonth < 1) or (LMonth > 12) or (LDay < 1) or (LDay > 31) or
-     (LHour < 0) or (LHour > 23) or (LMinute < 0) or (LMinute > 59) or
-     (LSecond < 0) or (LSecond > 59) then
-    Exit;
-
-  // Fractional seconds are not part of the SPDX 2.3 pattern. Drop them.
-  LPos := 20;
-  if (LPos <= Length(LText)) and (LText[LPos] = '.') then
-  begin
-    Inc(LPos);
-    while (LPos <= Length(LText)) and CharInSet(LText[LPos], ['0'..'9']) do
-      Inc(LPos);
-  end;
-
-  LOffsetMinutes := 0;
-  if LPos <= Length(LText) then
-  begin
-    if (LText[LPos] = 'Z') or (LText[LPos] = 'z') then
-    begin
-      if LPos <> Length(LText) then
-        Exit;
-    end
-    else if (LText[LPos] = '+') or (LText[LPos] = '-') then
-    begin
-      if LText[LPos] = '+' then
-        LSign := 1
-      else
-        LSign := -1;
-      LRemain := Length(LText) - LPos;
-      LOffHour := 0;
-      LOffMinute := 0;
-      if LRemain = 5 then
-      begin
-        // ±HH:MM
-        if LText[LPos + 3] <> ':' then
-          Exit;
-        if not TryStrToInt(Copy(LText, LPos + 1, 2), LOffHour) then
-          Exit;
-        if not TryStrToInt(Copy(LText, LPos + 4, 2), LOffMinute) then
-          Exit;
-      end
-      else if LRemain = 4 then
-      begin
-        // ±HHMM
-        if not TryStrToInt(Copy(LText, LPos + 1, 2), LOffHour) then
-          Exit;
-        if not TryStrToInt(Copy(LText, LPos + 3, 2), LOffMinute) then
-          Exit;
-      end
-      else if LRemain = 2 then
-      begin
-        // ±HH
-        if not TryStrToInt(Copy(LText, LPos + 1, 2), LOffHour) then
-          Exit;
-      end
-      else
-        Exit;
-      if (LOffHour < 0) or (LOffHour > 14) or (LOffMinute < 0) or (LOffMinute > 59) then
-        Exit;
-      LOffsetMinutes := LSign * ((LOffHour * 60) + LOffMinute);
-    end
-    else
-      Exit;
-  end;
-
-  try
-    // Offset is minutes east of UTC. UTC clock = local clock - offset.
-    AUtc := IncMinute(EncodeDateTime(Word(LYear), Word(LMonth), Word(LDay),
-      Word(LHour), Word(LMinute), Word(LSecond), 0), -LOffsetMinutes);
-    Result := True;
-  except
-    Result := False;
-  end;
-end;
-
-function TSpdxJsonWriter.FormatSpdxCreated(const ATimestamp: string): string;
-var
-  LUtc: TDateTime;
-begin
-  // SPDX 2.3 requires YYYY-MM-DDThh:mm:ssZ. DateToISO8601(..., False) emits
-  // a local offset and fractional seconds, which tools.spdx.org rejects.
-  if not TryParseSpdxTimestamp(ATimestamp, LUtc) then
-    LUtc := TTimeZone.Local.ToUniversalTime(Now);
-  Result := FormatDateTime('yyyy-mm-dd''T''hh:nn:ss''Z''', LUtc);
-end;
-
 function TSpdxJsonWriter.BuildGenericPurl(const ARelativePath: string): string;
 var
   LNormalized: string;
@@ -356,7 +233,7 @@ var
 begin
   LCreationInfo := TJSONObject.Create;
 
-  LCreationInfo.AddPair('created', FormatSpdxCreated(AMetadata.Timestamp));
+  LCreationInfo.AddPair('created', FormatUtcTimestamp(AMetadata.Timestamp));
   LCreationInfo.AddPair('licenseListVersion', '3.19');
 
   LCreators := TJSONArray.Create;
@@ -377,12 +254,14 @@ begin
 end;
 
 function TSpdxJsonWriter.BuildPackage(const AArtefact: TArtefactInfo;
-  const ASpdxId, ASupplier: string): TJSONObject;
+  const ASpdxId, ASupplier, ALicence: string): TJSONObject;
 var
   LPackage: TJSONObject;
   LChecksums: TJSONArray;
   LChecksum: TJSONObject;
   LFileName: string;
+  LKind: TLicenceKind;
+  LToken: string;
 begin
   LPackage := TJSONObject.Create;
 
@@ -400,8 +279,11 @@ begin
 
   LPackage.AddPair('downloadLocation', 'NOASSERTION');
   LPackage.AddPair('filesAnalyzed', TJSONBool.Create(False));
-  LPackage.AddPair('licenseConcluded', 'NOASSERTION');
-  LPackage.AddPair('licenseDeclared', 'NOASSERTION');
+  // The built program carries the product licence. Every other package
+  // stays NOASSERTION, the same as a scanned file with no manifest row.
+  LToken := SpdxLicenceTokenFor(ALicence, LKind);
+  LPackage.AddPair('licenseConcluded', LToken);
+  LPackage.AddPair('licenseDeclared', LToken);
 
   // Package verification code is not applicable for binary-only analysis.
   // --supplier / product.supplier is an organization name, not an SPDX agent
@@ -450,6 +332,41 @@ begin
   end;
 
   Result := LPackage;
+end;
+
+procedure AddRootExtractedLicence(ARoot: TJSONObject; const ALicence: string);
+var
+  LKind: TLicenceKind;
+  LToken, LNormalised: string;
+  LArray: TJSONArray;
+  LInfo: TJSONObject;
+  LItem: TJSONValue;
+  I: Integer;
+begin
+  LToken := SpdxLicenceTokenFor(ALicence, LKind);
+  if LKind <> lkName then
+    Exit;
+  ClassifyLicence(ALicence, LNormalised);
+  if ARoot.GetValue('hasExtractedLicensingInfos') is TJSONArray then
+    LArray := TJSONArray(ARoot.GetValue('hasExtractedLicensingInfos'))
+  else
+  begin
+    LArray := TJSONArray.Create;
+    ARoot.AddPair('hasExtractedLicensingInfos', LArray);
+  end;
+  for I := 0 to LArray.Count - 1 do
+  begin
+    if not (LArray.Items[I] is TJSONObject) then
+      Continue;
+    LItem := TJSONObject(LArray.Items[I]).GetValue('licenseId');
+    if (LItem <> nil) and SameText(LItem.Value, LToken) then
+      Exit;
+  end;
+  LInfo := TJSONObject.Create;
+  LArray.Add(LInfo);
+  LInfo.AddPair('licenseId', LToken);
+  LInfo.AddPair('name', LNormalised);
+  LInfo.AddPair('extractedText', LNormalised);
 end;
 
 function TSpdxJsonWriter.BuildRelationships(const AArtefacts: TArtefactList;
@@ -539,6 +456,7 @@ var
   LPackageIds: TArray<string>;
   LGraph: TUsesDependencyGraph;
   I: Integer;
+  LRootIndex: Integer;
 begin
   Result := False;
   if AOutputPath = '' then
@@ -568,10 +486,17 @@ begin
     LRoot.AddPair('creationInfo', BuildCreationInfo(AMetadata));
 
     // Packages. IDs are assigned once so relationships point at the same values.
+    // The product licence is written on the built program only.
+    LRootIndex := FindDeliverableTargetIndex(AArtefacts, AProjectInfo.ProjectName);
     LPackageIds := CollectPackageSpdxIds(AArtefacts);
     LPackages := TJSONArray.Create;
     for I := 0 to AArtefacts.Count - 1 do
-      LPackages.Add(BuildPackage(AArtefacts[I], LPackageIds[I], AMetadata.Supplier));
+      if I = LRootIndex then
+        LPackages.Add(BuildPackage(AArtefacts[I], LPackageIds[I], AMetadata.Supplier,
+          AMetadata.Licence))
+      else
+        LPackages.Add(BuildPackage(AArtefacts[I], LPackageIds[I], AMetadata.Supplier,
+          ''));
     LRoot.AddPair('packages', LPackages);
 
     // Relationships. Manifest libraries use the same package IDs.
@@ -584,6 +509,8 @@ begin
       ApplyManifestSpdx(AMetadata.ComponentManifestJson, AArtefacts, LPackages,
         LRoot.GetValue('relationships') as TJSONArray, LPackageIds,
         LDocumentSpdxId, LRoot);
+    if (LRootIndex >= 0) and (Trim(AMetadata.Licence) <> '') then
+      AddRootExtractedLicence(LRoot, AMetadata.Licence);
     AppendUsesRelationships(LRoot.GetValue('relationships') as TJSONArray,
       LPackageIds, LGraph);
 

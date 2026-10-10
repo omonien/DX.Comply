@@ -203,11 +203,69 @@ type
     /// </summary>
     [Test]
     procedure Scan_UnresolvedDllSuffix_LeavesOutputFileEmpty;
+
+    /// <summary>
+    /// When only the command-line directory exists (ProductVersion empty),
+    /// that directory is the output path and it contains no $(...).
+    /// </summary>
+    [Test]
+    procedure Scan_ProductVersion_UsesEmptyDirWhenThatIsTheOnlyOne;
+
+    /// <summary>
+    /// When the directory with the BDS version exists, that directory wins.
+    /// </summary>
+    [Test]
+    procedure Scan_ProductVersion_UsesExpandedDirWhenItExists;
+
+    /// <summary>
+    /// DCC_UsePackage without UsePackages is the IDE default list and is not linked.
+    /// </summary>
+    [Test]
+    procedure Scan_UsePackagesMissing_ReturnsNoRuntimePackages;
+
+    /// <summary>UsePackages true in Base returns the declared packages.</summary>
+    [Test]
+    procedure Scan_UsePackagesTrueInBase_ReturnsPackages;
+
+    /// <summary>
+    /// UsePackages true only in another configuration does not apply here.
+    /// </summary>
+    [Test]
+    procedure Scan_UsePackagesTrueInOtherConfig_ReturnsNone;
+
+    /// <summary>
+    /// A readable PE keeps only packages whose BPL name is imported.
+    /// </summary>
+    [Test]
+    procedure Scan_UsePackages_PeImports_KeepsOnlyImportedPackages;
+
+    /// <summary>
+    /// A file that is not a valid PE keeps the UsePackages list.
+    /// </summary>
+    [Test]
+    procedure Scan_UsePackages_UnreadablePe_KeepsDeclaredPackages;
+
+    /// <summary>A minimal PE32 import directory yields the DLL name.</summary>
+    [Test]
+    procedure TryReadPeImportNames_SyntheticPe32_ReadsDllName;
+
+    /// <summary>A minimal PE32+ import directory yields the DLL name.</summary>
+    [Test]
+    procedure TryReadPeImportNames_SyntheticPe32Plus_ReadsDllName;
+
+    /// <summary>A truncated MZ file is a failure, not an empty import list.</summary>
+    [Test]
+    procedure TryReadPeImportNames_Malformed_ReturnsFalse;
+
+    /// <summary>The running test executable imports no BPL.</summary>
+    [Test]
+    procedure TryReadPeImportNames_TestExecutable_HasNoBplImports;
   end;
 
 implementation
 
 uses
+  System.Generics.Collections,
   DX.Comply.Tests.Paths;
 
 { TProjectScannerTests }
@@ -315,6 +373,8 @@ begin
   try
     Assert.IsNotNull(LProjectInfo.RuntimePackages,
       'RuntimePackages must be assigned (not nil) after scanning');
+    Assert.AreEqual(NativeInt(0), NativeInt(LProjectInfo.RuntimePackages.Count),
+      'The engine .dproj lists DCC_UsePackage but does not set UsePackages');
   finally
     LProjectInfo.Free;
   end;
@@ -1009,6 +1069,544 @@ begin
     if TDirectory.Exists(LTempDir) then
       TDirectory.Delete(LTempDir, True);
   end;
+end;
+
+function MakeTempDir: string;
+var
+  LGuid: TGUID;
+begin
+  CreateGUID(LGuid);
+  Result := TPath.Combine(TPath.GetTempPath,
+    'dxc-' + GUIDToString(LGuid).Trim(['{', '}']));
+  ForceDirectories(Result);
+end;
+
+procedure PushBds(const AVersionDir: string; out APrevious: string);
+begin
+  APrevious := System.SysUtils.GetEnvironmentVariable('BDS');
+  ForceDirectories(AVersionDir);
+  Winapi.Windows.SetEnvironmentVariable(PChar('BDS'), PChar(AVersionDir));
+end;
+
+procedure PopBds(const APrevious: string);
+begin
+  if APrevious = '' then
+    Winapi.Windows.SetEnvironmentVariable(PChar('BDS'), nil)
+  else
+    Winapi.Windows.SetEnvironmentVariable(PChar('BDS'), PChar(APrevious));
+end;
+
+function ProgressText(const AInfo: TProjectInfo): string;
+var
+  LNote: string;
+begin
+  Result := '';
+  if not Assigned(AInfo.ProgressNotes) then
+    Exit;
+  for LNote in AInfo.ProgressNotes do
+    Result := Result + LNote + sLineBreak;
+end;
+
+procedure WriteU16(var ABytes: TBytes; AOffset: Integer; AValue: Word);
+begin
+  ABytes[AOffset] := Byte(AValue and $00FF);
+  ABytes[AOffset + 1] := Byte(AValue shr 8);
+end;
+
+procedure WriteU32(var ABytes: TBytes; AOffset: Integer; AValue: Cardinal);
+begin
+  ABytes[AOffset] := Byte(AValue and $FF);
+  ABytes[AOffset + 1] := Byte((AValue shr 8) and $FF);
+  ABytes[AOffset + 2] := Byte((AValue shr 16) and $FF);
+  ABytes[AOffset + 3] := Byte((AValue shr 24) and $FF);
+end;
+
+procedure WriteAsciiZ(var ABytes: TBytes; AOffset: Integer; const AText: string);
+var
+  I: Integer;
+begin
+  for I := 1 to Length(AText) do
+    ABytes[AOffset + I - 1] := Byte(Ord(AText[I]));
+  ABytes[AOffset + Length(AText)] := 0;
+end;
+
+// Minimal PE image: DOS stub, one section at RVA $1000 / file $200, and an
+// import directory whose DLL names sit just after the descriptor table.
+function BuildImportPe(APe32Plus: Boolean; const ADllNames: array of string): TBytes;
+const
+  cFileSize = $400;
+  cSectionVa = $1000;
+  cSectionRaw = $200;
+var
+  LDataOffset: Integer;
+  LDescAt: Integer;
+  LFilePos: Integer;
+  LImportSize: Integer;
+  LMachine: Word;
+  LMagic: Word;
+  LNameRva: Integer;
+  LNumberOffset: Integer;
+  LOptSize: Integer;
+  LSectionAt: Integer;
+  I: Integer;
+begin
+  SetLength(Result, cFileSize);
+  if APe32Plus then
+  begin
+    LMachine := $8664;
+    LOptSize := 240;
+    LMagic := $020B;
+    LNumberOffset := 108;
+    LDataOffset := 112;
+  end
+  else
+  begin
+    LMachine := $014C;
+    LOptSize := 224;
+    LMagic := $010B;
+    LNumberOffset := 92;
+    LDataOffset := 96;
+  end;
+
+  WriteU16(Result, 0, $5A4D);
+  WriteU32(Result, $3C, $80);
+  WriteU32(Result, $80, $4550);
+  WriteU16(Result, $84, LMachine);
+  WriteU16(Result, $86, 1);
+  WriteU16(Result, $94, Word(LOptSize));
+  WriteU16(Result, $98, LMagic);
+  WriteU32(Result, $98 + LNumberOffset, 16);
+  LImportSize := 20 * (Length(ADllNames) + 1);
+  WriteU32(Result, $98 + LDataOffset + 8, cSectionVa);
+  WriteU32(Result, $98 + LDataOffset + 12, Cardinal(LImportSize));
+
+  LSectionAt := $98 + LOptSize;
+  WriteU32(Result, LSectionAt + 8, $200);
+  WriteU32(Result, LSectionAt + 12, cSectionVa);
+  WriteU32(Result, LSectionAt + 16, $200);
+  WriteU32(Result, LSectionAt + 20, cSectionRaw);
+
+  LNameRva := cSectionVa + LImportSize;
+  LFilePos := cSectionRaw + LImportSize;
+  for I := 0 to High(ADllNames) do
+  begin
+    LDescAt := cSectionRaw + (I * 20);
+    WriteU32(Result, LDescAt, $2000);
+    WriteU32(Result, LDescAt + 12, Cardinal(LNameRva));
+    WriteU32(Result, LDescAt + 16, $2100);
+    if LFilePos + Length(ADllNames[I]) >= cFileSize then
+      raise Exception.Create('Synthetic PE import name does not fit');
+    WriteAsciiZ(Result, LFilePos, ADllNames[I]);
+    Inc(LNameRva, Length(ADllNames[I]) + 1);
+    Inc(LFilePos, Length(ADllNames[I]) + 1);
+  end;
+end;
+
+function ProductVersionDproj: string;
+begin
+  Result :=
+    '<?xml version="1.0" encoding="utf-8"?>' + sLineBreak +
+    '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">' + sLineBreak +
+    '  <PropertyGroup>' + sLineBreak +
+    '    <MainSource>DecApp.dpr</MainSource>' + sLineBreak +
+    '    <AppType>Console</AppType>' + sLineBreak +
+    '    <TargetedPlatforms>1</TargetedPlatforms>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '  <PropertyGroup Condition="''$(Base)''!=''''">' + sLineBreak +
+    '    <DCC_ExeOutput>.\Compiled\BIN_IDE$(ProductVersion)_$(Platform)_$(Config)</DCC_ExeOutput>' + sLineBreak +
+    '    <DCC_DcuOutput>.\Compiled\DCU_IDE$(BDSVersion)_$(Platform)_$(Config)</DCC_DcuOutput>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '</Project>' + sLineBreak;
+end;
+
+procedure TProjectScannerTests.Scan_ProductVersion_UsesEmptyDirWhenThatIsTheOnlyOne;
+var
+  LNotes: string;
+  LPreviousBds: string;
+  LProjectInfo: TProjectInfo;
+  LScanner: IProjectScanner;
+  LTempDir: string;
+begin
+  LTempDir := MakeTempDir;
+  LPreviousBds := '';
+  try
+    PushBds(TPath.Combine(LTempDir, 'Studio', '37.0'), LPreviousBds);
+    ForceDirectories(TPath.Combine(LTempDir, 'Compiled', 'BIN_IDE_Win32_Release'));
+    ForceDirectories(TPath.Combine(LTempDir, 'Compiled', 'DCU_IDE_Win32_Release'));
+    TFile.WriteAllText(TPath.Combine(LTempDir, 'DecApp.dproj'),
+      ProductVersionDproj, TEncoding.UTF8);
+    LScanner := TProjectScanner.Create;
+    LProjectInfo := LScanner.Scan(TPath.Combine(LTempDir, 'DecApp.dproj'),
+      'Win32', 'Release');
+    try
+      Assert.IsTrue(LProjectInfo.OutputDir.EndsWith('\Compiled\BIN_IDE_Win32_Release'),
+        'The directory with an empty ProductVersion must be used, but was: ' +
+        LProjectInfo.OutputDir);
+      Assert.IsTrue(Pos('$(', LProjectInfo.OutputDir) = 0,
+        'The resolved output path must contain no $( token: ' + LProjectInfo.OutputDir);
+      Assert.IsTrue(Pos('37.0', LProjectInfo.OutputDir) = 0,
+        'The empty ProductVersion directory was expected: ' + LProjectInfo.OutputDir);
+      Assert.IsTrue(LProjectInfo.DcuOutputDir.EndsWith('\Compiled\DCU_IDE_Win32_Release'),
+        '$(BDSVersion) must follow the empty-token directory, but was: ' +
+        LProjectInfo.DcuOutputDir);
+      Assert.IsTrue(Pos('$(', LProjectInfo.DcuOutputDir) = 0,
+        'The resolved DCU path must contain no $( token: ' + LProjectInfo.DcuOutputDir);
+      LNotes := ProgressText(LProjectInfo);
+      Assert.IsTrue(Pos('DCC_ExeOutput', LNotes) > 0,
+        'Verbose progress must name the output directory: ' + LNotes);
+      Assert.IsTrue(Pos('left empty', LNotes) > 0,
+        'Verbose progress must say the empty ProductVersion directory was used: ' +
+        LNotes);
+    finally
+      LProjectInfo.Free;
+    end;
+  finally
+    PopBds(LPreviousBds);
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_ProductVersion_UsesExpandedDirWhenItExists;
+var
+  LNotes: string;
+  LPreviousBds: string;
+  LProjectInfo: TProjectInfo;
+  LScanner: IProjectScanner;
+  LTempDir: string;
+begin
+  LTempDir := MakeTempDir;
+  LPreviousBds := '';
+  try
+    PushBds(TPath.Combine(LTempDir, 'Studio', '37.0'), LPreviousBds);
+    ForceDirectories(TPath.Combine(LTempDir, 'Compiled', 'BIN_IDE37.0_Win32_Release'));
+    ForceDirectories(TPath.Combine(LTempDir, 'Compiled', 'BIN_IDE_Win32_Release'));
+    ForceDirectories(TPath.Combine(LTempDir, 'Compiled', 'DCU_IDE37.0_Win32_Release'));
+    TFile.WriteAllText(TPath.Combine(LTempDir, 'DecApp.dproj'),
+      ProductVersionDproj, TEncoding.UTF8);
+    LScanner := TProjectScanner.Create;
+    LProjectInfo := LScanner.Scan(TPath.Combine(LTempDir, 'DecApp.dproj'),
+      'Win32', 'Release');
+    try
+      Assert.IsTrue(
+        LProjectInfo.OutputDir.EndsWith('\Compiled\BIN_IDE37.0_Win32_Release'),
+        'The directory with the BDS version must win, but was: ' +
+        LProjectInfo.OutputDir);
+      Assert.IsTrue(Pos('$(', LProjectInfo.OutputDir) = 0,
+        'The resolved output path must contain no $( token: ' + LProjectInfo.OutputDir);
+      Assert.IsTrue(
+        LProjectInfo.DcuOutputDir.EndsWith('\Compiled\DCU_IDE37.0_Win32_Release'),
+        '$(BDSVersion) must expand to the detected BDS version, but was: ' +
+        LProjectInfo.DcuOutputDir);
+      Assert.IsTrue(Pos('$(', LProjectInfo.DcuOutputDir) = 0,
+        'The resolved DCU path must contain no $( token: ' + LProjectInfo.DcuOutputDir);
+      LNotes := ProgressText(LProjectInfo);
+      Assert.IsTrue(Pos('expanded properties; the directory exists', LNotes) > 0,
+        'Verbose progress must say the expanded directory was used: ' + LNotes);
+      Assert.IsTrue(Pos('left empty', LNotes) = 0,
+        'The empty ProductVersion directory must not be chosen when the expanded one exists: ' +
+        LNotes);
+    finally
+      LProjectInfo.Free;
+    end;
+  finally
+    PopBds(LPreviousBds);
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_UsePackagesMissing_ReturnsNoRuntimePackages;
+var
+  LProjectInfo: TProjectInfo;
+  LScanner: IProjectScanner;
+  LTempDir: string;
+begin
+  LTempDir := MakeTempDir;
+  try
+    TFile.WriteAllText(TPath.Combine(LTempDir, 'PkgApp.dproj'),
+      '<?xml version="1.0" encoding="utf-8"?>' + sLineBreak +
+      '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">' + sLineBreak +
+      '  <PropertyGroup>' + sLineBreak +
+      '    <MainSource>PkgApp.dpr</MainSource>' + sLineBreak +
+      '    <AppType>Console</AppType>' + sLineBreak +
+      '    <TargetedPlatforms>1</TargetedPlatforms>' + sLineBreak +
+      '  </PropertyGroup>' + sLineBreak +
+      '  <PropertyGroup Condition="''$(Base)''!=''''">' + sLineBreak +
+      '    <DCC_UsePackage>rtl;vcl;fmx</DCC_UsePackage>' + sLineBreak +
+      '  </PropertyGroup>' + sLineBreak +
+      '</Project>' + sLineBreak, TEncoding.UTF8);
+    LScanner := TProjectScanner.Create;
+    LProjectInfo := LScanner.Scan(TPath.Combine(LTempDir, 'PkgApp.dproj'),
+      'Win32', 'Release');
+    try
+      Assert.IsNotNull(LProjectInfo.RuntimePackages);
+      Assert.AreEqual(NativeInt(0), NativeInt(LProjectInfo.RuntimePackages.Count),
+        'DCC_UsePackage without UsePackages must not be linked');
+    finally
+      LProjectInfo.Free;
+    end;
+  finally
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_UsePackagesTrueInBase_ReturnsPackages;
+var
+  LProjectInfo: TProjectInfo;
+  LScanner: IProjectScanner;
+  LTempDir: string;
+begin
+  LTempDir := MakeTempDir;
+  try
+    TFile.WriteAllText(TPath.Combine(LTempDir, 'PkgApp.dproj'),
+      '<?xml version="1.0" encoding="utf-8"?>' + sLineBreak +
+      '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">' + sLineBreak +
+      '  <PropertyGroup>' + sLineBreak +
+      '    <MainSource>PkgApp.dpr</MainSource>' + sLineBreak +
+      '    <AppType>Console</AppType>' + sLineBreak +
+      '    <TargetedPlatforms>1</TargetedPlatforms>' + sLineBreak +
+      '  </PropertyGroup>' + sLineBreak +
+      '  <PropertyGroup Condition="''$(Base)''!=''''">' + sLineBreak +
+      '    <UsePackages>true</UsePackages>' + sLineBreak +
+      '    <DCC_UsePackage>rtl;vcl</DCC_UsePackage>' + sLineBreak +
+      '  </PropertyGroup>' + sLineBreak +
+      '</Project>' + sLineBreak, TEncoding.UTF8);
+    LScanner := TProjectScanner.Create;
+    LProjectInfo := LScanner.Scan(TPath.Combine(LTempDir, 'PkgApp.dproj'),
+      'Win32', 'Release');
+    try
+      Assert.AreEqual(NativeInt(2), NativeInt(LProjectInfo.RuntimePackages.Count),
+        'UsePackages true in Base must return the declared packages');
+      Assert.IsTrue(LProjectInfo.RuntimePackages.Contains('rtl'));
+      Assert.IsTrue(LProjectInfo.RuntimePackages.Contains('vcl'));
+    finally
+      LProjectInfo.Free;
+    end;
+  finally
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_UsePackagesTrueInOtherConfig_ReturnsNone;
+var
+  LProjectInfo: TProjectInfo;
+  LScanner: IProjectScanner;
+  LTempDir: string;
+  LDproj: string;
+const
+  cXml =
+    '<?xml version="1.0" encoding="utf-8"?>' + sLineBreak +
+    '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">' + sLineBreak +
+    '  <PropertyGroup>' + sLineBreak +
+    '    <MainSource>PkgApp.dpr</MainSource>' + sLineBreak +
+    '    <AppType>Console</AppType>' + sLineBreak +
+    '    <TargetedPlatforms>1</TargetedPlatforms>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '  <PropertyGroup Condition="''$(Base)''!=''''">' + sLineBreak +
+    '    <DCC_UsePackage>rtl;vcl</DCC_UsePackage>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '  <PropertyGroup Condition="''$(Cfg_1)''!=''''">' + sLineBreak +
+    '    <UsePackages>true</UsePackages>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '  <ItemGroup>' + sLineBreak +
+    '    <BuildConfiguration Include="Debug">' + sLineBreak +
+    '      <Key>Cfg_1</Key>' + sLineBreak +
+    '    </BuildConfiguration>' + sLineBreak +
+    '    <BuildConfiguration Include="Release">' + sLineBreak +
+    '      <Key>Cfg_2</Key>' + sLineBreak +
+    '    </BuildConfiguration>' + sLineBreak +
+    '  </ItemGroup>' + sLineBreak +
+    '</Project>' + sLineBreak;
+begin
+  LTempDir := MakeTempDir;
+  try
+    LDproj := TPath.Combine(LTempDir, 'PkgApp.dproj');
+    TFile.WriteAllText(LDproj, cXml, TEncoding.UTF8);
+    LScanner := TProjectScanner.Create;
+    LProjectInfo := LScanner.Scan(LDproj, 'Win32', 'Release');
+    try
+      Assert.AreEqual(NativeInt(0), NativeInt(LProjectInfo.RuntimePackages.Count),
+        'UsePackages true only in Debug must not apply to Release');
+    finally
+      LProjectInfo.Free;
+    end;
+
+    LProjectInfo := LScanner.Scan(LDproj, 'Win32', 'Debug');
+    try
+      Assert.AreEqual(NativeInt(2), NativeInt(LProjectInfo.RuntimePackages.Count),
+        'UsePackages true in the Debug config must return the declared packages');
+    finally
+      LProjectInfo.Free;
+    end;
+  finally
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+function UsePackagesDproj: string;
+begin
+  Result :=
+    '<?xml version="1.0" encoding="utf-8"?>' + sLineBreak +
+    '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">' + sLineBreak +
+    '  <PropertyGroup>' + sLineBreak +
+    '    <MainSource>PeApp.dpr</MainSource>' + sLineBreak +
+    '    <AppType>Application</AppType>' + sLineBreak +
+    '    <TargetedPlatforms>1</TargetedPlatforms>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '  <PropertyGroup Condition="''$(Base)''!=''''">' + sLineBreak +
+    '    <DCC_ExeOutput>.\out</DCC_ExeOutput>' + sLineBreak +
+    '    <UsePackages>true</UsePackages>' + sLineBreak +
+    '    <DCC_UsePackage>rtl;vcl;vclimg;LockBox</DCC_UsePackage>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '</Project>' + sLineBreak;
+end;
+
+procedure TProjectScannerTests.Scan_UsePackages_PeImports_KeepsOnlyImportedPackages;
+var
+  LProjectInfo: TProjectInfo;
+  LScanner: IProjectScanner;
+  LTempDir: string;
+begin
+  LTempDir := MakeTempDir;
+  try
+    ForceDirectories(TPath.Combine(LTempDir, 'out'));
+    TFile.WriteAllBytes(TPath.Combine(LTempDir, 'out', 'PeApp.exe'),
+      BuildImportPe(False, ['rtl370.bpl', 'vclimg370.bpl', 'LockBox.bpl',
+        'kernel32.dll']));
+    TFile.WriteAllText(TPath.Combine(LTempDir, 'PeApp.dproj'),
+      UsePackagesDproj, TEncoding.UTF8);
+    LScanner := TProjectScanner.Create;
+    LProjectInfo := LScanner.Scan(TPath.Combine(LTempDir, 'PeApp.dproj'),
+      'Win32', 'Release');
+    try
+      Assert.IsTrue(TFile.Exists(LProjectInfo.OutputFilePath),
+        'The synthetic exe must be the resolved output file: ' +
+        LProjectInfo.OutputFilePath);
+      Assert.AreEqual(NativeInt(3), NativeInt(LProjectInfo.RuntimePackages.Count),
+        'Only BPLs named in the import directory are kept');
+      Assert.IsTrue(LProjectInfo.RuntimePackages.Contains('rtl'),
+        'rtl370.bpl must keep the rtl package');
+      Assert.IsTrue(LProjectInfo.RuntimePackages.Contains('vclimg'),
+        'vclimg370.bpl must keep the vclimg package');
+      Assert.IsTrue(LProjectInfo.RuntimePackages.Contains('LockBox'),
+        'LockBox.bpl must keep the package with no version suffix');
+      Assert.IsFalse(LProjectInfo.RuntimePackages.Contains('vcl'),
+        'vcl must not match vclimg370.bpl');
+    finally
+      LProjectInfo.Free;
+    end;
+  finally
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_UsePackages_UnreadablePe_KeepsDeclaredPackages;
+var
+  LProjectInfo: TProjectInfo;
+  LScanner: IProjectScanner;
+  LTempDir: string;
+begin
+  LTempDir := MakeTempDir;
+  try
+    ForceDirectories(TPath.Combine(LTempDir, 'out'));
+    TFile.WriteAllBytes(TPath.Combine(LTempDir, 'out', 'PeApp.exe'),
+      TBytes.Create($4D, $5A, $00));
+    TFile.WriteAllText(TPath.Combine(LTempDir, 'PeApp.dproj'),
+      UsePackagesDproj, TEncoding.UTF8);
+    LScanner := TProjectScanner.Create;
+    LProjectInfo := LScanner.Scan(TPath.Combine(LTempDir, 'PeApp.dproj'),
+      'Win32', 'Release');
+    try
+      Assert.AreEqual(NativeInt(4), NativeInt(LProjectInfo.RuntimePackages.Count),
+        'A file that is not a valid PE must keep the UsePackages list');
+      Assert.IsTrue(LProjectInfo.RuntimePackages.Contains('rtl'));
+      Assert.IsTrue(LProjectInfo.RuntimePackages.Contains('vcl'));
+      Assert.IsTrue(LProjectInfo.RuntimePackages.Contains('vclimg'));
+      Assert.IsTrue(LProjectInfo.RuntimePackages.Contains('LockBox'));
+    finally
+      LProjectInfo.Free;
+    end;
+  finally
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+procedure TProjectScannerTests.TryReadPeImportNames_SyntheticPe32_ReadsDllName;
+var
+  LNames: TArray<string>;
+  LTempDir: string;
+  LFile: string;
+begin
+  LTempDir := MakeTempDir;
+  try
+    LFile := TPath.Combine(LTempDir, 'sample.exe');
+    TFile.WriteAllBytes(LFile, BuildImportPe(False, ['rtl370.bpl', 'kernel32.dll']));
+    Assert.IsTrue(TryReadPeImportNames(LFile, LNames),
+      'A minimal PE32 image must be readable');
+    Assert.AreEqual(NativeInt(2), NativeInt(Length(LNames)));
+    Assert.AreEqual('rtl370.bpl', LNames[0]);
+    Assert.AreEqual('kernel32.dll', LNames[1]);
+  finally
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+procedure TProjectScannerTests.TryReadPeImportNames_SyntheticPe32Plus_ReadsDllName;
+var
+  LNames: TArray<string>;
+  LTempDir: string;
+  LFile: string;
+begin
+  LTempDir := MakeTempDir;
+  try
+    LFile := TPath.Combine(LTempDir, 'sample.exe');
+    TFile.WriteAllBytes(LFile, BuildImportPe(True, ['vcl290.bpl']));
+    Assert.IsTrue(TryReadPeImportNames(LFile, LNames),
+      'A minimal PE32+ image must be readable');
+    Assert.AreEqual(NativeInt(1), NativeInt(Length(LNames)));
+    Assert.AreEqual('vcl290.bpl', LNames[0]);
+  finally
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+procedure TProjectScannerTests.TryReadPeImportNames_Malformed_ReturnsFalse;
+var
+  LNames: TArray<string>;
+  LTempDir: string;
+  LFile: string;
+begin
+  LTempDir := MakeTempDir;
+  try
+    LFile := TPath.Combine(LTempDir, 'short.exe');
+    TFile.WriteAllBytes(LFile, TBytes.Create($4D, $5A));
+    Assert.IsFalse(TryReadPeImportNames(LFile, LNames),
+      'A truncated MZ file must be a failed read');
+    Assert.AreEqual(NativeInt(0), NativeInt(Length(LNames)));
+  finally
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+procedure TProjectScannerTests.TryReadPeImportNames_TestExecutable_HasNoBplImports;
+var
+  LName: string;
+  LNames: TArray<string>;
+begin
+  Assert.IsTrue(TryReadPeImportNames(ParamStr(0), LNames),
+    'The running test executable must be a readable PE');
+  for LName in LNames do
+    Assert.IsFalse(SameText(TPath.GetExtension(LName), '.bpl'),
+      'The test executable imports a BPL: ' + LName);
 end;
 
 initialization

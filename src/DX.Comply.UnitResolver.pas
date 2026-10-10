@@ -601,7 +601,7 @@ begin
   Result.ProjectVersion := AProjectInfo.Version;
   Result.Platform := AProjectInfo.Platform;
   Result.Configuration := AProjectInfo.Configuration;
-  Result.GeneratedAt := DateToISO8601(Now, False);
+  Result.GeneratedAt := FormatUtcTimestamp('');
   Result.ToolchainProductName := AProjectInfo.Toolchain.ProductName;
   Result.ToolchainVersion := AProjectInfo.Toolchain.Version;
   Result.ToolchainBuildVersion := AProjectInfo.Toolchain.BuildVersion;

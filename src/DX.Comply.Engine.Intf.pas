@@ -179,6 +179,15 @@ type
     Toolchain: TDelphiToolchainInfo;
     /// <summary>Warnings collected while scanning the project metadata.</summary>
     Warnings: TList<string>;
+    /// <summary>
+    /// One progress line for an output directory whose path used
+    /// $(ProductVersion) (or $(BDSVersion) / $(BDSVER)), or that still
+    /// contained an unresolved $(...) token after expansion.
+    /// Ordinary $(Platform) and $(Config) paths are not listed.
+    /// The generator forwards each line as progress. The CLI prints
+    /// progress lines only with --verbose.
+    /// </summary>
+    ProgressNotes: TList<string>;
     /// <summary>Initializes the record with a new TList instance.</summary>
     class function Create: TProjectInfo; static;
     /// <summary>Frees internal resources. Call this when done with the record.</summary>
@@ -215,6 +224,11 @@ type
     /// Optional URL for the supplier. Written on metadata.component when set.
     /// </summary>
     SupplierUrl: string;
+    /// <summary>
+    /// Distribution licence of the primary component. An SPDX identifier,
+    /// an SPDX expression, or a plain name. Empty means the writers omit it.
+    /// </summary>
+    Licence: string;
     /// <summary>
     /// Raw components.json text. Empty when no component manifest is in use.
     /// Writers read this to group matched units under library components.
@@ -401,6 +415,20 @@ function IsBsiHttpUrl(const AValue: string): Boolean;
 function BsiCreatorKind(const AValue: string): string;
 
 /// <summary>
+/// Parses YYYY-MM-DDThh:mm:ss with optional fractional seconds and an
+/// optional Z or +hh:mm, +hhmm or +hh offset. A value without a zone is
+/// read as UTC. AUtc is the UTC time. False when the text does not match.
+/// </summary>
+function TryParseUtcTimestamp(const ATimestamp: string; out AUtc: TDateTime): Boolean;
+
+/// <summary>
+/// ATimestamp converted to UTC as YYYY-MM-DDThh:mm:ssZ. An empty or
+/// unreadable value gives the current UTC time. Used for CycloneDX
+/// metadata.timestamp, SPDX creationInfo.created and the reports.
+/// </summary>
+function FormatUtcTimestamp(const ATimestamp: string): string;
+
+/// <summary>
 /// True when AValue is empty, or an email address, or an http(s) URL.
 /// </summary>
 function IsAcceptableBsiCreator(const AValue: string): Boolean;
@@ -441,7 +469,8 @@ implementation
 
 uses
   System.IOUtils,
-  System.SysUtils;
+  System.SysUtils,
+  System.DateUtils;
 
 { TSbomProperty }
 
@@ -463,6 +492,7 @@ begin
   Result.RuntimePackages := TList<string>.Create;
   Result.ExplicitUnitReferences := TProjectUnitReferenceList.Create;
   Result.Warnings := TList<string>.Create;
+  Result.ProgressNotes := TList<string>.Create;
 end;
 
 procedure TProjectInfo.Free;
@@ -507,6 +537,12 @@ begin
   begin
     Warnings.Free;
     Warnings := nil;
+  end;
+
+  if Assigned(ProgressNotes) then
+  begin
+    ProgressNotes.Free;
+    ProgressNotes := nil;
   end;
 end;
 
@@ -702,6 +738,131 @@ begin
   Result := 'bsi:component:executable=' + BsiExecutableValue(AArtefact) + '; ' +
     'bsi:component:archive=' + BsiArchiveValue(LFileName) + '; ' +
     'bsi:component:structured=' + BsiStructuredValue(LFileName);
+end;
+
+function TryParseUtcTimestamp(const ATimestamp: string;
+  out AUtc: TDateTime): Boolean;
+var
+  LText: string;
+  LYear, LMonth, LDay, LHour, LMinute, LSecond: Integer;
+  LPos: Integer;
+  LOffsetMinutes: Integer;
+  LSign: Integer;
+  LRemain: Integer;
+  LOffHour: Integer;
+  LOffMinute: Integer;
+begin
+  Result := False;
+  AUtc := 0;
+  LText := Trim(ATimestamp);
+  // YYYY-MM-DDThh:mm:ss
+  if Length(LText) < 19 then
+    Exit;
+  if (LText[5] <> '-') or (LText[8] <> '-') then
+    Exit;
+  if (LText[11] <> 'T') and (LText[11] <> 't') then
+    Exit;
+  if (LText[14] <> ':') or (LText[17] <> ':') then
+    Exit;
+  if not TryStrToInt(Copy(LText, 1, 4), LYear) then
+    Exit;
+  if not TryStrToInt(Copy(LText, 6, 2), LMonth) then
+    Exit;
+  if not TryStrToInt(Copy(LText, 9, 2), LDay) then
+    Exit;
+  if not TryStrToInt(Copy(LText, 12, 2), LHour) then
+    Exit;
+  if not TryStrToInt(Copy(LText, 15, 2), LMinute) then
+    Exit;
+  if not TryStrToInt(Copy(LText, 18, 2), LSecond) then
+    Exit;
+  if (LMonth < 1) or (LMonth > 12) or (LDay < 1) or (LDay > 31) or
+     (LHour < 0) or (LHour > 23) or (LMinute < 0) or (LMinute > 59) or
+     (LSecond < 0) or (LSecond > 59) then
+    Exit;
+
+  // Fractional seconds are dropped. The output has whole seconds.
+  LPos := 20;
+  if (LPos <= Length(LText)) and (LText[LPos] = '.') then
+  begin
+    Inc(LPos);
+    while (LPos <= Length(LText)) and CharInSet(LText[LPos], ['0'..'9']) do
+      Inc(LPos);
+  end;
+
+  LOffsetMinutes := 0;
+  if LPos <= Length(LText) then
+  begin
+    if (LText[LPos] = 'Z') or (LText[LPos] = 'z') then
+    begin
+      if LPos <> Length(LText) then
+        Exit;
+    end
+    else if (LText[LPos] = '+') or (LText[LPos] = '-') then
+    begin
+      if LText[LPos] = '+' then
+        LSign := 1
+      else
+        LSign := -1;
+      LRemain := Length(LText) - LPos;
+      LOffHour := 0;
+      LOffMinute := 0;
+      if LRemain = 5 then
+      begin
+        // ±HH:MM
+        if LText[LPos + 3] <> ':' then
+          Exit;
+        if not TryStrToInt(Copy(LText, LPos + 1, 2), LOffHour) then
+          Exit;
+        if not TryStrToInt(Copy(LText, LPos + 4, 2), LOffMinute) then
+          Exit;
+      end
+      else if LRemain = 4 then
+      begin
+        // ±HHMM
+        if not TryStrToInt(Copy(LText, LPos + 1, 2), LOffHour) then
+          Exit;
+        if not TryStrToInt(Copy(LText, LPos + 3, 2), LOffMinute) then
+          Exit;
+      end
+      else if LRemain = 2 then
+      begin
+        // ±HH
+        if not TryStrToInt(Copy(LText, LPos + 1, 2), LOffHour) then
+          Exit;
+      end
+      else
+        Exit;
+      if (LOffHour < 0) or (LOffHour > 14) or (LOffMinute < 0) or (LOffMinute > 59) then
+        Exit;
+      LOffsetMinutes := LSign * ((LOffHour * 60) + LOffMinute);
+    end
+    else
+      Exit;
+  end;
+
+  try
+    // Offset is minutes east of UTC. UTC clock = local clock - offset.
+    AUtc := IncMinute(EncodeDateTime(Word(LYear), Word(LMonth), Word(LDay),
+      Word(LHour), Word(LMinute), Word(LSecond), 0), -LOffsetMinutes);
+    Result := True;
+  except
+    Result := False;
+  end;
+end;
+
+function FormatUtcTimestamp(const ATimestamp: string): string;
+var
+  LUtc: TDateTime;
+begin
+  // SPDX 2.3 requires YYYY-MM-DDThh:mm:ssZ, and BSI TR-03183-2 recommends
+  // UTC for every SBOM timestamp. DateToISO8601(..., False) emits a local
+  // offset and fractional seconds. The invariant format settings keep the
+  // colons when the user locale has another time separator.
+  if not TryParseUtcTimestamp(ATimestamp, LUtc) then
+    LUtc := TTimeZone.Local.ToUniversalTime(Now);
+  Result := FormatDateTime('yyyy-mm-dd''T''hh:nn:ss''Z''', LUtc,
+    TFormatSettings.Invariant);
 end;
 
 end.

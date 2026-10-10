@@ -164,6 +164,27 @@ function StripDelphiScopePrefix(const AUnitName: string): string;
 function ClassifyLicence(const AValue: string; out ANormalised: string): TLicenceKind;
 
 /// <summary>
+/// Appends CycloneDX 1.6 licenses to a component. An empty value writes
+/// nothing. An SPDX id or a name is written twice, concluded then declared.
+/// An expression is one concluded entry. A URL is omitted for an expression.
+/// </summary>
+procedure AddCycloneDxLicences(AComponent: TJSONObject; const ALicence,
+  ALicenceUrl: string);
+
+/// <summary>
+/// Appends a licenses element. An empty value writes nothing.
+/// Indent is two spaces per level, the same as the XML writer.
+/// </summary>
+procedure AppendCycloneDxLicencesXml(ALines: TStrings; const ALicence,
+  ALicenceUrl: string; AIndentLevel: Integer);
+
+/// <summary>
+/// SPDX 2.3 token for a licence value. NOASSERTION when empty.
+/// A name becomes LicenseRef- followed by a sanitized id.
+/// </summary>
+function SpdxLicenceTokenFor(const ALicence: string; out AKind: TLicenceKind): string;
+
+/// <summary>
 /// Percent-encodes one purl segment. Unreserved characters are kept.
 /// A space becomes %20.
 /// </summary>
@@ -230,6 +251,7 @@ function DormantComponentWarnings(const AManifest: TComponentManifest;
 /// <summary>
 /// Copies the manifest publisher onto metadata when supplier is still empty.
 /// An explicit supplier (CLI or product.supplier) is left as it is.
+/// An explicit supplier URL is not replaced by the manifest URL.
 /// </summary>
 procedure ApplyManifestPublisher(const AManifest: TComponentManifest;
   var AMetadata: TSbomMetadata);
@@ -1133,7 +1155,8 @@ begin
   if (Trim(AMetadata.Supplier) = '') and (AManifest.SupplierName <> '') then
   begin
     AMetadata.Supplier := AManifest.SupplierName;
-    AMetadata.SupplierUrl := AManifest.SupplierUrl;
+    if Trim(AMetadata.SupplierUrl) = '' then
+      AMetadata.SupplierUrl := AManifest.SupplierUrl;
   end;
 end;
 
@@ -1153,7 +1176,8 @@ begin
   Result := True;
 end;
 
-procedure AddLicenceJson(AComponent: TJSONObject; const AEntry: TComponentEntry);
+procedure AddCycloneDxLicences(AComponent: TJSONObject; const ALicence,
+  ALicenceUrl: string);
 var
   LKind: TLicenceKind;
   LValue: string;
@@ -1172,12 +1196,14 @@ var
       LLicence.AddPair('name', LValue);
     // acknowledgement sits on the license object in bom-1.6.schema.json.
     LLicence.AddPair('acknowledgement', AAcknowledgement);
-    if AEntry.LicenceUrl <> '' then
-      LLicence.AddPair('url', AEntry.LicenceUrl);
+    if ALicenceUrl <> '' then
+      LLicence.AddPair('url', ALicenceUrl);
   end;
 
 begin
-  LKind := ClassifyLicence(AEntry.Licence, LValue);
+  if not Assigned(AComponent) then
+    Exit;
+  LKind := ClassifyLicence(ALicence, LValue);
   if LKind = lkNone then
     Exit;
 
@@ -1196,11 +1222,57 @@ begin
   end
   else
   begin
-    // The manifest row declares the licence, and it is also the distribution
+    // The row declares the licence, and it is also the distribution
     // licence we assert. Same id or name, once concluded and once declared.
     AddNamed('concluded');
     AddNamed('declared');
   end;
+end;
+
+procedure AddLicenceJson(AComponent: TJSONObject; const AEntry: TComponentEntry);
+begin
+  AddCycloneDxLicences(AComponent, AEntry.Licence, AEntry.LicenceUrl);
+end;
+
+procedure AppendCycloneDxLicencesXml(ALines: TStrings; const ALicence,
+  ALicenceUrl: string; AIndentLevel: Integer);
+var
+  LKind: TLicenceKind;
+  LValue: string;
+
+  procedure AddLine(ALevel: Integer; const AText: string);
+  begin
+    ALines.Add(StringOfChar(' ', ALevel * 2) + AText);
+  end;
+
+  procedure EmitNamed(const AAcknowledgement: string);
+  begin
+    AddLine(AIndentLevel + 1, '<license acknowledgement="' + AAcknowledgement + '">');
+    if LKind = lkSpdxId then
+      AddLine(AIndentLevel + 2, '<id>' + EscapeXml(LValue) + '</id>')
+    else
+      AddLine(AIndentLevel + 2, '<name>' + EscapeXml(LValue) + '</name>');
+    if ALicenceUrl <> '' then
+      AddLine(AIndentLevel + 2, '<url>' + EscapeXml(ALicenceUrl) + '</url>');
+    AddLine(AIndentLevel + 1, '</license>');
+  end;
+
+begin
+  if not Assigned(ALines) then
+    Exit;
+  LKind := ClassifyLicence(ALicence, LValue);
+  if LKind = lkNone then
+    Exit;
+  AddLine(AIndentLevel, '<licenses>');
+  if LKind = lkExpression then
+    AddLine(AIndentLevel + 1, '<expression acknowledgement="concluded">' +
+      EscapeXml(LValue) + '</expression>')
+  else
+  begin
+    EmitNamed('concluded');
+    EmitNamed('declared');
+  end;
+  AddLine(AIndentLevel, '</licenses>');
 end;
 
 function BuildLibraryJson(const AEntry: TComponentEntry; AIndex: Integer;
@@ -1406,37 +1478,8 @@ var
   end;
 
   procedure EmitLicence(const AEntry: TComponentEntry; ALevel: Integer);
-  var
-    LKind: TLicenceKind;
-    LValue: string;
   begin
-    LKind := ClassifyLicence(AEntry.Licence, LValue);
-    if LKind = lkNone then
-      Exit;
-    AddLine(ALevel, '<licenses>');
-    if LKind = lkExpression then
-      AddLine(ALevel + 1, '<expression acknowledgement="concluded">' +
-        EscapeXml(LValue) + '</expression>')
-    else
-    begin
-      AddLine(ALevel + 1, '<license acknowledgement="concluded">');
-      if LKind = lkSpdxId then
-        AddLine(ALevel + 2, '<id>' + EscapeXml(LValue) + '</id>')
-      else
-        AddLine(ALevel + 2, '<name>' + EscapeXml(LValue) + '</name>');
-      if AEntry.LicenceUrl <> '' then
-        AddLine(ALevel + 2, '<url>' + EscapeXml(AEntry.LicenceUrl) + '</url>');
-      AddLine(ALevel + 1, '</license>');
-      AddLine(ALevel + 1, '<license acknowledgement="declared">');
-      if LKind = lkSpdxId then
-        AddLine(ALevel + 2, '<id>' + EscapeXml(LValue) + '</id>')
-      else
-        AddLine(ALevel + 2, '<name>' + EscapeXml(LValue) + '</name>');
-      if AEntry.LicenceUrl <> '' then
-        AddLine(ALevel + 2, '<url>' + EscapeXml(AEntry.LicenceUrl) + '</url>');
-      AddLine(ALevel + 1, '</license>');
-    end;
-    AddLine(ALevel, '</licenses>');
+    AppendCycloneDxLicencesXml(ALines, AEntry.Licence, AEntry.LicenceUrl, ALevel);
   end;
 
   procedure EmitLibrary(const AEntry: TComponentEntry; AIndex: Integer; const ABomRef: string);
@@ -1603,11 +1646,11 @@ begin
     Result[I] := LPlan.Libraries[I].BomRef;
 end;
 
-function SpdxLicenceToken(const AEntry: TComponentEntry; out AKind: TLicenceKind): string;
+function SpdxLicenceTokenFor(const ALicence: string; out AKind: TLicenceKind): string;
 var
   LValue: string;
 begin
-  AKind := ClassifyLicence(AEntry.Licence, LValue);
+  AKind := ClassifyLicence(ALicence, LValue);
   case AKind of
     lkNone:
       Result := 'NOASSERTION';
@@ -1618,6 +1661,11 @@ begin
     if Result = 'LicenseRef-' then
       Result := 'LicenseRef-Custom';
   end;
+end;
+
+function SpdxLicenceToken(const AEntry: TComponentEntry; out AKind: TLicenceKind): string;
+begin
+  Result := SpdxLicenceTokenFor(AEntry.Licence, AKind);
 end;
 
 function BuildSpdxLibraryPackage(const AEntry: TComponentEntry; AIndex: Integer;

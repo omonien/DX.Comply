@@ -44,6 +44,8 @@ type
     FProductName: string;
     FProductVersion: string;
     FSupplier: string;
+    FSupplierUrl: string;
+    FLicence: string;
     FIncludePatterns: TArray<string>;
     FExcludePatterns: TArray<string>;
     FCiMode: Boolean;
@@ -119,6 +121,10 @@ type
     property ProductName: string read FProductName;
     property ProductVersion: string read FProductVersion;
     property Supplier: string read FSupplier;
+    /// <summary>Supplier contact URL from --supplier-url.</summary>
+    property SupplierUrl: string read FSupplierUrl;
+    /// <summary>Distribution licence of the product from --licence.</summary>
+    property Licence: string read FLicence;
     property IncludePatterns: TArray<string> read FIncludePatterns;
     property ExcludePatterns: TArray<string> read FExcludePatterns;
     property CiMode: Boolean read FCiMode;
@@ -378,6 +384,16 @@ begin
         FSupplier := LValue;
         Include(FExplicitOverrides, scoSupplier);
       end
+      else if LKey = 'supplier-url' then
+      begin
+        FSupplierUrl := Trim(LValue);
+        Include(FExplicitOverrides, scoSupplierUrl);
+      end
+      else if LKey = 'licence' then
+      begin
+        FLicence := Trim(LValue);
+        Include(FExplicitOverrides, scoLicence);
+      end
       else if LKey = 'include' then
       begin
         AppendPattern(FIncludePatterns, LValue);
@@ -507,6 +523,12 @@ begin
   Writeln('  --product=<name>              Product name override');
   Writeln('  --version=<version>           Product version override');
   Writeln('  --supplier=<name>             Supplier/company name');
+  Writeln('  --supplier-url=<url>          Supplier contact URL.');
+  Writeln('                                Used when the supplier is not an email.');
+  Writeln('                                File key: product.supplierUrl');
+  Writeln('  --licence=<SPDX expression>   Distribution licence of the product.');
+  Writeln('                                SPDX identifier, expression, or a name.');
+  Writeln('                                File key: product.licence');
   Writeln('  --sbom-creator=<email-or-url> SBOM creator contact (BSI TR-03183-2).');
   Writeln('                                An email address or an http(s) URL.');
   Writeln('                                Omitted when you do not set it.');
@@ -557,7 +579,7 @@ end;
 
 procedure TCliOptions.PrintVersion;
 begin
-  Writeln('DX.Comply v1.3.0');
+  Writeln('DX.Comply v2.0.0');
 end;
 
 // ---------------------------------------------------------------------------
@@ -586,6 +608,8 @@ begin
   Result.ProductName     := FProductName;
   Result.ProductVersion  := FProductVersion;
   Result.Supplier        := FSupplier;
+  Result.SupplierUrl     := FSupplierUrl;
+  Result.Licence         := FLicence;
   Result.SbomCreator     := FSbomCreator;
   Result.IncludePatterns             := FIncludePatterns;
   Result.ExcludePatterns             := FExcludePatterns;

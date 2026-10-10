@@ -132,6 +132,27 @@ type
     /// <summary>--platform and --config-name mark the target as explicitly set.</summary>
     [Test]
     procedure Parse_ConfigName_MarksTargetExplicit;
+
+    /// <summary>
+    /// --supplier-url and --licence are copied into the engine configuration
+    /// and marked explicit. Surrounding spaces are trimmed.
+    /// </summary>
+    [Test]
+    procedure Parse_SupplierUrlAndLicence_AreRecorded;
+
+    /// <summary>
+    /// --supplier-url and --licence without '=' fail like --supplier.
+    /// An empty value after '=' is accepted and stays explicit.
+    /// </summary>
+    [Test]
+    procedure Parse_SupplierUrlAndLicence_WithoutValue_MatchSupplier;
+
+    /// <summary>
+    /// product.supplierUrl and product.licence stay when the flags are omitted.
+    /// An explicit flag, including an empty one, replaces the file.
+    /// </summary>
+    [Test]
+    procedure Parse_SupplierUrlAndLicence_WinOverConfigFile;
   end;
 
 implementation
@@ -495,6 +516,148 @@ begin
       'An explicit Release must still count as set by the user');
   finally
     LOptions.Free;
+  end;
+end;
+
+procedure TCliOptionsTests.Parse_SupplierUrlAndLicence_AreRecorded;
+var
+  LOptions: TCliOptions;
+  LConfig: TSbomConfig;
+begin
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsTrue(LOptions.Parse([
+      '--project=App.dproj',
+      '--supplier-url= https://acme.example ',
+      '--licence= Apache-2.0 OR MIT ']));
+    Assert.AreEqual('https://acme.example', LOptions.SupplierUrl);
+    Assert.AreEqual('Apache-2.0 OR MIT', LOptions.Licence);
+    LConfig := LOptions.ToSbomConfig;
+    Assert.AreEqual('https://acme.example', LConfig.SupplierUrl);
+    Assert.AreEqual('Apache-2.0 OR MIT', LConfig.Licence);
+    Assert.IsTrue(scoSupplierUrl in LConfig.ExplicitOverrides);
+    Assert.IsTrue(scoLicence in LConfig.ExplicitOverrides);
+    Assert.IsFalse(scoSupplier in LConfig.ExplicitOverrides,
+      '--supplier was not passed, so the file may still set the supplier name');
+  finally
+    LOptions.Free;
+  end;
+end;
+
+procedure TCliOptionsTests.Parse_SupplierUrlAndLicence_WithoutValue_MatchSupplier;
+var
+  LOptions: TCliOptions;
+  LConfig: TSbomConfig;
+  LSupplierError: string;
+begin
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsFalse(LOptions.Parse(['--project=App.dproj', '--supplier']),
+      '--supplier without a value must fail');
+    LSupplierError := LOptions.ParseError;
+    Assert.AreEqual('Unknown option: --supplier', LSupplierError);
+  finally
+    LOptions.Free;
+  end;
+
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsFalse(LOptions.Parse(['--project=App.dproj', '--supplier-url']));
+    Assert.AreEqual(StringReplace(LSupplierError, '--supplier', '--supplier-url', []),
+      LOptions.ParseError);
+  finally
+    LOptions.Free;
+  end;
+
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsFalse(LOptions.Parse(['--project=App.dproj', '--licence']));
+    Assert.AreEqual(StringReplace(LSupplierError, '--supplier', '--licence', []),
+      LOptions.ParseError);
+  finally
+    LOptions.Free;
+  end;
+
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsTrue(LOptions.Parse([
+      '--project=App.dproj',
+      '--supplier=',
+      '--supplier-url=',
+      '--licence=']),
+      'An empty value after = must parse, the same as --supplier=');
+    LConfig := LOptions.ToSbomConfig;
+    Assert.AreEqual('', LConfig.Supplier);
+    Assert.AreEqual('', LConfig.SupplierUrl);
+    Assert.AreEqual('', LConfig.Licence);
+    Assert.IsTrue(scoSupplier in LConfig.ExplicitOverrides);
+    Assert.IsTrue(scoSupplierUrl in LConfig.ExplicitOverrides);
+    Assert.IsTrue(scoLicence in LConfig.ExplicitOverrides);
+  finally
+    LOptions.Free;
+  end;
+end;
+
+procedure TCliOptionsTests.Parse_SupplierUrlAndLicence_WinOverConfigFile;
+var
+  LOptions: TCliOptions;
+  LGen: TDxComplyGenerator;
+  LPath: string;
+begin
+  LPath := TPath.Combine(TPath.GetTempPath, 'dxcomply-cli-supplier-licence.json');
+  TFile.WriteAllText(LPath,
+    '{"product":{"supplierUrl":"https://file.example","licence":"Apache-2.0"}}',
+    TEncoding.UTF8);
+  LOptions := nil;
+  LGen := nil;
+  try
+    LOptions := TCliOptions.Create;
+    Assert.IsTrue(LOptions.Parse(['--project=App.dproj']));
+    LGen := TDxComplyGenerator.Create(LOptions.ToSbomConfig);
+    LGen.GenerateFromConfig('missing.dproj', LPath);
+    Assert.AreEqual('https://file.example', LGen.Config.SupplierUrl,
+      'An omitted --supplier-url keeps product.supplierUrl');
+    Assert.AreEqual('Apache-2.0', LGen.Config.Licence,
+      'An omitted --licence keeps product.licence');
+    Assert.IsFalse(scoSupplierUrl in LGen.Config.ExplicitOverrides);
+    Assert.IsFalse(scoLicence in LGen.Config.ExplicitOverrides);
+    LGen.Free;
+    LGen := nil;
+    LOptions.Free;
+    LOptions := nil;
+
+    LOptions := TCliOptions.Create;
+    Assert.IsTrue(LOptions.Parse([
+      '--project=App.dproj',
+      '--supplier-url=https://cli.example',
+      '--licence=MIT']));
+    LGen := TDxComplyGenerator.Create(LOptions.ToSbomConfig);
+    LGen.GenerateFromConfig('missing.dproj', LPath);
+    Assert.AreEqual('https://cli.example', LGen.Config.SupplierUrl);
+    Assert.AreEqual('MIT', LGen.Config.Licence);
+    LGen.Free;
+    LGen := nil;
+    LOptions.Free;
+    LOptions := nil;
+
+    LOptions := TCliOptions.Create;
+    Assert.IsTrue(LOptions.Parse([
+      '--project=App.dproj',
+      '--supplier-url=',
+      '--licence=']));
+    LGen := TDxComplyGenerator.Create(LOptions.ToSbomConfig);
+    LGen.GenerateFromConfig('missing.dproj', LPath);
+    Assert.AreEqual('', LGen.Config.SupplierUrl,
+      'An empty --supplier-url replaces the file');
+    Assert.AreEqual('', LGen.Config.Licence,
+      'An empty --licence replaces the file');
+    Assert.IsTrue(scoSupplierUrl in LGen.Config.ExplicitOverrides);
+    Assert.IsTrue(scoLicence in LGen.Config.ExplicitOverrides);
+  finally
+    LGen.Free;
+    LOptions.Free;
+    if TFile.Exists(LPath) then
+      TFile.Delete(LPath);
   end;
 end;
 

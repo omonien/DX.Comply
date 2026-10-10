@@ -73,7 +73,9 @@ type
     scoReport,
     scoScanDirs,
     scoScanTree,
-    scoSbomCreator
+    scoSbomCreator,
+    scoSupplierUrl,
+    scoLicence
   );
   /// <summary>Set of TSbomConfig fields that were set explicitly.</summary>
   TSbomConfigOverrides = set of TSbomConfigOverride;
@@ -96,6 +98,18 @@ type
     ProductVersion: string;
     /// <summary>Supplier name.</summary>
     Supplier: string;
+    /// <summary>
+    /// Optional supplier contact URL from --supplier-url or product.supplierUrl.
+    /// Written as supplier.url. Empty means the writers omit the URL.
+    /// An explicit value is not replaced by the component manifest.
+    /// </summary>
+    SupplierUrl: string;
+    /// <summary>
+    /// Distribution licence of the primary component, from --licence or
+    /// product.licence. An SPDX identifier, an SPDX expression, or a plain
+    /// name. Empty means the writers omit it.
+    /// </summary>
+    Licence: string;
     /// <summary>
     /// Optional SBOM creator contact from --sbom-creator or sbomCreator.
     /// An email address or an http(s) URL. Empty means the field is omitted.
@@ -332,6 +346,7 @@ implementation
 
 uses
   DX.Comply.ComponentManifest,
+  DX.Comply.CraChecks,
   DX.Comply.LegacyProject,
   DX.Comply.Report.Support,
   DX.Comply.VersionInfo;
@@ -355,6 +370,8 @@ begin
   Result.ProductName := '';
   Result.ProductVersion := '';
   Result.Supplier := '';
+  Result.SupplierUrl := '';
+  Result.Licence := '';
   Result.SbomCreator := '';
   Result.ManifestFile := '';
   Result.ManifestFileExplicit := False;
@@ -1188,6 +1205,10 @@ begin
             Result.ProductVersion := LProduct.GetValue<string>('version');
           if LProduct.GetValue('supplier') <> nil then
             Result.Supplier := LProduct.GetValue<string>('supplier');
+          if LProduct.GetValue('supplierUrl') <> nil then
+            Result.SupplierUrl := Trim(LProduct.GetValue<string>('supplierUrl'));
+          if LProduct.GetValue('licence') <> nil then
+            Result.Licence := Trim(LProduct.GetValue<string>('licence'));
         end;
 
         // Deep Evidence
@@ -1373,9 +1394,10 @@ begin
   Result.ProductVersion := AConfig.ProductVersion;
   Result.Supplier := AConfig.Supplier;
   Result.SbomCreator := Trim(AConfig.SbomCreator);
-  Result.SupplierUrl := '';
+  Result.SupplierUrl := Trim(AConfig.SupplierUrl);
+  Result.Licence := Trim(AConfig.Licence);
   Result.ComponentManifestJson := '';
-  Result.Timestamp := DateToISO8601(Now, False);
+  Result.Timestamp := FormatUtcTimestamp('');
   Result.ToolName := 'DX.Comply';
   Result.ToolVersion := GetDxComplyToolVersion;
   LBomProperties := TList<TSbomProperty>.Create;
@@ -1611,6 +1633,9 @@ var
   LManifestError: string;
   LDormantWarnings: TArray<string>;
   LWarningIndex: Integer;
+  LNote: string;
+  LCraWarnings: TList<string>;
+  LCraText: string;
 begin
   Result := False;
 
@@ -1659,6 +1684,13 @@ begin
   end;
 
   try
+    // Output-directory variant notes. Not warnings, so the CLI prints them
+    // only with --verbose.
+    if Assigned(LProjectInfo.ProgressNotes) then
+      for LNote in LProjectInfo.ProgressNotes do
+        if Trim(LNote) <> '' then
+          DoProgress(LNote, 11);
+
     ReportWarnings(LProjectInfo.Warnings, LReportedWarnings, 12);
 
     // Legacy projects are not compiled here. The MAP file must already sit
@@ -1808,6 +1840,17 @@ begin
         LMetadata.ComponentManifestJson := LManifestJson;
       end;
 
+      // Header gaps are warnings. The SBOM is still written.
+      LCraWarnings := TList<string>.Create;
+      try
+        for LCraText in BuildCraMetadataWarnings(FConfig, LMetadata, LProjectInfo,
+          LArtefacts) do
+          LCraWarnings.Add(LCraText);
+        ReportWarnings(LCraWarnings, LReportedWarnings, 69);
+      finally
+        LCraWarnings.Free;
+      end;
+
       Result := FSbomWriter.Write(LOutputPath, LMetadata, LArtefacts, LProjectInfo);
 
       if Result then
@@ -1884,6 +1927,10 @@ begin
     Result.ProductVersion := ACaller.ProductVersion;
   if scoSupplier in ACaller.ExplicitOverrides then
     Result.Supplier := ACaller.Supplier;
+  if scoSupplierUrl in ACaller.ExplicitOverrides then
+    Result.SupplierUrl := ACaller.SupplierUrl;
+  if scoLicence in ACaller.ExplicitOverrides then
+    Result.Licence := ACaller.Licence;
   if scoSbomCreator in ACaller.ExplicitOverrides then
     Result.SbomCreator := ACaller.SbomCreator;
   if scoIncludePatterns in ACaller.ExplicitOverrides then

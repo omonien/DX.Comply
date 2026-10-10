@@ -25,6 +25,8 @@ uses
   System.Classes,
   System.JSON,
   System.Generics.Collections,
+  System.DateUtils,
+  System.RegularExpressions,
   Winapi.Windows,
   DUnitX.TestFramework,
   DX.Comply.CycloneDx.Writer,
@@ -89,6 +91,21 @@ type
     /// <summary>metadata.timestamp must be present in the output JSON.</summary>
     [Test]
     procedure Write_MetadataContainsTimestamp;
+
+    /// <summary>An offset timestamp is written as UTC with a Z suffix.</summary>
+    [Test]
+    procedure Write_OffsetTimestamp_IsUtcZ;
+
+    /// <summary>
+    /// An empty timestamp becomes the current UTC time with a Z suffix.
+    /// The check compares UTC with UTC, so the machine time zone does not matter.
+    /// </summary>
+    [Test]
+    procedure Write_EmptyTimestamp_IsCurrentUtcZ;
+
+    /// <summary>FormatUtcTimestamp converts offsets and drops fractions.</summary>
+    [Test]
+    procedure FormatUtcTimestamp_ConvertsOffsets;
 
     /// <summary>metadata.tools must be present in the output JSON.</summary>
     [Test]
@@ -170,6 +187,13 @@ type
     /// <summary>An explicit metadata tool version must be written as supplied.</summary>
     [Test]
     procedure Write_ToolVersion_UsesMetadataOverride;
+
+    /// <summary>
+    /// The product licence is metadata.component.licenses.
+    /// An empty licence writes no licenses element.
+    /// </summary>
+    [Test]
+    procedure Write_RootLicence_OnMetadataComponent;
   end;
 
 implementation
@@ -188,6 +212,8 @@ begin
   FMetadata.ProductName    := 'TestApp';
   FMetadata.ProductVersion := '1.0.0';
   FMetadata.Supplier       := 'Test Supplier';
+  FMetadata.SupplierUrl    := '';
+  FMetadata.Licence        := '';
   FMetadata.Timestamp      := '2026-01-01T00:00:00';
   FMetadata.ToolName       := 'DX.Comply';
   FMetadata.ToolVersion    := '';
@@ -399,13 +425,64 @@ begin
     Assert.IsNotNull(LMeta, 'metadata object must be present');
     Assert.IsNotNull(LMeta.GetValue('timestamp'),
       'metadata.timestamp must be present');
-    // CycloneDX keeps the supplied timestamp, including offset form.
-    // SPDX is the format that must be rewritten to UTC Z (issue #40).
-    Assert.AreEqual('2026-01-01T00:00:00', LMeta.GetValue<string>('timestamp'),
-      'CycloneDX must pass metadata.timestamp through unchanged');
+    // A value without a zone is read as UTC and written with a Z suffix,
+    // the same as SPDX creationInfo.created.
+    Assert.AreEqual('2026-01-01T00:00:00Z', LMeta.GetValue<string>('timestamp'),
+      'metadata.timestamp must be UTC with a Z suffix');
   finally
     LJson.Free;
   end;
+end;
+
+procedure TCycloneDxWriterTests.Write_OffsetTimestamp_IsUtcZ;
+var
+  LJson, LMeta: TJSONObject;
+begin
+  FMetadata.Timestamp := '2026-10-10T10:31:18.250+02:00';
+  FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo);
+
+  LJson := LoadOutputJson;
+  Assert.IsNotNull(LJson);
+  try
+    LMeta := LJson.GetValue('metadata') as TJSONObject;
+    Assert.AreEqual('2026-10-10T08:31:18Z', LMeta.GetValue<string>('timestamp'));
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TCycloneDxWriterTests.Write_EmptyTimestamp_IsCurrentUtcZ;
+var
+  LJson, LMeta: TJSONObject;
+  LValue: string;
+  LWritten, LNowUtc: TDateTime;
+begin
+  FMetadata.Timestamp := '';
+  FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo);
+
+  LJson := LoadOutputJson;
+  Assert.IsNotNull(LJson);
+  try
+    LMeta := LJson.GetValue('metadata') as TJSONObject;
+    LValue := LMeta.GetValue<string>('timestamp');
+    Assert.IsTrue(TRegEx.IsMatch(LValue, '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$'),
+      'metadata.timestamp must be YYYY-MM-DDThh:mm:ssZ, got ' + LValue);
+    Assert.IsTrue(TryParseUtcTimestamp(LValue, LWritten), 'timestamp must parse');
+    LNowUtc := TTimeZone.Local.ToUniversalTime(Now);
+    Assert.IsTrue(Abs(MinutesBetween(LNowUtc, LWritten)) <= 5,
+      'timestamp must be the current UTC time, got ' + LValue);
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TCycloneDxWriterTests.FormatUtcTimestamp_ConvertsOffsets;
+begin
+  Assert.AreEqual('2026-05-18T04:27:39Z', FormatUtcTimestamp('2026-05-18T14:27:39.895+10:00'));
+  Assert.AreEqual('2025-12-31T15:30:00Z', FormatUtcTimestamp('2026-01-01T01:30:00+10:00'));
+  Assert.AreEqual('2026-02-24T15:00:00Z', FormatUtcTimestamp('2026-02-24T10:00:00-05:00'));
+  Assert.AreEqual('2026-02-24T10:00:00Z', FormatUtcTimestamp('2026-02-24T10:00:00.895Z'));
+  Assert.AreEqual('2026-01-01T00:00:00Z', FormatUtcTimestamp('2026-01-01T00:00:00'));
 end;
 
 procedure TCycloneDxWriterTests.Write_MetadataContainsToolInfo;
@@ -883,6 +960,48 @@ begin
     LTool := LComponents.Items[0] as TJSONObject;
     Assert.AreEqual('9.9.9-meta', LTool.GetValue<string>('version'),
       'An explicit metadata tool version must be written unchanged');
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TCycloneDxWriterTests.Write_RootLicence_OnMetadataComponent;
+var
+  LJson, LMetadata, LComponent, LLicense: TJSONObject;
+  LLicences: TJSONArray;
+begin
+  FMetadata.ProductName := 'TestApp';
+  FMetadata.Licence := 'MIT';
+  Assert.IsTrue(FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LJson := LoadOutputJson;
+  Assert.IsNotNull(LJson);
+  try
+    LMetadata := LJson.GetValue('metadata') as TJSONObject;
+    Assert.IsNotNull(LMetadata, 'metadata must be present');
+    LComponent := LMetadata.GetValue('component') as TJSONObject;
+    Assert.IsNotNull(LComponent, 'metadata.component must be present');
+    Assert.AreEqual('TestApp', LComponent.GetValue<string>('name'));
+    LLicences := LComponent.GetValue('licenses') as TJSONArray;
+    Assert.IsNotNull(LLicences, 'metadata.component.licenses must be present');
+    Assert.AreEqual(2, Integer(LLicences.Count));
+    LLicense := (LLicences.Items[0] as TJSONObject).GetValue('license') as TJSONObject;
+    Assert.AreEqual('MIT', LLicense.GetValue<string>('id'));
+    Assert.AreEqual('concluded', LLicense.GetValue<string>('acknowledgement'));
+    LLicense := (LLicences.Items[1] as TJSONObject).GetValue('license') as TJSONObject;
+    Assert.AreEqual('MIT', LLicense.GetValue<string>('id'));
+    Assert.AreEqual('declared', LLicense.GetValue<string>('acknowledgement'));
+  finally
+    LJson.Free;
+  end;
+
+  FMetadata.Licence := '';
+  Assert.IsTrue(FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LJson := LoadOutputJson;
+  Assert.IsNotNull(LJson);
+  try
+    LComponent := (LJson.GetValue('metadata') as TJSONObject).GetValue('component') as TJSONObject;
+    Assert.IsNull(LComponent.GetValue('licenses'),
+      'An empty licence writes no licenses element');
   finally
     LJson.Free;
   end;

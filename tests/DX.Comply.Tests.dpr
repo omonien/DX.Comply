@@ -49,7 +49,8 @@ uses
   DX.Comply.Tests.BsiTr03183 in 'DX.Comply.Tests.BsiTr03183.pas',
   DX.Comply.Tests.UsesClauseParser in 'DX.Comply.Tests.UsesClauseParser.pas',
   DX.Comply.Tests.DependencyGraph in 'DX.Comply.Tests.DependencyGraph.pas',
-  DX.Comply.Tests.VersionInfo in 'DX.Comply.Tests.VersionInfo.pas';
+  DX.Comply.Tests.VersionInfo in 'DX.Comply.Tests.VersionInfo.pas',
+  DX.Comply.Tests.CraChecks in 'DX.Comply.Tests.CraChecks.pas';
 
 var
   LRunner: ITestRunner;

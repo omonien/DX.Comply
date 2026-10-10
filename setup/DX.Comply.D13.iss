@@ -3,7 +3,11 @@
 ; and registers the IDE package in the Delphi 13 Known Packages.
 
 #define MyAppName "DX.Comply"
-#define MyAppVersion "1.3.0"
+; The Forge passes /DMyAppVersion=2.0.0. An unconditional #define would override that.
+; 0.0.0 is only the fallback when the switch is absent.
+#ifndef MyAppVersion
+#define MyAppVersion "0.0.0"
+#endif
 #define MyAppPublisher "Olaf Monien"
 #define MyAppURL "https://github.com/omonien/DX.Comply"
 #define BDSVersion "37.0"
@@ -15,6 +19,7 @@
 AppId={{F4A7E2B1-8C3D-4E5F-9A1B-2C3D4E5F6A7B}
 AppName={#MyAppName} for {#DelphiName}
 AppVersion={#MyAppVersion}
+VersionInfoVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 DefaultDirName={localappdata}\{#MyAppName}

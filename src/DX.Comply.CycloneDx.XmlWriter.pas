@@ -164,10 +164,8 @@ procedure TCycloneDxXmlWriter.BuildMetadata(const AMetadata: TSbomMetadata;
 begin
   OpenTag('metadata');
 
-  if AMetadata.Timestamp <> '' then
-    AddElement('timestamp', AMetadata.Timestamp)
-  else
-    AddElement('timestamp', DateToISO8601(Now, False));
+  // Timestamp in UTC with a Z suffix (BSI TR-03183-2 section 5.2.1).
+  AddElement('timestamp', FormatUtcTimestamp(AMetadata.Timestamp));
 
   // CycloneDX 1.6 metadata sequence: timestamp, lifecycles, tools, authors,
   // component, manufacturer, manufacture, supplier, licenses, properties.
@@ -207,6 +205,8 @@ begin
     AddElement('version', AMetadata.ProductVersion)
   else if AProjectInfo.Version <> '' then
     AddElement('version', AProjectInfo.Version);
+  // bom-1.6 component order: version, then licenses, then properties.
+  AppendCycloneDxLicencesXml(FLines, AMetadata.Licence, '', FIndentLevel);
   AddPropertyElements(AMetadata.ComponentProperties);
   CloseTag('component');
 

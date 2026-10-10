@@ -174,7 +174,7 @@ begin
   FMetadata := Default(TSbomMetadata);
   FMetadata.Timestamp := '2026-08-20T12:00:00Z';
   FMetadata.ToolName := 'DX.Comply';
-  FMetadata.ToolVersion := '1.3.0';
+  FMetadata.ToolVersion := '2.0.0';
   FProjectInfo := TProjectInfo.Create;
   FProjectInfo.ProjectName := 'TestApp';
   FProjectInfo.Version := '1.0.0';

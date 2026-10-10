@@ -347,7 +347,7 @@ const
     '<metadata>' +
     '<timestamp>2026-02-24T10:00:00+01:00</timestamp>' +
     '<properties><property name="dx:profile">cra</property></properties>' +
-    '<tools><tool><name>DX.Comply</name><version>1.3.0.0</version></tool></tools>' +
+    '<tools><tool><name>DX.Comply</name><version>2.0.0.0</version></tool></tools>' +
     '</metadata>' +
     '<components></components>' +
     '</bom>';
@@ -394,10 +394,10 @@ const
     '<metadata>' +
     '<timestamp>2026-02-24T10:00:00+01:00</timestamp>' +
     '<tools><tool><vendor>Olaf Monien</vendor><name>DX.Comply</name>' +
-    '<version>1.3.0.0</version></tool></tools>' +
+    '<version>2.0.0.0</version></tool></tools>' +
     '<component type="application" bom-ref="App">' +
     '<supplier><name>Acme</name></supplier>' +
-    '<name>App</name><version>1.3.0.0</version>' +
+    '<name>App</name><version>2.0.0.0</version>' +
     '</component>' +
     '<properties><property name="dx:profile">cra</property></properties>' +
     '</metadata>' +

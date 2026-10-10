@@ -141,6 +141,13 @@ type
     /// </summary>
     [Test]
     procedure Write_Package_LicenseAndSupplier;
+
+    /// <summary>
+    /// The product licence is written on the built program.
+    /// Another package stays NOASSERTION.
+    /// </summary>
+    [Test]
+    procedure Write_RootLicence_OnDeliverablePackage;
   end;
 
 implementation
@@ -158,6 +165,8 @@ begin
   FMetadata.ProductName := 'TestProduct';
   FMetadata.ProductVersion := '1.0.0';
   FMetadata.Supplier := 'Test GmbH';
+  FMetadata.SupplierUrl := '';
+  FMetadata.Licence := '';
   FMetadata.Timestamp := '2026-02-24T10:00:00+01:00';
   FMetadata.ToolName := 'DX.Comply';
   FMetadata.ToolVersion := '';
@@ -789,6 +798,48 @@ begin
     LPackage := PackageAt(LJson, 0);
     Assert.AreEqual('NOASSERTION', LPackage.GetValue<string>('supplier'),
       'An empty supplier stays NOASSERTION');
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TSpdxWriterTests.Write_RootLicence_OnDeliverablePackage;
+var
+  LJson, LPackage: TJSONObject;
+
+  function PackageNamed(const AJson: TJSONObject; const AName: string): TJSONObject;
+  var
+    LPackages: TJSONArray;
+    I: Integer;
+  begin
+    Result := nil;
+    LPackages := AJson.GetValue('packages') as TJSONArray;
+    Assert.IsNotNull(LPackages, 'packages must be present');
+    for I := 0 to LPackages.Count - 1 do
+      if SameText(TJSONObject(LPackages.Items[I]).GetValue<string>('name'), AName) then
+        Exit(TJSONObject(LPackages.Items[I]));
+  end;
+
+begin
+  FProjectInfo.ProjectName := 'TestProject';
+  FMetadata.Licence := 'Apache-2.0';
+  FArtefacts.Add(MakeArtefact('helper.dll', 'library', '', 100));
+  FArtefacts.Add(MakeArtefact('TestProject.exe', 'application', '', 200));
+  Assert.IsTrue(FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LJson := LoadOutputJson;
+  Assert.IsNotNull(LJson);
+  try
+    LPackage := PackageNamed(LJson, 'TestProject.exe');
+    Assert.IsNotNull(LPackage, 'The built program must be a package');
+    Assert.AreEqual('Apache-2.0', LPackage.GetValue<string>('licenseConcluded'));
+    Assert.AreEqual('Apache-2.0', LPackage.GetValue<string>('licenseDeclared'));
+
+    LPackage := PackageNamed(LJson, 'helper.dll');
+    Assert.IsNotNull(LPackage, 'The other binary must stay a package');
+    Assert.AreEqual('NOASSERTION', LPackage.GetValue<string>('licenseConcluded'));
+    Assert.AreEqual('NOASSERTION', LPackage.GetValue<string>('licenseDeclared'));
+    Assert.IsNull(LJson.GetValue('hasExtractedLicensingInfos'),
+      'An SPDX identifier needs no extracted licensing info');
   finally
     LJson.Free;
   end;

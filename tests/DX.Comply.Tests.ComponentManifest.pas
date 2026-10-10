@@ -263,7 +263,7 @@ begin
   FMetadata.ProductVersion := '1.0.0';
   FMetadata.Timestamp := '2026-01-01T00:00:00Z';
   FMetadata.ToolName := 'DX.Comply';
-  FMetadata.ToolVersion := '1.3.0.0';
+  FMetadata.ToolVersion := '2.0.0.0';
   FProjectInfo := TProjectInfo.Create;
   FProjectInfo.ProjectName := 'TestApp';
   FProjectInfo.Version := '1.0.0';
@@ -598,6 +598,13 @@ begin
   Assert.AreEqual('From CLI', LMetadata.Supplier);
   Assert.AreEqual('', LMetadata.SupplierUrl,
     'A manifest URL must not be attached to a different supplier name');
+
+  LMetadata := Default(TSbomMetadata);
+  LMetadata.SupplierUrl := 'https://cli.example';
+  ApplyManifestPublisher(LManifest, LMetadata);
+  Assert.AreEqual('Acme GmbH', LMetadata.Supplier);
+  Assert.AreEqual('https://cli.example', LMetadata.SupplierUrl,
+    'An explicit supplier URL stays when the manifest fills an empty name');
 end;
 
 procedure TComponentManifestTests.Resolve_RelativePath_UsesProjectDir;
