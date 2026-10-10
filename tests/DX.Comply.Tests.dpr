@@ -50,7 +50,8 @@ uses
   DX.Comply.Tests.UsesClauseParser in 'DX.Comply.Tests.UsesClauseParser.pas',
   DX.Comply.Tests.DependencyGraph in 'DX.Comply.Tests.DependencyGraph.pas',
   DX.Comply.Tests.VersionInfo in 'DX.Comply.Tests.VersionInfo.pas',
-  DX.Comply.Tests.CraChecks in 'DX.Comply.Tests.CraChecks.pas';
+  DX.Comply.Tests.CraChecks in 'DX.Comply.Tests.CraChecks.pas',
+  DX.Comply.Tests.LibrarySource in 'DX.Comply.Tests.LibrarySource.pas';
 
 var
   LRunner: ITestRunner;

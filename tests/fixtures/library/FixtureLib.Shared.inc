@@ -1,0 +1,2 @@
+const
+  FixtureLibShared = 1;

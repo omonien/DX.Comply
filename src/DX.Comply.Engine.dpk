@@ -59,6 +59,7 @@ contains
   DX.Comply.Schema.Validator in 'DX.Comply.Schema.Validator.pas',
   DX.Comply.ComponentManifest in 'DX.Comply.ComponentManifest.pas',
   DX.Comply.CraChecks in 'DX.Comply.CraChecks.pas',
+  DX.Comply.LibrarySource in 'DX.Comply.LibrarySource.pas',
   DX.Comply.Engine in 'DX.Comply.Engine.pas';
 
 end.

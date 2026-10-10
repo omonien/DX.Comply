@@ -75,7 +75,11 @@ type
     scoScanTree,
     scoSbomCreator,
     scoSupplierUrl,
-    scoLicence
+    scoLicence,
+    scoLibraryMode,
+    scoSourceDirs,
+    scoPurl,
+    scoRepoUrl
   );
   /// <summary>Set of TSbomConfig fields that were set explicitly.</summary>
   TSbomConfigOverrides = set of TSbomConfigOverride;
@@ -188,6 +192,27 @@ type
     /// scans. Empty uses the Borland registry key and the DELPHI variable.
     /// </summary>
     Delphi7Root: string;
+    /// <summary>
+    /// When True, write an SBOM for a source release. There is no build,
+    /// no MAP file, and no binary scan. Default is False (build mode).
+    /// </summary>
+    LibraryMode: Boolean;
+    /// <summary>
+    /// Directories walked for library source files. Relative paths are
+    /// resolved from the project directory, or from the current directory
+    /// when there is no project.
+    /// </summary>
+    SourceDirs: TArray<string>;
+    /// <summary>
+    /// Package URL of the root component. Empty means derive one from
+    /// RepoUrl when that URL is a GitHub repository and a version is known.
+    /// </summary>
+    Purl: string;
+    /// <summary>
+    /// Repository URL. A https://github.com/owner/repo URL, with an optional
+    /// trailing .git or slash, can supply the root purl.
+    /// </summary>
+    RepoUrl: string;
     /// <summary>Creates a new TSbomConfig with default values.</summary>
     class function Default: TSbomConfig; static;
     /// <summary>
@@ -272,6 +297,11 @@ type
     /// Copies include/exclude warnings from the most recent file scan.
     /// </summary>
     procedure RememberPatternWarnings(const AWarnings: TList<string>);
+    /// <summary>
+    /// Writes an SBOM for a library source release. Build mode is not used.
+    /// </summary>
+    function GenerateLibrary(const AProjectPath, AOutputPath: string;
+      AFormat: TSbomFormat): Boolean;
   public
     /// <summary>
     /// Scans the supplied .pas files for external DLL references. String
@@ -348,6 +378,7 @@ uses
   DX.Comply.ComponentManifest,
   DX.Comply.CraChecks,
   DX.Comply.LegacyProject,
+  DX.Comply.LibrarySource,
   DX.Comply.Report.Support,
   DX.Comply.VersionInfo;
 
@@ -384,6 +415,10 @@ begin
   Result.ScanTree := False;
   SetLength(Result.ScanDirs, 0);
   Result.Delphi7Root := '';
+  Result.LibraryMode := False;
+  SetLength(Result.SourceDirs, 0);
+  Result.Purl := '';
+  Result.RepoUrl := '';
 end;
 
 
@@ -1209,6 +1244,10 @@ begin
             Result.SupplierUrl := Trim(LProduct.GetValue<string>('supplierUrl'));
           if LProduct.GetValue('licence') <> nil then
             Result.Licence := Trim(LProduct.GetValue<string>('licence'));
+          if LProduct.GetValue('purl') <> nil then
+            Result.Purl := Trim(LProduct.GetValue<string>('purl'));
+          if LProduct.GetValue('repoUrl') <> nil then
+            Result.RepoUrl := Trim(LProduct.GetValue<string>('repoUrl'));
         end;
 
         // Deep Evidence
@@ -1296,6 +1335,17 @@ begin
 
         if LJson.GetValue('scanTree') <> nil then
           Result.ScanTree := LJson.GetValue<Boolean>('scanTree');
+
+        if LJson.GetValue('library') <> nil then
+          Result.LibraryMode := LJson.GetValue<Boolean>('library');
+
+        if LJson.GetValue('sourceDirs') is TJSONArray then
+        begin
+          LArray := LJson.GetValue('sourceDirs') as TJSONArray;
+          SetLength(Result.SourceDirs, LArray.Count);
+          for I := 0 to LArray.Count - 1 do
+            Result.SourceDirs[I] := LArray.Items[I].Value;
+        end;
 
         // Component manifest. A non-string value is ignored here; the IDE
         // reader reports that case. Relative paths stay relative until
@@ -1394,6 +1444,14 @@ begin
   Result.ProductVersion := AConfig.ProductVersion;
   Result.Supplier := AConfig.Supplier;
   Result.SbomCreator := Trim(AConfig.SbomCreator);
+  // Build mode keeps the root component as an application and uses the
+  // uses-graph compositions. These fields stay clear so a library run
+  // cannot leak into a later build through an unassigned record.
+  Result.ComponentType := '';
+  Result.Purl := '';
+  Result.LibraryCompositions := False;
+  Result.LibraryFilesComplete := False;
+  Result.LibraryRequiresDeclared := False;
   Result.SupplierUrl := Trim(AConfig.SupplierUrl);
   Result.Licence := Trim(AConfig.Licence);
   Result.ComponentManifestJson := '';
@@ -1612,6 +1670,329 @@ begin
   end;
 end;
 
+function TDxComplyGenerator.GenerateLibrary(const AProjectPath, AOutputPath: string;
+  AFormat: TSbomFormat): Boolean;
+var
+  LProjectInfo: TProjectInfo;
+  LBuildEvidence: TBuildEvidence;
+  LCompositionEvidence: TCompositionEvidence;
+  LArtefacts: TArtefactList;
+  LMetadata: TSbomMetadata;
+  LReportedWarnings: TList<string>;
+  LValidation: TValidationResult;
+  LCraWarnings: TList<string>;
+  LGeneratedReportPaths: TArray<string>;
+  LReportData: TComplianceReportData;
+  LSourceDirs: TArray<string>;
+  LFiles: TArray<TLibrarySourceFile>;
+  LRequires: TArray<string>;
+  LCollectWarnings: TArray<string>;
+  LProjectPath: string;
+  LExt: string;
+  LDir: string;
+  LCommonRoot: string;
+  LMainSource: string;
+  LOutputPath: string;
+  LFormat: TSbomFormat;
+  LName: string;
+  LVersion: string;
+  LWarning: string;
+  LNote: string;
+  LCraText: string;
+  LErr: string;
+  LWarn: string;
+  LHasProject: Boolean;
+  LRequiresFound: Boolean;
+  LFilesComplete: Boolean;
+  LFile: TLibrarySourceFile;
+  LArtefact: TArtefactInfo;
+  I: Integer;
+begin
+  Result := False;
+  LProjectPath := Trim(AProjectPath);
+  LHasProject := LProjectPath <> '';
+
+  if LHasProject and TPath.IsRelativePath(LProjectPath) then
+  begin
+    try
+      LProjectPath := TPath.GetFullPath(LProjectPath);
+    except
+      on EInOutArgumentException do
+        LProjectPath := TPath.Combine(GetCurrentDir, LProjectPath);
+    end;
+  end;
+
+  if (not LHasProject) and (Length(FConfig.SourceDirs) = 0) then
+  begin
+    DoProgress('Error: Library mode needs a project file or at least one source directory.', -1);
+    Exit;
+  end;
+
+  if LHasProject then
+  begin
+    LExt := LowerCase(TPath.GetExtension(LProjectPath));
+    if (LExt <> '.dproj') and (LExt <> '.dpk') and (LExt <> '.dpr') then
+    begin
+      DoProgress('Error: Library mode accepts a .dproj, a .dpk, or a .dpr: ' +
+        LProjectPath, -1);
+      Exit;
+    end;
+    if not TFile.Exists(LProjectPath) then
+    begin
+      DoProgress('Error: Project file not found: ' + LProjectPath, -1);
+      Exit;
+    end;
+  end;
+
+  LProjectInfo := Default(TProjectInfo);
+  LBuildEvidence := Default(TBuildEvidence);
+  LCompositionEvidence := Default(TCompositionEvidence);
+  LReportedWarnings := nil;
+  LArtefacts := nil;
+  LCraWarnings := nil;
+  try
+    LReportedWarnings := TList<string>.Create;
+    LArtefacts := TArtefactList.Create;
+    LBuildEvidence := TBuildEvidence.Create;
+    LCompositionEvidence := TCompositionEvidence.Create;
+
+    if LHasProject then
+    begin
+      DoProgress('Scanning project...', 10);
+      try
+        FProjectScanner.SetDelphi7Root(FConfig.Delphi7Root);
+        FProjectScanner.SetExplicitTargetRequest(FConfig.PlatformExplicit,
+          FConfig.ConfigurationExplicit);
+        LProjectInfo := FProjectScanner.Scan(LProjectPath, FConfig.Platform,
+          FConfig.Configuration);
+      except
+        on E: Exception do
+        begin
+          // Scan frees the record it created before it raises.
+          DoProgress('Error: Failed to read project file: ' + E.Message, -1);
+          Exit;
+        end;
+      end;
+
+      if Assigned(LProjectInfo.ProgressNotes) then
+        for LNote in LProjectInfo.ProgressNotes do
+          if Trim(LNote) <> '' then
+            DoProgress(LNote, 11);
+      ReportWarnings(LProjectInfo.Warnings, LReportedWarnings, 12);
+    end
+    else
+      LProjectInfo := TProjectInfo.Create;
+
+    SetLength(LSourceDirs, 0);
+    for I := 0 to High(FConfig.SourceDirs) do
+    begin
+      LDir := Trim(FConfig.SourceDirs[I]);
+      if LDir = '' then
+        Continue;
+      if TPath.IsRelativePath(LDir) then
+      begin
+        if LHasProject and (LProjectInfo.ProjectDir <> '') then
+          LDir := TPath.Combine(LProjectInfo.ProjectDir, LDir)
+        else
+          LDir := TPath.Combine(GetCurrentDir, LDir);
+      end;
+      try
+        LDir := TPath.GetFullPath(LDir);
+      except
+        on EInOutArgumentException do
+          ;
+      end;
+      SetLength(LSourceDirs, Length(LSourceDirs) + 1);
+      LSourceDirs[High(LSourceDirs)] := LDir;
+    end;
+
+    if LHasProject and (LProjectInfo.ProjectDir <> '') then
+      LCommonRoot := LProjectInfo.ProjectDir
+    else if Length(LSourceDirs) > 0 then
+      LCommonRoot := LSourceDirs[0]
+    else
+      LCommonRoot := GetCurrentDir;
+
+    if not LHasProject then
+    begin
+      LProjectInfo.ProjectDir := LCommonRoot;
+      LProjectInfo.ProjectName :=
+        ExtractFileName(ExcludeTrailingPathDelimiter(LCommonRoot));
+      if LProjectInfo.ProjectName = '' then
+        LProjectInfo.ProjectName := 'library';
+    end;
+
+    LMainSource := '';
+    if LHasProject then
+    begin
+      LExt := LowerCase(TPath.GetExtension(LProjectPath));
+      if LExt = '.dproj' then
+      begin
+        if (LProjectInfo.MainSourcePath <> '') and
+           (SameText(TPath.GetExtension(LProjectInfo.MainSourcePath), '.dpk') or
+            SameText(TPath.GetExtension(LProjectInfo.MainSourcePath), '.dpr')) then
+          LMainSource := LProjectInfo.MainSourcePath;
+      end
+      else
+        LMainSource := LProjectPath;
+    end;
+
+    DoProgress('Collecting library sources...', 30);
+    LFiles := CollectLibrarySourceFiles(LMainSource, LSourceDirs, LCommonRoot,
+      FConfig.IncludePatterns, FConfig.ExcludePatterns, LRequires, LRequiresFound,
+      LCollectWarnings);
+    for LWarning in LCollectWarnings do
+      DoProgress('Warning: ' + LWarning, 32);
+
+    LFilesComplete := True;
+    for LFile in LFiles do
+    begin
+      LArtefact := Default(TArtefactInfo);
+      LArtefact.FilePath := LFile.FullPath;
+      LArtefact.RelativePath := LFile.RelativePath;
+      LArtefact.ComponentName := LFile.RelativePath;
+      LArtefact.ArtefactType := 'file';
+      LArtefact.FileSize := -1;
+      if TFile.Exists(LFile.FullPath) then
+      begin
+        try
+          LArtefact.FileSize := TFile.GetSize(LFile.FullPath);
+          LArtefact.Hash := FHashService.ComputeSha256(LFile.FullPath);
+          LArtefact.HashSha512 := FHashService.ComputeSha512(LFile.FullPath);
+        except
+          LArtefact.FileSize := -1;
+          LArtefact.Hash := '';
+          LArtefact.HashSha512 := '';
+        end;
+      end;
+      if (LArtefact.Hash = '') or (LArtefact.HashSha512 = '') then
+        LFilesComplete := False;
+      LArtefacts.Add(LArtefact);
+    end;
+    if Length(LFiles) = 0 then
+      LFilesComplete := True;
+
+    for LName in LRequires do
+    begin
+      LArtefact := Default(TArtefactInfo);
+      LArtefact.ComponentName := LName;
+      LArtefact.FileSize := -1;
+      if IsDelphiFrameworkPackage(LName) then
+        LArtefact.ArtefactType := 'framework'
+      else
+        LArtefact.ArtefactType := 'required-package';
+      LArtefact.Version := Trim(LProjectInfo.Toolchain.Version);
+      LArtefacts.Add(LArtefact);
+    end;
+
+    DoProgress(Format('Found %d library component(s)', [LArtefacts.Count]), 50);
+
+    if AOutputPath <> '' then
+      LOutputPath := AOutputPath
+    else
+      LOutputPath := FConfig.OutputPath;
+    if TPath.IsRelativePath(LOutputPath) then
+    begin
+      if LHasProject and (LProjectInfo.ProjectDir <> '') then
+        LOutputPath := TPath.Combine(LProjectInfo.ProjectDir, LOutputPath)
+      else if LCommonRoot <> '' then
+        LOutputPath := TPath.Combine(LCommonRoot, LOutputPath)
+      else
+        LOutputPath := TPath.Combine(GetCurrentDir, LOutputPath);
+    end;
+
+    if AFormat <> sfCycloneDxJson then
+      LFormat := AFormat
+    else
+      LFormat := FConfig.Format;
+
+    LMetadata := Default(TSbomMetadata);
+    LMetadata.ProductName := Trim(FConfig.ProductName);
+    if LMetadata.ProductName = '' then
+      LMetadata.ProductName := LProjectInfo.ProjectName;
+    if LMetadata.ProductName = '' then
+      LMetadata.ProductName := 'library';
+    LMetadata.ProductVersion := Trim(FConfig.ProductVersion);
+    if LMetadata.ProductVersion = '' then
+      LMetadata.ProductVersion := LProjectInfo.Version;
+    LMetadata.Supplier := Trim(FConfig.Supplier);
+    if LMetadata.Supplier = '' then
+      LMetadata.Supplier := LProjectInfo.CompanyName;
+    LMetadata.SupplierUrl := Trim(FConfig.SupplierUrl);
+    LMetadata.Licence := Trim(FConfig.Licence);
+    LMetadata.SbomCreator := Trim(FConfig.SbomCreator);
+    LMetadata.Timestamp := FormatUtcTimestamp('');
+    LMetadata.ToolName := 'DX.Comply';
+    LMetadata.ToolVersion := GetDxComplyToolVersion;
+    LMetadata.ComponentType := 'library';
+    LVersion := LMetadata.ProductVersion;
+    if Trim(FConfig.Purl) <> '' then
+      LMetadata.Purl := Trim(FConfig.Purl)
+    else
+      LMetadata.Purl := GithubPurlFromRepoUrl(FConfig.RepoUrl, LVersion);
+    LMetadata.LibraryCompositions := True;
+    LMetadata.LibraryFilesComplete := LFilesComplete;
+    LMetadata.LibraryRequiresDeclared := LRequiresFound;
+    SetLength(LMetadata.Properties, 1);
+    LMetadata.Properties[0] := TSbomProperty.Create(
+      'net.developer-experts.dx-comply:document.profile', 'library-source');
+
+    LCraWarnings := TList<string>.Create;
+    for LCraText in BuildCraMetadataWarnings(FConfig, LMetadata, LProjectInfo,
+      LArtefacts) do
+      LCraWarnings.Add(LCraText);
+    ReportWarnings(LCraWarnings, LReportedWarnings, 69);
+
+    DoProgress('Generating SBOM...', 70);
+    FSbomWriter := CreateWriter(LFormat);
+    Result := FSbomWriter.Write(LOutputPath, LMetadata, LArtefacts, LProjectInfo);
+    if not Result then
+    begin
+      DoProgress('Error: Failed to write SBOM', -1);
+      Exit;
+    end;
+
+    DoProgress('Running structural check...', 90);
+    LValidation := ValidateSbom(LOutputPath);
+    LReportData := BuildHumanReadableReportData(LOutputPath, LFormat, LMetadata,
+      LProjectInfo, LBuildEvidence, LCompositionEvidence, LArtefacts,
+      LReportedWarnings, Default(TDeepEvidenceBuildResult), LValidation);
+    if not GenerateHumanReadableReports(LReportData, LGeneratedReportPaths) then
+    begin
+      DoProgress('Error: Failed to generate the configured human-readable report.', -1);
+      Exit(False);
+    end;
+
+    if LValidation.IsValid then
+    begin
+      if Length(LGeneratedReportPaths) > 0 then
+        DoProgress(Format('SBOM and %d human-readable report(s) generated. Structural check passed: %s',
+          [Length(LGeneratedReportPaths), LOutputPath]), 100)
+      else
+        DoProgress(Format('SBOM generated. Structural check passed: %s', [LOutputPath]), 100);
+    end
+    else
+    begin
+      if Length(LGeneratedReportPaths) > 0 then
+        DoProgress(Format('SBOM and human-readable report(s) generated: %s (structural check did not pass)',
+          [LOutputPath]), 95)
+      else
+        DoProgress(Format('SBOM generated: %s (structural check did not pass)', [LOutputPath]), 95);
+      for LErr in LValidation.Errors do
+        DoProgress('Structural check error: ' + LErr, -1);
+      for LWarn in LValidation.Warnings do
+        DoProgress('Structural check warning: ' + LWarn, 95);
+    end;
+  finally
+    LCraWarnings.Free;
+    LArtefacts.Free;
+    LReportedWarnings.Free;
+    LCompositionEvidence.Free;
+    LBuildEvidence.Free;
+    LProjectInfo.Free;
+  end;
+end;
+
 function TDxComplyGenerator.Generate(const AProjectPath, AOutputPath: string;
   AFormat: TSbomFormat): Boolean;
 var
@@ -1642,6 +2023,13 @@ begin
   if not IsAcceptableBsiCreator(FConfig.SbomCreator) then
   begin
     DoProgress('Error: sbomCreator must be an email address or an http(s) URL.', -1);
+    Exit;
+  end;
+
+  // Library mode does not build, read a MAP file, or scan a binary.
+  if FConfig.LibraryMode then
+  begin
+    Result := GenerateLibrary(AProjectPath, AOutputPath, AFormat);
     Exit;
   end;
 
@@ -1952,6 +2340,14 @@ begin
     Result.ScanDirs := ACaller.ScanDirs;
   if scoScanTree in ACaller.ExplicitOverrides then
     Result.ScanTree := ACaller.ScanTree;
+  if scoLibraryMode in ACaller.ExplicitOverrides then
+    Result.LibraryMode := ACaller.LibraryMode;
+  if scoSourceDirs in ACaller.ExplicitOverrides then
+    Result.SourceDirs := ACaller.SourceDirs;
+  if scoPurl in ACaller.ExplicitOverrides then
+    Result.Purl := ACaller.Purl;
+  if scoRepoUrl in ACaller.ExplicitOverrides then
+    Result.RepoUrl := ACaller.RepoUrl;
 
   Result.IncludePlatformInOutput := ACaller.IncludePlatformInOutput;
   Result.ExplicitOverrides := ACaller.ExplicitOverrides;

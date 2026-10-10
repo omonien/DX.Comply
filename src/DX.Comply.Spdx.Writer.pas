@@ -260,21 +260,25 @@ var
   LChecksums: TJSONArray;
   LChecksum: TJSONObject;
   LFileName: string;
+  LName: string;
   LKind: TLicenceKind;
   LToken: string;
 begin
   LPackage := TJSONObject.Create;
 
-  LFileName := TPath.GetFileName(AArtefact.RelativePath);
+  LName := ArtefactComponentName(AArtefact);
+  LFileName := BsiComponentFileName(AArtefact.RelativePath);
   LPackage.AddPair('SPDXID', ASpdxId);
-  LPackage.AddPair('name', LFileName);
+  LPackage.AddPair('name', LName);
   if LFileName <> '' then
   begin
     LPackage.AddPair('packageFileName', LFileName);
     LPackage.AddPair('comment', BsiPropertyComment(AArtefact));
   end;
 
-  if AArtefact.Hash <> '' then
+  if Trim(AArtefact.Version) <> '' then
+    LPackage.AddPair('versionInfo', Trim(AArtefact.Version))
+  else if AArtefact.Hash <> '' then
     LPackage.AddPair('versionInfo', Copy(AArtefact.Hash, 1, 12));
 
   LPackage.AddPair('downloadLocation', 'NOASSERTION');

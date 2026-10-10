@@ -61,13 +61,13 @@ begin
       Continue;
     if LArtefact.FileSize >= 0 then
       Lines.Add(Format('| %s | %s | %d | %s |', [
-        EscapeMarkdown(SafeText(LArtefact.RelativePath, LArtefact.FilePath)),
+        EscapeMarkdown(SafeText(SafeText(LArtefact.RelativePath, LArtefact.ComponentName), LArtefact.FilePath)),
         EscapeMarkdown(SafeText(LArtefact.ArtefactType)),
         LArtefact.FileSize,
         EscapeMarkdown(SafeText(LArtefact.Hash))]))
     else
       Lines.Add(Format('| %s | %s | n/a | %s |', [
-        EscapeMarkdown(SafeText(LArtefact.RelativePath, LArtefact.FilePath)),
+        EscapeMarkdown(SafeText(SafeText(LArtefact.RelativePath, LArtefact.ComponentName), LArtefact.FilePath)),
         EscapeMarkdown(SafeText(LArtefact.ArtefactType)),
         EscapeMarkdown(SafeText(LArtefact.Hash))]));
   end;
@@ -228,6 +228,8 @@ begin
     Lines.Add('## Project Overview');
     Lines.Add('| Field | Value |');
     Lines.Add('| --- | --- |');
+    if SameText(AData.Metadata.ComponentType, 'library') then
+      AddKeyValue(Lines, 'Mode', 'library');
     AddKeyValue(Lines, 'Project', SafeText(AData.ProjectInfo.ProjectName));
     AddKeyValue(Lines, 'Version', SafeText(AData.Metadata.ProductVersion, SafeText(AData.ProjectInfo.Version)));
     AddKeyValue(Lines, 'Platform', SafeText(AData.ProjectInfo.Platform));

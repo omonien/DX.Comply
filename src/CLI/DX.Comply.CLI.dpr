@@ -59,6 +59,9 @@ var
   LConfig: TSbomConfig;
   LSuccess: Boolean;
   LVerbose: Boolean;
+  LLibraryWithoutProject: Boolean;
+  LFileConfig: TSbomConfig;
+  LPeek: TDxComplyGenerator;
   {$IFNDEF CI}
   LNoPause: Boolean;
   {$ENDIF}
@@ -85,10 +88,34 @@ begin
 
     if LOptions.Project = '' then
     begin
-      Writeln('Error: --project is required.');
-      Writeln('Run dxcomply --help for usage.');
-      ExitCode := 2;
-      Exit;
+      // --library and --source-dir on the command line are enough.
+      // With --ci the same keys may be present only in the config file.
+      LConfig := LOptions.ToSbomConfig;
+      LLibraryWithoutProject := LConfig.LibraryMode and
+        (Length(LConfig.SourceDirs) > 0);
+      if (not LLibraryWithoutProject) and LOptions.CiMode and
+         TFile.Exists(LOptions.ConfigFile) then
+      begin
+        LPeek := TDxComplyGenerator.Create;
+        try
+          LFileConfig := LPeek.LoadConfig(LOptions.ConfigFile);
+        finally
+          LPeek.Free;
+        end;
+        if scoLibraryMode in LConfig.ExplicitOverrides then
+          LFileConfig.LibraryMode := LConfig.LibraryMode;
+        if scoSourceDirs in LConfig.ExplicitOverrides then
+          LFileConfig.SourceDirs := LConfig.SourceDirs;
+        LLibraryWithoutProject := LFileConfig.LibraryMode and
+          (Length(LFileConfig.SourceDirs) > 0);
+      end;
+      if not LLibraryWithoutProject then
+      begin
+        Writeln('Error: --project is required.');
+        Writeln('Run dxcomply --help for usage.');
+        ExitCode := 2;
+        Exit;
+      end;
     end;
 
     {$IFNDEF CI}

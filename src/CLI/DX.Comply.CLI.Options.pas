@@ -62,6 +62,10 @@ type
     FExplicitOverrides: TSbomConfigOverrides;
     FScanDirs: TArray<string>;
     FScanTree: Boolean;
+    FLibraryMode: Boolean;
+    FSourceDirs: TArray<string>;
+    FPurl: string;
+    FRepoUrl: string;
     FDelphi7Root: string;
     FManifestFile: string;
     FManifestExplicit: Boolean;
@@ -148,6 +152,14 @@ type
     property ScanDirs: TArray<string> read FScanDirs;
     /// <summary>True when --scan-tree was requested. Deprecated.</summary>
     property ScanTree: Boolean read FScanTree;
+    /// <summary>True when --library was requested.</summary>
+    property LibraryMode: Boolean read FLibraryMode;
+    /// <summary>Source directories from repeatable --source-dir.</summary>
+    property SourceDirs: TArray<string> read FSourceDirs;
+    /// <summary>Package URL from --purl.</summary>
+    property Purl: string read FPurl;
+    /// <summary>Repository URL from --repo-url.</summary>
+    property RepoUrl: string read FRepoUrl;
     /// <summary>Delphi 7 installation directory from --delphi7-root.</summary>
     property Delphi7Root: string read FDelphi7Root;
     /// <summary>Path from --manifest. Empty when the flag was not passed.</summary>
@@ -322,6 +334,13 @@ begin
       Continue;
     end;
 
+    if LArg = '--library' then
+    begin
+      FLibraryMode := True;
+      Include(FExplicitOverrides, scoLibraryMode);
+      Continue;
+    end;
+
     // Bare --report (no value) enables both markdown and html.
     if LArg = '--report' then
     begin
@@ -438,6 +457,36 @@ begin
         end;
         Include(FExplicitOverrides, scoScanTree);
       end
+      else if LKey = 'library' then
+      begin
+        if not TryParseBool(LValue, FLibraryMode) then
+        begin
+          FParseError := 'Invalid value for --library: ' + LValue +
+            ' (expected true or false)';
+          Exit(False);
+        end;
+        Include(FExplicitOverrides, scoLibraryMode);
+      end
+      else if LKey = 'source-dir' then
+      begin
+        if Trim(LValue) = '' then
+        begin
+          FParseError := 'Invalid value for --source-dir: path is empty.';
+          Exit(False);
+        end;
+        AppendPattern(FSourceDirs, Trim(LValue));
+        Include(FExplicitOverrides, scoSourceDirs);
+      end
+      else if LKey = 'purl' then
+      begin
+        FPurl := Trim(LValue);
+        Include(FExplicitOverrides, scoPurl);
+      end
+      else if LKey = 'repo-url' then
+      begin
+        FRepoUrl := Trim(LValue);
+        Include(FExplicitOverrides, scoRepoUrl);
+      end
       else if LKey = 'manifest' then
       begin
         if Trim(LValue) = '' then
@@ -486,10 +535,16 @@ begin
   if FHelp then
     Exit(True);
 
-  // In CI mode with an explicit --config the project path is still required,
-  // but we allow the caller to handle that after Parse returns.
+  // Build mode needs a project. Library mode does not when at least one
+  // source directory was given. With --ci those keys may live only in the
+  // config file, which is read after Parse, so an empty project is left
+  // for the caller to accept or reject.
   if FProject = '' then
   begin
+    if FLibraryMode and (Length(FSourceDirs) > 0) then
+      Exit(True);
+    if FCiMode then
+      Exit(True);
     FParseError := '--project is required.';
     Exit(False);
   end;
@@ -505,10 +560,14 @@ begin
   Writeln;
   Writeln('Usage:');
   Writeln('  dxcomply --project=<path> [options]');
+  Writeln('  dxcomply --library --source-dir=<dir> [options]');
   Writeln;
   Writeln('Options:');
-  Writeln('  --project=<path>              Project file (required): .dproj, .dpr,');
-  Writeln('                                .dpk, .bdsproj, or .groupproj');
+  Writeln('  --project=<path>              Project file. Required in build mode:');
+  Writeln('                                .dproj, .dpr, .dpk, .bdsproj, or .groupproj.');
+  Writeln('                                Optional in library mode when at least');
+  Writeln('                                one --source-dir is set. Library mode');
+  Writeln('                                accepts .dproj, .dpk, or .dpr.');
   Writeln('  --format=<format>             Output format (default: cyclonedx-json)');
   Writeln('                                  cyclonedx-json (1.6) | cyclonedx-xml (1.6) | spdx-json (2.3)');
   Writeln('  --output=<path>               Output file path (default: bom.json)');
@@ -541,6 +600,23 @@ begin
   Writeln('  --scan-tree                   Deprecated: recursively scan the output');
   Writeln('                                directory, as older versions did.');
   Writeln('                                Kept for one release. Prefer --scan-dir.');
+  Writeln('  --library[=true|false]        SBOM for a source release, not a build.');
+  Writeln('                                No build, no MAP file, no binary scan.');
+  Writeln('                                File key: library');
+  Writeln('  --source-dir=<dir>            Source directory, walked recursively');
+  Writeln('                                (repeatable). Relative to the project');
+  Writeln('                                directory, or the current directory');
+  Writeln('                                when --project is omitted.');
+  Writeln('                                File key: sourceDirs');
+  Writeln('  --purl=<purl>                 Package URL of the root component.');
+  Writeln('                                File key: product.purl');
+  Writeln('  --repo-url=<url>              Repository URL. When --purl is empty');
+  Writeln('                                and this is https://github.com/owner/repo');
+  Writeln('                                (optional trailing .git or /), the purl');
+  Writeln('                                is pkg:github/owner/repo@version when a');
+  Writeln('                                version is known. Without a version,');
+  Writeln('                                no purl is written.');
+  Writeln('                                File key: product.repoUrl');
   Writeln('  --manifest=<file>             Component manifest (components.json)');
   Writeln('                                Groups third-party units into libraries');
   Writeln('                                with supplier, licence, version, type');
@@ -575,6 +651,7 @@ begin
   Writeln('  dxcomply --project=src\MyApp.dpr --delphi7-root=C:\Delphi7 --no-pause');
   Writeln('  dxcomply --project=src\MyApp.dproj --ci --config=.dxcomply.json --no-pause');
   Writeln('  dxcomply --project=src\MyApp.dproj --ci --config-name=Debug --no-pause');
+  Writeln('  dxcomply --library --project=Source\DEC60.dproj --source-dir=Source --licence=Apache-2.0 --no-pause');
 end;
 
 procedure TCliOptions.PrintVersion;
@@ -615,6 +692,10 @@ begin
   Result.ExcludePatterns             := FExcludePatterns;
   Result.ScanDirs                    := FScanDirs;
   Result.ScanTree                    := FScanTree;
+  Result.LibraryMode                 := FLibraryMode;
+  Result.SourceDirs                  := FSourceDirs;
+  Result.Purl                        := FPurl;
+  Result.RepoUrl                     := FRepoUrl;
   Result.MapFileDir                  := FMapDir;
   Result.Delphi7Root                 := FDelphi7Root;
   Result.IncludeCompositionEvidence  := not FNoCompositionEvidence;
