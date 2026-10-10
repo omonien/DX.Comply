@@ -1397,7 +1397,7 @@ begin
   Result.SupplierUrl := Trim(AConfig.SupplierUrl);
   Result.Licence := Trim(AConfig.Licence);
   Result.ComponentManifestJson := '';
-  Result.Timestamp := DateToISO8601(Now, False);
+  Result.Timestamp := FormatUtcTimestamp('');
   Result.ToolName := 'DX.Comply';
   Result.ToolVersion := GetDxComplyToolVersion;
   LBomProperties := TList<TSbomProperty>.Create;

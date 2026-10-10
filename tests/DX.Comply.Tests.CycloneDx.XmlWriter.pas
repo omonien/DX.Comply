@@ -249,7 +249,8 @@ var
 begin
   FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo);
   LContent := LoadOutputContent;
-  Assert.IsTrue(Pos('<timestamp>2026-02-24T10:00:00+01:00</timestamp>', LContent) > 0);
+  // The +01:00 input is written as UTC with a Z suffix.
+  Assert.IsTrue(Pos('<timestamp>2026-02-24T09:00:00Z</timestamp>', LContent) > 0);
 end;
 
 procedure TCycloneDxXmlWriterTests.Write_ContainsToolInfo;

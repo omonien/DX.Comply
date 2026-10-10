@@ -107,11 +107,8 @@ var
 begin
   LMetadata := TJSONObject.Create;
 
-  // Timestamp
-  if AMetadata.Timestamp <> '' then
-    LMetadata.AddPair('timestamp', AMetadata.Timestamp)
-  else
-    LMetadata.AddPair('timestamp', DateToISO8601(Now, False));
+  // Timestamp in UTC with a Z suffix (BSI TR-03183-2 section 5.2.1).
+  LMetadata.AddPair('timestamp', FormatUtcTimestamp(AMetadata.Timestamp));
 
   // Component (the project being documented).
   // Prefer metadata overrides (CLI --product / --version) over values parsed
