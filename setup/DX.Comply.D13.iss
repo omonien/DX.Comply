@@ -3,7 +3,7 @@
 ; and registers the IDE package in the Delphi 13 Known Packages.
 
 #define MyAppName "DX.Comply"
-; The Forge passes /DMyAppVersion=2.0.0. An unconditional #define would override that.
+; The Forge passes /DMyAppVersion=2.0.1. An unconditional #define would override that.
 ; 0.0.0 is only the fallback when the switch is absent.
 #ifndef MyAppVersion
 #define MyAppVersion "0.0.0"
