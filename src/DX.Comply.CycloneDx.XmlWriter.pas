@@ -181,8 +181,8 @@ begin
   // Component (the project being documented). Prefer metadata overrides
   // (CLI --product / --version) over values from the .dproj. Issue #26.
   // Component sequence places supplier before name and version.
-  OpenTag('component', 'type="application" bom-ref="' +
-    EscapeXml(AProjectInfo.ProjectName) + '"');
+  OpenTag('component', 'type="' + EscapeXml(SbomRootComponentType(AMetadata)) +
+    '" bom-ref="' + EscapeXml(AProjectInfo.ProjectName) + '"');
   if AMetadata.Supplier <> '' then
   begin
     OpenTag('supplier');
@@ -205,8 +205,10 @@ begin
     AddElement('version', AMetadata.ProductVersion)
   else if AProjectInfo.Version <> '' then
     AddElement('version', AProjectInfo.Version);
-  // bom-1.6 component order: version, then licenses, then properties.
+  // bom-1.6 component order: version, then licenses, then purl, then properties.
   AppendCycloneDxLicencesXml(FLines, AMetadata.Licence, '', FIndentLevel);
+  if Trim(AMetadata.Purl) <> '' then
+    AddElement('purl', AMetadata.Purl);
   AddPropertyElements(AMetadata.ComponentProperties);
   CloseTag('component');
 
@@ -242,9 +244,12 @@ var
 begin
   if AArtefact.ArtefactType = 'application' then
     LComponentType := 'application'
+  else if AArtefact.ArtefactType = 'framework' then
+    LComponentType := 'framework'
   else if (AArtefact.ArtefactType = 'library') or (AArtefact.ArtefactType = 'unit-evidence') or
     (AArtefact.ArtefactType = 'package') or (AArtefact.ArtefactType = 'runtime-package') or
-    (AArtefact.ArtefactType = 'external-reference') then
+    (AArtefact.ArtefactType = 'external-reference') or
+    (AArtefact.ArtefactType = 'required-package') then
     LComponentType := 'library'
   else
     LComponentType := 'file';
@@ -253,9 +258,11 @@ begin
 
   OpenTag('component', 'type="' + LComponentType + '" bom-ref="' + EscapeXml(LBomRef) + '"');
 
-  AddElement('name', TPath.GetFileName(AArtefact.RelativePath));
+  AddElement('name', ArtefactComponentName(AArtefact));
 
-  if AArtefact.Hash <> '' then
+  if Trim(AArtefact.Version) <> '' then
+    AddElement('version', Trim(AArtefact.Version))
+  else if (AArtefact.Hash <> '') and not AArtefact.LibrarySourceFile then
     AddElement('version', Copy(AArtefact.Hash, 1, 12));
 
   // Component sequence: name, version, then hashes, then purl, then properties.
@@ -269,7 +276,9 @@ begin
     CloseTag('hashes');
   end;
 
-  AddElement('purl', 'file:' + AArtefact.RelativePath);
+  // A library source file has no package URL of its own.
+  if (AArtefact.RelativePath <> '') and not AArtefact.LibrarySourceFile then
+    AddElement('purl', 'file:' + AArtefact.RelativePath);
 
   // Component sequence places externalReferences after purl and before
   // properties. The distribution url is the file: locator. bom-1.6 requires
@@ -334,6 +343,9 @@ begin
       FLines[FLines.Count - 1] := StringOfChar(' ', FIndentLevel * 2) +
         '<property name="net.developer-experts.dx-comply:conditional">true</property>';
     end;
+    if AArtefact.LibrarySourceFile and (AArtefact.RelativePath <> '') then
+      AddLine('<property name="net.developer-experts.dx-comply:relativePath">' +
+        EscapeXml(AArtefact.RelativePath) + '</property>');
     if LFileName <> '' then
     begin
       AddLine('<property name="bsi:component:filename">' + EscapeXml(LFileName) + '</property>');
@@ -414,6 +426,8 @@ var
   LOutputDir: string;
   LGraph: TUsesDependencyGraph;
   LLibraries, LIncomplete, LComplete: TArray<string>;
+  LGroups: TArray<TLibraryCompositionGroup>;
+  LGroup: TLibraryCompositionGroup;
   LRef: string;
 begin
   Result := False;
@@ -444,6 +458,30 @@ begin
     else
       BuildDependencies(AArtefacts, AProjectInfo.ProjectName, LGraph);
 
+    if AMetadata.LibraryCompositions then
+    begin
+      LGroups := BuildLibraryCompositionGroups(AArtefacts, AProjectInfo.ProjectName,
+        AMetadata.LibraryFilesComplete, AMetadata.LibraryRequiresDeclared);
+      if Length(LGroups) > 0 then
+      begin
+        OpenTag('compositions');
+        for LGroup in LGroups do
+        begin
+          if Length(LGroup.Refs) = 0 then
+            Continue;
+          OpenTag('composition');
+          AddElement('aggregate', LGroup.Aggregate);
+          OpenTag('dependencies');
+          for LRef in LGroup.Refs do
+            AddLine('<dependency ref="' + EscapeXml(LRef) + '"/>');
+          CloseTag('dependencies');
+          CloseTag('composition');
+        end;
+        CloseTag('compositions');
+      end;
+    end
+    else
+    begin
     LLibraries := ManifestLibraryBomRefs(AMetadata.ComponentManifestJson, AArtefacts);
     BuildCompositionRefLists(AProjectInfo.ProjectName, LGraph, LLibraries,
       LIncomplete, LComplete);
@@ -468,6 +506,7 @@ begin
         CloseTag('composition');
       end;
       CloseTag('compositions');
+    end;
     end;
 
     CloseTag('bom');

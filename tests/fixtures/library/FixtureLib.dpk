@@ -1,0 +1,14 @@
+package FixtureLib;
+
+{$R *.res}
+
+requires
+  rtl,
+  vcl;
+
+contains
+  FixtureLib.Core in 'FixtureLib.Core.pas',
+  FixtureLib.Form in 'FixtureLib.Form.pas',
+  FixtureLib.Sub in 'sub\FixtureLib.Sub.pas';
+
+end.

@@ -139,9 +139,14 @@ begin
     if Trim(AMetadata.Licence) = '' then
       Add(cNoLicence);
 
-    LOutput := Trim(AProjectInfo.OutputFilePath);
-    if (LOutput <> '') and not DeployableWasHashed(LOutput, AArtefacts) then
-      Add(DeployableWarning(LOutput));
+    // Library mode has no deliverable binary. A package project still
+    // names a .bpl that was never built.
+    if not AConfig.LibraryMode then
+    begin
+      LOutput := Trim(AProjectInfo.OutputFilePath);
+      if (LOutput <> '') and not DeployableWasHashed(LOutput, AArtefacts) then
+        Add(DeployableWarning(LOutput));
+    end;
 
     Result := LWarnings.ToArray;
   finally

@@ -108,6 +108,34 @@ procedure BuildCompositionRefLists(const AProjectName: string;
 procedure WriteCompositionsJson(ARoot: TJSONObject; const AProjectName: string;
   const AGraph: TUsesDependencyGraph; const ALibraryRefs: TArray<string>);
 
+type
+  /// <summary>
+  /// One CycloneDX composition aggregate for a library source SBOM.
+  /// </summary>
+  TLibraryCompositionGroup = record
+    /// <summary>complete, incomplete, or unknown.</summary>
+    Aggregate: string;
+    /// <summary>bom-ref values in that aggregate.</summary>
+    Refs: TArray<string>;
+  end;
+
+/// <summary>
+/// File components are one aggregate: complete when AFilesComplete, otherwise
+/// incomplete. An empty file list omits that group. Requires components
+/// (framework and required-package) are complete when ARequiresDeclared and
+/// the list is not empty. When the requires clause was not declared, one
+/// unknown aggregate names the root bom-ref.
+/// </summary>
+function BuildLibraryCompositionGroups(const AArtefacts: TArtefactList;
+  const ARootBomRef: string; AFilesComplete, ARequiresDeclared: Boolean):
+  TArray<TLibraryCompositionGroup>;
+
+/// <summary>
+/// Writes library compositions. Omitted when there are no groups.
+/// </summary>
+procedure WriteLibraryCompositionsJson(ARoot: TJSONObject;
+  const AGroups: TArray<TLibraryCompositionGroup>);
+
 implementation
 
 uses
@@ -465,6 +493,101 @@ begin
   LCompositions := TJSONArray.Create;
   AddOne('incomplete', LIncomplete);
   AddOne('complete', LComplete);
+  ARoot.AddPair('compositions', LCompositions);
+end;
+
+function BuildLibraryCompositionGroups(const AArtefacts: TArtefactList;
+  const ARootBomRef: string; AFilesComplete, ARequiresDeclared: Boolean):
+  TArray<TLibraryCompositionGroup>;
+var
+  LFiles: TList<string>;
+  LRequires: TList<string>;
+  LGroups: TList<TLibraryCompositionGroup>;
+  LGroup: TLibraryCompositionGroup;
+  LType: string;
+  I: Integer;
+begin
+  Result := nil;
+  LFiles := TList<string>.Create;
+  LRequires := TList<string>.Create;
+  LGroups := TList<TLibraryCompositionGroup>.Create;
+  try
+    if Assigned(AArtefacts) then
+      for I := 0 to AArtefacts.Count - 1 do
+      begin
+        LType := AArtefacts[I].ArtefactType;
+        if SameText(LType, 'file') then
+          LFiles.Add('comp-' + IntToStr(I))
+        else if SameText(LType, 'framework') or
+                SameText(LType, 'required-package') then
+          LRequires.Add('comp-' + IntToStr(I));
+      end;
+
+    if LFiles.Count > 0 then
+    begin
+      LGroup.Aggregate := 'incomplete';
+      if AFilesComplete then
+        LGroup.Aggregate := 'complete';
+      LGroup.Refs := LFiles.ToArray;
+      LGroups.Add(LGroup);
+    end;
+
+    if ARequiresDeclared then
+    begin
+      if LRequires.Count > 0 then
+      begin
+        LGroup.Aggregate := 'complete';
+        LGroup.Refs := LRequires.ToArray;
+        LGroups.Add(LGroup);
+      end;
+    end
+    else if Trim(ARootBomRef) <> '' then
+    begin
+      LGroup.Aggregate := 'unknown';
+      SetLength(LGroup.Refs, 1);
+      LGroup.Refs[0] := ARootBomRef;
+      LGroups.Add(LGroup);
+    end;
+
+    Result := LGroups.ToArray;
+  finally
+    LGroups.Free;
+    LRequires.Free;
+    LFiles.Free;
+  end;
+end;
+
+procedure WriteLibraryCompositionsJson(ARoot: TJSONObject;
+  const AGroups: TArray<TLibraryCompositionGroup>);
+var
+  LCompositions: TJSONArray;
+  LGroup: TLibraryCompositionGroup;
+  LComposition: TJSONObject;
+  LDeps: TJSONArray;
+  LRef: string;
+begin
+  if not Assigned(ARoot) or (Length(AGroups) = 0) then
+    Exit;
+
+  LCompositions := TJSONArray.Create;
+  for LGroup in AGroups do
+  begin
+    if Length(LGroup.Refs) = 0 then
+      Continue;
+    LComposition := TJSONObject.Create;
+    LDeps := TJSONArray.Create;
+    LComposition.AddPair('aggregate', LGroup.Aggregate);
+    for LRef in LGroup.Refs do
+      LDeps.Add(LRef);
+    LComposition.AddPair('dependencies', LDeps);
+    LCompositions.Add(LComposition);
+  end;
+
+  if LCompositions.Count = 0 then
+  begin
+    LCompositions.Free;
+    Exit;
+  end;
   ARoot.AddPair('compositions', LCompositions);
 end;
 

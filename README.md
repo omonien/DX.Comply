@@ -236,6 +236,26 @@ dxcomply --project=MyApp.dproj --scan-dir=redist --scan-dir=plugins\** --no-paus
 
 `include` and `exclude` still filter what was scanned. Patterns match the path relative to the directory being scanned. `*.dll` matches a DLL next to the exe. Patterns such as `build/**` matter when the scanned directory itself contains a `build` folder, which is the case for `--scan-tree` when the project has no output directory, and for a `--scan-dir` value that contains `**`.
 
+## Library mode
+
+A component vendor or open source project often ships source, not a binary. `--library` writes an SBOM for that source release instead of a build. Nothing is compiled.
+
+```cmd
+dxcomply --library --project=Source\MyLib.dproj --source-dir=Source --version=2.1.0 ^
+  --repo-url=https://github.com/acme/mylib --licence=MIT --supplier="Acme" ^
+  --supplier-url=https://acme.example --sbom-creator=sbom@acme.example --no-pause
+```
+
+- The root component has type `library`, the name and version of the release, the licence, the supplier, and a package URL. `--purl=<purl>` sets it. Without it, a GitHub `--repo-url` gives `pkg:github/<owner>/<repo>@<version>`.
+- With `--project` (a `.dproj`, `.dpk`, or `.dpr`), the units in the `.dpk` contains clause, or the `.dpr` uses entries with an `in` path, are listed, with their `.dfm` or `.fmx`. The package or program file itself is listed too.
+- `--source-dir=<dir>` (repeatable, or `sourceDirs` in the config file) adds every `.pas`, `.inc`, `.dpk`, `.dpr`, `.dproj`, `.dfm`, `.fmx`, `.res`, `.dcr`, and `.rc` file under that directory. A relative path is resolved from the project directory. `include` and `exclude` filter the walk.
+- Every file is one component of type `file` with its relative path, the release version, SHA-256, and SHA-512. File components have no package URL.
+- The `.dpk` requires clause becomes one component per package. `rtl`, `vcl`, and `fmx` are `framework` components with the Delphi version. Other packages are listed by name.
+- CycloneDX compositions say which sets are complete. A `.dpr` has no requires clause, so the required packages are marked `unknown`.
+- The CRA and BSI header warnings run as in build mode, except the warning about a built file that was not found.
+
+`--project` is optional when at least one `--source-dir` is given. The config file keys are `library`, `sourceDirs`, `product.purl`, and `product.repoUrl`. See [Library SBOM](docs/Library-SBOM.md) for the difference between build mode and library mode.
+
 ## Configuration
 
 Add a `.dxcomply.json` to your project folder and pass `--ci` so the CLI loads it:
@@ -367,6 +387,7 @@ No internet connection is required. All processing is local.
 | [Architecture](docs/Architecture.md) | Engine pipeline, component overview, unit origin classification |
 | [CI Integration](docs/CI-Integration.md) | Command-line usage, GitHub Actions examples, CI configuration |
 | [Legacy Support](docs/LegacySupport.md) | MAP files from older Delphi versions, and which project files the CLI accepts |
+| [Library SBOM](docs/Library-SBOM.md) | Build mode and library mode, and what each SBOM contains |
 | [Example SBOM (JSON)](docs/examples/ConwaysLifeFMX.cdx.json) | CycloneDX 1.6 from ConwaysLifeFMX in RADStudio13Demos, Release/Win32 with a map file |
 | [Component manifest sample](docs/samples/components.sample.json) | Optional components.json (supplier, licence, version, type, package URL) |
 

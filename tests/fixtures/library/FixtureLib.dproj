@@ -1,0 +1,44 @@
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <ProjectGuid>{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}</ProjectGuid>
+    <MainSource>FixtureLib.dpk</MainSource>
+    <Base>true</Base>
+    <TargetedPlatforms>1</TargetedPlatforms>
+    <AppType>Package</AppType>
+    <FrameworkType>VCL</FrameworkType>
+    <ProjectVersion>20.3</ProjectVersion>
+    <VerInfo_IncludeVerInfo>true</VerInfo_IncludeVerInfo>
+    <VerInfo_MajorVer>1</VerInfo_MajorVer>
+    <VerInfo_MinorVer>2</VerInfo_MinorVer>
+    <VerInfo_Release>3</VerInfo_Release>
+    <VerInfo_Build>0</VerInfo_Build>
+    <DCC_ExeOutput>.</DCC_ExeOutput>
+    <DCC_BplOutput>.</DCC_BplOutput>
+  </PropertyGroup>
+  <ItemGroup>
+    <DelphiCompile Include="FixtureLib.dpk"/>
+    <DelphiCompile Include="FixtureLib.Core.pas"/>
+    <DelphiCompile Include="FixtureLib.Form.pas"/>
+    <DelphiCompile Include="sub\FixtureLib.Sub.pas"/>
+    <BuildConfiguration Include="Base">
+      <Key>Base</Key>
+    </BuildConfiguration>
+    <BuildConfiguration Include="Debug">
+      <Key>Cfg_1</Key>
+    </BuildConfiguration>
+    <BuildConfiguration Include="Release">
+      <Key>Cfg_2</Key>
+    </BuildConfiguration>
+  </ItemGroup>
+  <ProjectExtensions>
+    <Borland.Personality>Delphi.Personality.12</Borland.Personality>
+    <Borland.ProjectType>Package</Borland.ProjectType>
+    <BorlandProject>
+      <Delphi.Personality>
+        <Source>
+          <Source Name="MainSource">FixtureLib.dpk</Source>
+        </Source>
+      </Delphi.Personality>
+    </BorlandProject>
+  </ProjectExtensions>
+</Project>

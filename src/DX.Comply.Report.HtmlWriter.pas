@@ -59,13 +59,13 @@ begin
       Continue;
     if LArtefact.FileSize >= 0 then
       Lines.Add(Format('<tr><td>%s</td><td>%s</td><td>%d</td><td><code>%s</code></td></tr>', [
-        EscapeHtml(SafeText(LArtefact.RelativePath, LArtefact.FilePath)),
+        EscapeHtml(SafeText(SafeText(LArtefact.RelativePath, LArtefact.ComponentName), LArtefact.FilePath)),
         EscapeHtml(SafeText(LArtefact.ArtefactType)),
         LArtefact.FileSize,
         EscapeHtml(SafeText(LArtefact.Hash))]))
     else
       Lines.Add(Format('<tr><td>%s</td><td>%s</td><td>n/a</td><td><code>%s</code></td></tr>', [
-        EscapeHtml(SafeText(LArtefact.RelativePath, LArtefact.FilePath)),
+        EscapeHtml(SafeText(SafeText(LArtefact.RelativePath, LArtefact.ComponentName), LArtefact.FilePath)),
         EscapeHtml(SafeText(LArtefact.ArtefactType)),
         EscapeHtml(SafeText(LArtefact.Hash))]));
   end;
@@ -267,6 +267,8 @@ begin
       AddSummaryCard(Lines, 'Structural check', ValidationStatusText(AData), 'bad');
     Lines.Add('</div>');
     Lines.Add('<section><h2>Project Overview</h2><div class="table-wrap"><table><tbody>');
+    if SameText(AData.Metadata.ComponentType, 'library') then
+      Lines.Add('<tr><th>Mode</th><td>library</td></tr>');
     Lines.Add('<tr><th>Version</th><td>' + EscapeHtml(SafeText(AData.Metadata.ProductVersion, SafeText(AData.ProjectInfo.Version))) + '</td></tr>');
     Lines.Add('<tr><th>Platform</th><td>' + EscapeHtml(SafeText(AData.ProjectInfo.Platform)) + '</td></tr>');
     Lines.Add('<tr><th>Configuration</th><td>' + EscapeHtml(SafeText(AData.ProjectInfo.Configuration)) + '</td></tr>');

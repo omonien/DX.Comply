@@ -95,6 +95,18 @@ type
     /// during the most recent Scan. Empty when every pattern was usable.
     /// </summary>
     function PatternWarnings: TArray<string>;
+    /// <summary>
+    /// Prepares include and exclude globs for a library source walk.
+    /// An empty include list does not fall back to exe, dll, bpl, and dcp.
+    /// The caller has already kept the source extensions it wants.
+    /// </summary>
+    procedure BeginLibraryFilter(const AIncludePatterns, AExcludePatterns: TArray<string>);
+    /// <summary>
+    /// True when ARelativePath survives the filter from BeginLibraryFilter.
+    /// Excluded paths are rejected. With no include patterns, every other
+    /// path is accepted.
+    /// </summary>
+    function LibraryPathSelected(const ARelativePath: string): Boolean;
   end;
 
 implementation
@@ -303,6 +315,24 @@ begin
     FPatternWarnings.Clear;
   PreparePatterns(FIncludePatterns);
   PreparePatterns(FExcludePatterns);
+end;
+
+procedure TFileScanner.BeginLibraryFilter(const AIncludePatterns,
+  AExcludePatterns: TArray<string>);
+begin
+  BeginFilter(AIncludePatterns, AExcludePatterns);
+end;
+
+function TFileScanner.LibraryPathSelected(const ARelativePath: string): Boolean;
+begin
+  if IsExcluded(ARelativePath) then
+    Exit(False);
+  // Scan treats an empty include list as the binary extensions. A library
+  // walk has already applied its own extension list, so an empty include
+  // list keeps the file.
+  if Length(FIncludePatterns) = 0 then
+    Exit(True);
+  Result := MatchesPattern(ARelativePath, FIncludePatterns);
 end;
 
 function TFileScanner.IsUniversalScanPattern(const APattern: string): Boolean;

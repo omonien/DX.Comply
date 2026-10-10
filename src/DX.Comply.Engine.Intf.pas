@@ -66,6 +66,23 @@ type
     /// False means the writer may read a .pas once.
     /// </summary>
     UsesCached: Boolean;
+    /// <summary>
+    /// Component name written into the SBOM. Empty means the file name of
+    /// RelativePath, which is what build mode writes.
+    /// </summary>
+    ComponentName: string;
+    /// <summary>
+    /// Component version written into the SBOM. Empty means the first 12
+    /// characters of the SHA-256 hash when a hash is present, except for a
+    /// library source file.
+    /// </summary>
+    Version: string;
+    /// <summary>
+    /// True for a file of a library source release (library mode). Writers
+    /// omit the version when Version is empty, write no file: purl, and add
+    /// the relative path as net.developer-experts.dx-comply:relativePath.
+    /// </summary>
+    LibrarySourceFile: Boolean;
   end;
 
   /// <summary>
@@ -249,6 +266,28 @@ type
     /// or an http(s) URL. Empty means the writers omit the contact.
     /// </summary>
     SbomCreator: string;
+    /// <summary>
+    /// CycloneDX type of the root component. Empty means application, which
+    /// is what build mode writes. Library mode sets library.
+    /// </summary>
+    ComponentType: string;
+    /// <summary>
+    /// Package URL of the root component. Empty means the writers omit it.
+    /// </summary>
+    Purl: string;
+    /// <summary>
+    /// When True, compositions describe the library source set instead of
+    /// the uses graph.
+    /// </summary>
+    LibraryCompositions: Boolean;
+    /// <summary>
+    /// True when every scanned library file has a SHA-256 and a SHA-512.
+    /// </summary>
+    LibraryFilesComplete: Boolean;
+    /// <summary>
+    /// True when the requires names were read from a .dpk requires clause.
+    /// </summary>
+    LibraryRequiresDeclared: Boolean;
   end;
 
   /// <summary>
@@ -434,9 +473,21 @@ function FormatUtcTimestamp(const ATimestamp: string): string;
 function IsAcceptableBsiCreator(const AValue: string): Boolean;
 
 /// <summary>
-/// File name without a directory. Empty when ARelativePath has no name.
+/// File name without a directory. Slashes and backslashes both count as
+/// separators. Empty when ARelativePath has no name.
 /// </summary>
 function BsiComponentFileName(const ARelativePath: string): string;
+
+/// <summary>
+/// Name written on a component. ComponentName when it is set, otherwise
+/// the file name of RelativePath.
+/// </summary>
+function ArtefactComponentName(const AArtefact: TArtefactInfo): string;
+
+/// <summary>
+/// CycloneDX type of the root component. Empty metadata means application.
+/// </summary>
+function SbomRootComponentType(const AMetadata: TSbomMetadata): string;
 
 /// <summary>
 /// True for archive names used by TR-03183-2 section 8.1.6 and for a short
@@ -675,8 +726,34 @@ begin
 end;
 
 function BsiComponentFileName(const ARelativePath: string): string;
+var
+  I: Integer;
+  LPos: Integer;
 begin
-  Result := TPath.GetFileName(ARelativePath);
+  // TPath.GetFileName follows the platform separator. Library paths use
+  // '/', and a build path uses '\'. Take the last segment of either.
+  LPos := 0;
+  for I := 1 to Length(ARelativePath) do
+    if (ARelativePath[I] = '\') or (ARelativePath[I] = '/') then
+      LPos := I;
+  if LPos = 0 then
+    Result := ARelativePath
+  else
+    Result := Copy(ARelativePath, LPos + 1, MaxInt);
+end;
+
+function ArtefactComponentName(const AArtefact: TArtefactInfo): string;
+begin
+  Result := Trim(AArtefact.ComponentName);
+  if Result = '' then
+    Result := TPath.GetFileName(AArtefact.RelativePath);
+end;
+
+function SbomRootComponentType(const AMetadata: TSbomMetadata): string;
+begin
+  Result := Trim(AMetadata.ComponentType);
+  if Result = '' then
+    Result := 'application';
 end;
 
 function IsBsiArchiveFileName(const AFileName: string): Boolean;
