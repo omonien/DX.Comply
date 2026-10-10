@@ -242,17 +242,19 @@ begin
   LComponent.AddPair('name', ArtefactComponentName(AArtefact));
 
   // Version. An explicit version wins. Otherwise the hash prefix stands in
-  // for a file that has no product version.
+  // for a file that has no product version. A library source file without
+  // a release version has no version.
   if Trim(AArtefact.Version) <> '' then
     LComponent.AddPair('version', Trim(AArtefact.Version))
-  else if AArtefact.Hash <> '' then
+  else if (AArtefact.Hash <> '') and not AArtefact.LibrarySourceFile then
     LComponent.AddPair('version', Copy(AArtefact.Hash, 1, 12));
 
   // BOM reference
   LComponent.AddPair('bom-ref', 'comp-' + IntToStr(AIndex));
 
-  // File path. A requires package has no file, so it has no purl.
-  if AArtefact.RelativePath <> '' then
+  // File path. A requires package has no file, so it has no purl. A library
+  // source file has no package URL of its own; bom-ref identifies it.
+  if (AArtefact.RelativePath <> '') and not AArtefact.LibrarySourceFile then
     LComponent.AddPair('purl', 'file:' + AArtefact.RelativePath);
 
   // Hashes. SHA-256 stays first. SHA-512 is added when the file was hashed.
@@ -339,6 +341,8 @@ begin
     LProp.AddPair('value', 'true');
     LProperties.Add(LProp);
   end;
+  if AArtefact.LibrarySourceFile and (AArtefact.RelativePath <> '') then
+    AddProperty('net.developer-experts.dx-comply:relativePath', AArtefact.RelativePath);
 
   // BSI TR-03183-2 file properties. Omitted when there is no file name,
   // which is how a logical component is left without these fields.

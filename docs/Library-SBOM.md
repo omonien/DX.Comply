@@ -19,7 +19,7 @@ Library mode describes the source release:
 | Part | Content |
 |---|---|
 | Root component | Type `library`, name, version, licence, supplier, supplier URL, package URL |
-| File components | One per shipped source file, type `file`, relative path, SHA-256, SHA-512 |
+| File components | One per shipped source file, type `file`, relative path as name, the release version, SHA-256, SHA-512, and the property `net.developer-experts.dx-comply:relativePath`. No package URL |
 | Required packages | One per name in the `.dpk` requires clause. `rtl`, `vcl`, and `fmx` are `framework` with the Delphi version |
 | Compositions | Files complete when every file was hashed. Required packages complete when a requires clause was read, otherwise `unknown` |
 | Property | `net.developer-experts.dx-comply:document.profile` = `library-source` |
@@ -35,7 +35,7 @@ Both sets are merged. A file appears once. `{$I}` directives are not followed, s
 
 ### Version and package URL
 
-`--version` overrides the project version. Set it when the version info still says 1.0.0.0, which also raises a CRA warning. `--purl` sets the package URL. Without it, `--repo-url=https://github.com/<owner>/<repo>` gives `pkg:github/<owner>/<repo>@<version>`. Other hosts get no derived purl.
+`--version` overrides the project version. Set it when the version info still says 1.0.0.0, which also raises a CRA warning. Every file component carries the same release version. When no version is known, file components have no version field. `--purl` sets the package URL. Without it, `--repo-url=https://github.com/<owner>/<repo>` gives `pkg:github/<owner>/<repo>@<version>`. Other hosts get no derived purl.
 
 ### Example
 

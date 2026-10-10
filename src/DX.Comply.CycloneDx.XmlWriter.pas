@@ -262,7 +262,7 @@ begin
 
   if Trim(AArtefact.Version) <> '' then
     AddElement('version', Trim(AArtefact.Version))
-  else if AArtefact.Hash <> '' then
+  else if (AArtefact.Hash <> '') and not AArtefact.LibrarySourceFile then
     AddElement('version', Copy(AArtefact.Hash, 1, 12));
 
   // Component sequence: name, version, then hashes, then purl, then properties.
@@ -276,7 +276,8 @@ begin
     CloseTag('hashes');
   end;
 
-  if AArtefact.RelativePath <> '' then
+  // A library source file has no package URL of its own.
+  if (AArtefact.RelativePath <> '') and not AArtefact.LibrarySourceFile then
     AddElement('purl', 'file:' + AArtefact.RelativePath);
 
   // Component sequence places externalReferences after purl and before
@@ -342,6 +343,9 @@ begin
       FLines[FLines.Count - 1] := StringOfChar(' ', FIndentLevel * 2) +
         '<property name="net.developer-experts.dx-comply:conditional">true</property>';
     end;
+    if AArtefact.LibrarySourceFile and (AArtefact.RelativePath <> '') then
+      AddLine('<property name="net.developer-experts.dx-comply:relativePath">' +
+        EscapeXml(AArtefact.RelativePath) + '</property>');
     if LFileName <> '' then
     begin
       AddLine('<property name="bsi:component:filename">' + EscapeXml(LFileName) + '</property>');

@@ -249,7 +249,7 @@ dxcomply --library --project=Source\MyLib.dproj --source-dir=Source --version=2.
 - The root component has type `library`, the name and version of the release, the licence, the supplier, and a package URL. `--purl=<purl>` sets it. Without it, a GitHub `--repo-url` gives `pkg:github/<owner>/<repo>@<version>`.
 - With `--project` (a `.dproj`, `.dpk`, or `.dpr`), the units in the `.dpk` contains clause, or the `.dpr` uses entries with an `in` path, are listed, with their `.dfm` or `.fmx`. The package or program file itself is listed too.
 - `--source-dir=<dir>` (repeatable, or `sourceDirs` in the config file) adds every `.pas`, `.inc`, `.dpk`, `.dpr`, `.dproj`, `.dfm`, `.fmx`, `.res`, `.dcr`, and `.rc` file under that directory. A relative path is resolved from the project directory. `include` and `exclude` filter the walk.
-- Every file is one component of type `file` with its relative path, SHA-256, and SHA-512.
+- Every file is one component of type `file` with its relative path, the release version, SHA-256, and SHA-512. File components have no package URL.
 - The `.dpk` requires clause becomes one component per package. `rtl`, `vcl`, and `fmx` are `framework` components with the Delphi version. Other packages are listed by name.
 - CycloneDX compositions say which sets are complete. A `.dpr` has no requires clause, so the required packages are marked `unknown`.
 - The CRA and BSI header warnings run as in build mode, except the warning about a built file that was not found.

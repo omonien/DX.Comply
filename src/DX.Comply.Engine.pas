@@ -1852,6 +1852,7 @@ begin
       LArtefact.RelativePath := LFile.RelativePath;
       LArtefact.ComponentName := LFile.RelativePath;
       LArtefact.ArtefactType := 'file';
+      LArtefact.LibrarySourceFile := True;
       LArtefact.FileSize := -1;
       if TFile.Exists(LFile.FullPath) then
       begin
@@ -1926,6 +1927,14 @@ begin
     LMetadata.ToolVersion := GetDxComplyToolVersion;
     LMetadata.ComponentType := 'library';
     LVersion := LMetadata.ProductVersion;
+    // Every shipped file carries the release version. Unknown stays empty.
+    for I := 0 to LArtefacts.Count - 1 do
+      if LArtefacts[I].LibrarySourceFile then
+      begin
+        LArtefact := LArtefacts[I];
+        LArtefact.Version := Trim(LVersion);
+        LArtefacts[I] := LArtefact;
+      end;
     if Trim(FConfig.Purl) <> '' then
       LMetadata.Purl := Trim(FConfig.Purl)
     else

@@ -73,9 +73,16 @@ type
     ComponentName: string;
     /// <summary>
     /// Component version written into the SBOM. Empty means the first 12
-    /// characters of the SHA-256 hash when a hash is present.
+    /// characters of the SHA-256 hash when a hash is present, except for a
+    /// library source file.
     /// </summary>
     Version: string;
+    /// <summary>
+    /// True for a file of a library source release (library mode). Writers
+    /// omit the version when Version is empty, write no file: purl, and add
+    /// the relative path as net.developer-experts.dx-comply:relativePath.
+    /// </summary>
+    LibrarySourceFile: Boolean;
   end;
 
   /// <summary>
