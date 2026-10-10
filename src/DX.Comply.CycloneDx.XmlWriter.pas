@@ -207,6 +207,8 @@ begin
     AddElement('version', AMetadata.ProductVersion)
   else if AProjectInfo.Version <> '' then
     AddElement('version', AProjectInfo.Version);
+  // bom-1.6 component order: version, then licenses, then properties.
+  AppendCycloneDxLicencesXml(FLines, AMetadata.Licence, '', FIndentLevel);
   AddPropertyElements(AMetadata.ComponentProperties);
   CloseTag('component');
 

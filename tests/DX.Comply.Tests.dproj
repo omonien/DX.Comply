@@ -108,6 +108,7 @@
         <DCCReference Include="DX.Comply.Tests.UsesClauseParser.pas"/>
         <DCCReference Include="DX.Comply.Tests.DependencyGraph.pas"/>
         <DCCReference Include="DX.Comply.Tests.VersionInfo.pas"/>
+        <DCCReference Include="DX.Comply.Tests.CraChecks.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>

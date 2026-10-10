@@ -9,7 +9,8 @@
 /// IOTAMessageServices. All calls are guarded against unavailable IDE
 /// services so the unit is safe to use during package load/unload.
 ///
-/// TIDELogger.Progress routes to Error or Info based on the sign of APercent.
+/// TIDELogger.Progress routes a negative percent to Error, a message that
+/// starts with "Warning:" to Warning, and every other message to Info.
 /// </remarks>
 ///
 /// <copyright>
@@ -55,7 +56,8 @@ type
     class procedure Error(const AMessage: string);
     /// <summary>
     /// Writes a progress update to the IDE message window.
-    /// Negative APercent values are treated as errors.
+    /// A negative APercent is an error. A message that starts with
+    /// "Warning:" (any case) is a warning. Every other message is information.
     /// </summary>
     /// <param name="AMessage">The message text to display.</param>
     /// <param name="APercent">Completion percentage (0-100). Use -1 to signal an error.</param>
@@ -128,8 +130,12 @@ end;
 class procedure TIDELogger.Progress(const AMessage: string; const APercent: Integer);
 begin
   // Negative percent signals an error condition from the engine.
+  // The CLI prints a message that starts with "Warning:" as [WARN ].
+  // The Messages window uses the same split, so those lines are [WARNING].
   if APercent < 0 then
     Error(AMessage)
+  else if AMessage.StartsWith('Warning:', True) then
+    Warning(AMessage)
   else
     Info(Format('[%d%%] %s', [APercent, AMessage]));
 end;

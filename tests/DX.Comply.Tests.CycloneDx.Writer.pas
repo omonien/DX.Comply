@@ -170,6 +170,13 @@ type
     /// <summary>An explicit metadata tool version must be written as supplied.</summary>
     [Test]
     procedure Write_ToolVersion_UsesMetadataOverride;
+
+    /// <summary>
+    /// The product licence is metadata.component.licenses.
+    /// An empty licence writes no licenses element.
+    /// </summary>
+    [Test]
+    procedure Write_RootLicence_OnMetadataComponent;
   end;
 
 implementation
@@ -188,6 +195,8 @@ begin
   FMetadata.ProductName    := 'TestApp';
   FMetadata.ProductVersion := '1.0.0';
   FMetadata.Supplier       := 'Test Supplier';
+  FMetadata.SupplierUrl    := '';
+  FMetadata.Licence        := '';
   FMetadata.Timestamp      := '2026-01-01T00:00:00';
   FMetadata.ToolName       := 'DX.Comply';
   FMetadata.ToolVersion    := '';
@@ -883,6 +892,48 @@ begin
     LTool := LComponents.Items[0] as TJSONObject;
     Assert.AreEqual('9.9.9-meta', LTool.GetValue<string>('version'),
       'An explicit metadata tool version must be written unchanged');
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TCycloneDxWriterTests.Write_RootLicence_OnMetadataComponent;
+var
+  LJson, LMetadata, LComponent, LLicense: TJSONObject;
+  LLicences: TJSONArray;
+begin
+  FMetadata.ProductName := 'TestApp';
+  FMetadata.Licence := 'MIT';
+  Assert.IsTrue(FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LJson := LoadOutputJson;
+  Assert.IsNotNull(LJson);
+  try
+    LMetadata := LJson.GetValue('metadata') as TJSONObject;
+    Assert.IsNotNull(LMetadata, 'metadata must be present');
+    LComponent := LMetadata.GetValue('component') as TJSONObject;
+    Assert.IsNotNull(LComponent, 'metadata.component must be present');
+    Assert.AreEqual('TestApp', LComponent.GetValue<string>('name'));
+    LLicences := LComponent.GetValue('licenses') as TJSONArray;
+    Assert.IsNotNull(LLicences, 'metadata.component.licenses must be present');
+    Assert.AreEqual(2, Integer(LLicences.Count));
+    LLicense := (LLicences.Items[0] as TJSONObject).GetValue('license') as TJSONObject;
+    Assert.AreEqual('MIT', LLicense.GetValue<string>('id'));
+    Assert.AreEqual('concluded', LLicense.GetValue<string>('acknowledgement'));
+    LLicense := (LLicences.Items[1] as TJSONObject).GetValue('license') as TJSONObject;
+    Assert.AreEqual('MIT', LLicense.GetValue<string>('id'));
+    Assert.AreEqual('declared', LLicense.GetValue<string>('acknowledgement'));
+  finally
+    LJson.Free;
+  end;
+
+  FMetadata.Licence := '';
+  Assert.IsTrue(FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LJson := LoadOutputJson;
+  Assert.IsNotNull(LJson);
+  try
+    LComponent := (LJson.GetValue('metadata') as TJSONObject).GetValue('component') as TJSONObject;
+    Assert.IsNull(LComponent.GetValue('licenses'),
+      'An empty licence writes no licenses element');
   finally
     LJson.Free;
   end;

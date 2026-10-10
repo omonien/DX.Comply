@@ -225,6 +225,11 @@ type
     /// </summary>
     SupplierUrl: string;
     /// <summary>
+    /// Distribution licence of the primary component. An SPDX identifier,
+    /// an SPDX expression, or a plain name. Empty means the writers omit it.
+    /// </summary>
+    Licence: string;
+    /// <summary>
     /// Raw components.json text. Empty when no component manifest is in use.
     /// Writers read this to group matched units under library components.
     /// </summary>

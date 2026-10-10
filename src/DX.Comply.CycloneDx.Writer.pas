@@ -149,6 +149,10 @@ begin
     LComponent.AddPair('supplier', LSupplier);
   end;
 
+  // Same classification as a manifest library. Empty writes nothing.
+  // licences sit before properties, matching the component sequence.
+  AddCycloneDxLicences(LComponent, AMetadata.Licence, '');
+
   if Length(AMetadata.ComponentProperties) > 0 then
     LComponent.AddPair('properties', BuildProperties(AMetadata.ComponentProperties));
 

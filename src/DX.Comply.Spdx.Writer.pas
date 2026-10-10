@@ -18,7 +18,8 @@
 /// creationInfo.created is UTC YYYY-MM-DDThh:mm:ssZ. Package external
 /// references use a percent-encoded pkg:generic PURL so the locator has no
 /// whitespace (issue #40). licenseConcluded and licenseDeclared are
-/// NOASSERTION. supplier uses Organization: when metadata supplies a name.
+/// NOASSERTION, except the built program when a product licence is set.
+/// supplier uses Organization: when metadata supplies a name.
 ///
 /// SPDX JSON is part of the MIT-licensed tool, the same as the CycloneDX writers.
 /// </remarks>
@@ -63,7 +64,7 @@ type
     function BuildGenericPurl(const ARelativePath: string): string;
     function BuildCreationInfo(const AMetadata: TSbomMetadata): TJSONObject;
     function BuildPackage(const AArtefact: TArtefactInfo; const ASpdxId,
-      ASupplier: string): TJSONObject;
+      ASupplier, ALicence: string): TJSONObject;
     function BuildRelationships(const AArtefacts: TArtefactList;
       const APackageIds: TArray<string>;
       const ADocumentSpdxId, AProjectName: string): TJSONArray;
@@ -377,12 +378,14 @@ begin
 end;
 
 function TSpdxJsonWriter.BuildPackage(const AArtefact: TArtefactInfo;
-  const ASpdxId, ASupplier: string): TJSONObject;
+  const ASpdxId, ASupplier, ALicence: string): TJSONObject;
 var
   LPackage: TJSONObject;
   LChecksums: TJSONArray;
   LChecksum: TJSONObject;
   LFileName: string;
+  LKind: TLicenceKind;
+  LToken: string;
 begin
   LPackage := TJSONObject.Create;
 
@@ -400,8 +403,11 @@ begin
 
   LPackage.AddPair('downloadLocation', 'NOASSERTION');
   LPackage.AddPair('filesAnalyzed', TJSONBool.Create(False));
-  LPackage.AddPair('licenseConcluded', 'NOASSERTION');
-  LPackage.AddPair('licenseDeclared', 'NOASSERTION');
+  // The built program carries the product licence. Every other package
+  // stays NOASSERTION, the same as a scanned file with no manifest row.
+  LToken := SpdxLicenceTokenFor(ALicence, LKind);
+  LPackage.AddPair('licenseConcluded', LToken);
+  LPackage.AddPair('licenseDeclared', LToken);
 
   // Package verification code is not applicable for binary-only analysis.
   // --supplier / product.supplier is an organization name, not an SPDX agent
@@ -450,6 +456,41 @@ begin
   end;
 
   Result := LPackage;
+end;
+
+procedure AddRootExtractedLicence(ARoot: TJSONObject; const ALicence: string);
+var
+  LKind: TLicenceKind;
+  LToken, LNormalised: string;
+  LArray: TJSONArray;
+  LInfo: TJSONObject;
+  LItem: TJSONValue;
+  I: Integer;
+begin
+  LToken := SpdxLicenceTokenFor(ALicence, LKind);
+  if LKind <> lkName then
+    Exit;
+  ClassifyLicence(ALicence, LNormalised);
+  if ARoot.GetValue('hasExtractedLicensingInfos') is TJSONArray then
+    LArray := TJSONArray(ARoot.GetValue('hasExtractedLicensingInfos'))
+  else
+  begin
+    LArray := TJSONArray.Create;
+    ARoot.AddPair('hasExtractedLicensingInfos', LArray);
+  end;
+  for I := 0 to LArray.Count - 1 do
+  begin
+    if not (LArray.Items[I] is TJSONObject) then
+      Continue;
+    LItem := TJSONObject(LArray.Items[I]).GetValue('licenseId');
+    if (LItem <> nil) and SameText(LItem.Value, LToken) then
+      Exit;
+  end;
+  LInfo := TJSONObject.Create;
+  LArray.Add(LInfo);
+  LInfo.AddPair('licenseId', LToken);
+  LInfo.AddPair('name', LNormalised);
+  LInfo.AddPair('extractedText', LNormalised);
 end;
 
 function TSpdxJsonWriter.BuildRelationships(const AArtefacts: TArtefactList;
@@ -539,6 +580,7 @@ var
   LPackageIds: TArray<string>;
   LGraph: TUsesDependencyGraph;
   I: Integer;
+  LRootIndex: Integer;
 begin
   Result := False;
   if AOutputPath = '' then
@@ -568,10 +610,17 @@ begin
     LRoot.AddPair('creationInfo', BuildCreationInfo(AMetadata));
 
     // Packages. IDs are assigned once so relationships point at the same values.
+    // The product licence is written on the built program only.
+    LRootIndex := FindDeliverableTargetIndex(AArtefacts, AProjectInfo.ProjectName);
     LPackageIds := CollectPackageSpdxIds(AArtefacts);
     LPackages := TJSONArray.Create;
     for I := 0 to AArtefacts.Count - 1 do
-      LPackages.Add(BuildPackage(AArtefacts[I], LPackageIds[I], AMetadata.Supplier));
+      if I = LRootIndex then
+        LPackages.Add(BuildPackage(AArtefacts[I], LPackageIds[I], AMetadata.Supplier,
+          AMetadata.Licence))
+      else
+        LPackages.Add(BuildPackage(AArtefacts[I], LPackageIds[I], AMetadata.Supplier,
+          ''));
     LRoot.AddPair('packages', LPackages);
 
     // Relationships. Manifest libraries use the same package IDs.
@@ -584,6 +633,8 @@ begin
       ApplyManifestSpdx(AMetadata.ComponentManifestJson, AArtefacts, LPackages,
         LRoot.GetValue('relationships') as TJSONArray, LPackageIds,
         LDocumentSpdxId, LRoot);
+    if (LRootIndex >= 0) and (Trim(AMetadata.Licence) <> '') then
+      AddRootExtractedLicence(LRoot, AMetadata.Licence);
     AppendUsesRelationships(LRoot.GetValue('relationships') as TJSONArray,
       LPackageIds, LGraph);
 

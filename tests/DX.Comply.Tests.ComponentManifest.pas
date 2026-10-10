@@ -598,6 +598,13 @@ begin
   Assert.AreEqual('From CLI', LMetadata.Supplier);
   Assert.AreEqual('', LMetadata.SupplierUrl,
     'A manifest URL must not be attached to a different supplier name');
+
+  LMetadata := Default(TSbomMetadata);
+  LMetadata.SupplierUrl := 'https://cli.example';
+  ApplyManifestPublisher(LManifest, LMetadata);
+  Assert.AreEqual('Acme GmbH', LMetadata.Supplier);
+  Assert.AreEqual('https://cli.example', LMetadata.SupplierUrl,
+    'An explicit supplier URL stays when the manifest fills an empty name');
 end;
 
 procedure TComponentManifestTests.Resolve_RelativePath_UsesProjectDir;
