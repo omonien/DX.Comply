@@ -894,7 +894,7 @@ begin
     LCandidates := [LName];
 
   // 1. Full path given in code.
-  if TPath.IsPathRooted(LName) and (TPath.GetDriveName(LName) <> '') then
+  if TPath.IsPathRooted(LName) and (ExtractFileDrive(LName) <> '') then
   begin
     for LCandidate in LCandidates do
       if TFile.Exists(LCandidate) then
