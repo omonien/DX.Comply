@@ -68,6 +68,8 @@ Root: HKCU; Subkey: "{#BDSRegKey}\Known Packages"; ValueType: string; ValueName:
 Root: HKCU; Subkey: "{#BDSRegKey}\Environment Variables"; ValueType: string; ValueName: "DXCOMPLY"; ValueData: "{app}\bpl"; Flags: uninsdeletevalue
 
 [Code]
+#include "DX.Comply.StalePaths.iss"
+
 function IsDelphi13Installed: Boolean;
 begin
   Result := RegKeyExists(HKEY_LOCAL_MACHINE, 'SOFTWARE\Embarcadero\BDS\{#BDSVersion}') or
@@ -87,6 +89,19 @@ begin
            mbError, MB_OK);
     Result := False;
   end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  // Clean up library path entries left by an earlier GetIt install (#67).
+  if CurStep = ssPostInstall then
+    CleanStaleDXComplyGetItPaths;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usPostUninstall then
+    CleanStaleDXComplyGetItPaths;
 end;
 
 [Run]
