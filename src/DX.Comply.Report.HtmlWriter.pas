@@ -51,21 +51,28 @@ uses
 procedure THtmlReportWriter.AddArtefacts(Lines: TStrings; const AData: TComplianceReportData);
 var
   LArtefact: TArtefactInfo;
+  LPathCell: string;
 begin
   Lines.Add('<section><h2>Artefacts</h2><div class="table-wrap"><table><thead><tr><th>Relative Path</th><th>Type</th><th>Size</th><th>SHA-256</th></tr></thead><tbody>');
   for LArtefact in AData.Artefacts do
   begin
     if LArtefact.ArtefactType = 'unit-evidence' then
       Continue;
+    LPathCell := EscapeHtml(SafeText(SafeText(LArtefact.RelativePath, LArtefact.ComponentName), LArtefact.FilePath));
+    // Issue #59: a DLL found only in a system directory has no hash. Show
+    // where it was found instead.
+    if LArtefact.Location <> '' then
+      LPathCell := LPathCell + '<br><small>System directory: ' +
+        EscapeHtml(LArtefact.Location) + '</small>';
     if LArtefact.FileSize >= 0 then
       Lines.Add(Format('<tr><td>%s</td><td>%s</td><td>%d</td><td><code>%s</code></td></tr>', [
-        EscapeHtml(SafeText(SafeText(LArtefact.RelativePath, LArtefact.ComponentName), LArtefact.FilePath)),
+        LPathCell,
         EscapeHtml(SafeText(LArtefact.ArtefactType)),
         LArtefact.FileSize,
         EscapeHtml(SafeText(LArtefact.Hash))]))
     else
       Lines.Add(Format('<tr><td>%s</td><td>%s</td><td>n/a</td><td><code>%s</code></td></tr>', [
-        EscapeHtml(SafeText(SafeText(LArtefact.RelativePath, LArtefact.ComponentName), LArtefact.FilePath)),
+        LPathCell,
         EscapeHtml(SafeText(LArtefact.ArtefactType)),
         EscapeHtml(SafeText(LArtefact.Hash))]));
   end;

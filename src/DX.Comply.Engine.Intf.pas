@@ -83,6 +83,20 @@ type
     /// the relative path as net.developer-experts.dx-comply:relativePath.
     /// </summary>
     LibrarySourceFile: Boolean;
+    /// <summary>
+    /// Where a source-scanned DLL was found: explicit-path, output-directory
+    /// or system-directory. Empty when the file was not found or the
+    /// artefact is not a DLL reference. Writers emit this as
+    /// net.developer-experts.dx-comply:locationSource.
+    /// </summary>
+    LocationSource: string;
+    /// <summary>
+    /// Full path of a DLL that was found only in a Windows system
+    /// directory. No hash is recorded for it, because the build machine's
+    /// copy does not represent the target system. Writers emit this as
+    /// net.developer-experts.dx-comply:location.
+    /// </summary>
+    Location: string;
   end;
 
   /// <summary>

@@ -235,6 +235,12 @@ type
   /// <summary>
   /// Main facade for SBOM generation.
   /// </summary>
+  /// <summary>
+  /// Where ResolveExternalDllFile found a DLL named in source code.
+  /// </summary>
+  TDllLocationSource = (dlsNotFound, dlsExplicitPath, dlsOutputDirectory,
+    dlsSystemDirectory);
+
   TDxComplyGenerator = class
   private
     FProjectScanner: IProjectScanner;
@@ -321,6 +327,29 @@ type
     /// </summary>
     class function ScanPasFilesForDllReferences(
       const APasFilePaths: TArray<string>): TArray<string>; overload; static;
+    /// <summary>
+    /// Finds the file of a DLL named in source code. The order is: the full
+    /// path given in code, the application output directory, then the
+    /// system directories in ASystemDirs. A name without an extension is
+    /// also tried with .dll, the same as LoadLibrary does. Returns the full
+    /// path, or an empty string with dlsNotFound. Public for testability.
+    /// </summary>
+    class function ResolveExternalDllFile(const ADllName, AOutputDir: string;
+      const ASystemDirs: TArray<string>;
+      out ASource: TDllLocationSource): string; static;
+    /// <summary>
+    /// Windows system directory that holds DLLs for the target platform:
+    /// SysWOW64 for Win32 on 64-bit Windows, System32 for Win64 (Sysnative
+    /// when this process is 32-bit, so file system redirection does not
+    /// apply). Empty for non-Windows targets.
+    /// </summary>
+    class function SystemDirectoriesForPlatform(
+      const APlatform: string): TArray<string>; static;
+    /// <summary>
+    /// Text for the locationSource property, e.g. output-directory.
+    /// </summary>
+    class function DllLocationSourceText(
+      ASource: TDllLocationSource): string; static;
     /// <summary>
     /// Creates a new TDxComplyGenerator instance.
     /// </summary>
@@ -678,6 +707,11 @@ var
   LSearchPaths: TArray<string>;
   LDllName, LFilePath: string;
   LResolvedUnit: TResolvedUnitInfo;
+  LOutputDir, LResolvedPath: string;
+  LSystemDirs: TArray<string>;
+  LSource: TDllLocationSource;
+  LExisting: TArtefactInfo;
+  LReused: Boolean;
   I: Integer;
 begin
   LPasFiles := TList<string>.Create;
@@ -723,6 +757,15 @@ begin
     LDllNames := ScanPasFilesForDllReferences(LPasFiles.ToArray, LSearchPaths,
       LConditional);
 
+    // Issue #59: look for the file. A file next to the program, or at a full
+    // path given in code, is what ships, so it gets size and hashes. A file
+    // found only in a system directory is the build machine's copy, so only
+    // its location is recorded.
+    LOutputDir := AProjectInfo.ArtefactOutputDir;
+    if LOutputDir = '' then
+      LOutputDir := AProjectInfo.OutputDir;
+    LSystemDirs := SystemDirectoriesForPlatform(AProjectInfo.Platform);
+
     for I := 0 to High(LDllNames) do
     begin
       LDllName := LDllNames[I];
@@ -739,11 +782,162 @@ begin
       if I < Length(LConditional) then
         LArtefact.Conditional := LConditional[I];
 
+      LResolvedPath := ResolveExternalDllFile(LDllName, LOutputDir, LSystemDirs,
+        LSource);
+      case LSource of
+        dlsExplicitPath, dlsOutputDirectory:
+          begin
+            LArtefact.FilePath := LResolvedPath;
+            LArtefact.LocationSource := DllLocationSourceText(LSource);
+            // The output directory scan may already have hashed this file.
+            LReused := False;
+            for LExisting in AArtefacts do
+              if SameText(LExisting.FilePath, LResolvedPath) and
+                (LExisting.Hash <> '') then
+              begin
+                LArtefact.FileSize := LExisting.FileSize;
+                LArtefact.Hash := LExisting.Hash;
+                LArtefact.HashSha512 := LExisting.HashSha512;
+                LReused := True;
+                Break;
+              end;
+            if not LReused then
+              try
+                LArtefact.FileSize := TFile.GetSize(LResolvedPath);
+                LArtefact.Hash := FHashService.ComputeSha256(LResolvedPath);
+                LArtefact.HashSha512 := FHashService.ComputeSha512(LResolvedPath);
+              except
+                LArtefact.FileSize := -1;
+                LArtefact.Hash := '';
+                LArtefact.HashSha512 := '';
+              end;
+          end;
+        dlsSystemDirectory:
+          begin
+            LArtefact.LocationSource := DllLocationSourceText(LSource);
+            LArtefact.Location := LResolvedPath;
+          end;
+      end;
+
       AArtefacts.Add(LArtefact);
     end;
   finally
     LPasFiles.Free;
   end;
+end;
+
+class function TDxComplyGenerator.DllLocationSourceText(
+  ASource: TDllLocationSource): string;
+begin
+  case ASource of
+    dlsExplicitPath:
+      Result := 'explicit-path';
+    dlsOutputDirectory:
+      Result := 'output-directory';
+    dlsSystemDirectory:
+      Result := 'system-directory';
+  else
+    Result := '';
+  end;
+end;
+
+class function TDxComplyGenerator.SystemDirectoriesForPlatform(
+  const APlatform: string): TArray<string>;
+var
+  LWindowsDir, LSysWow64: string;
+begin
+  SetLength(Result, 0);
+  LWindowsDir := GetEnvironmentVariable('SystemRoot');
+  if LWindowsDir = '' then
+    LWindowsDir := GetEnvironmentVariable('windir');
+  if LWindowsDir = '' then
+    Exit;
+
+  if SameText(APlatform, 'Win32') or (APlatform = '') then
+  begin
+    // A 32-bit program loads system DLLs from SysWOW64 on 64-bit Windows.
+    // That path is not redirected, so it works from a 32-bit IDE too.
+    LSysWow64 := TPath.Combine(LWindowsDir, 'SysWOW64');
+    if TDirectory.Exists(LSysWow64) then
+      Result := [LSysWow64]
+    else
+      Result := [TPath.Combine(LWindowsDir, 'System32')];
+  end
+  else if SameText(APlatform, 'Win64') or SameText(APlatform, 'Win64x') or
+    SameText(APlatform, 'WinARM64EC') then
+  begin
+    // A 32-bit process sees SysWOW64 under System32. Sysnative is the
+    // real System32 for such a process.
+    if SizeOf(Pointer) = 4 then
+      Result := [TPath.Combine(LWindowsDir, 'Sysnative')]
+    else
+      Result := [TPath.Combine(LWindowsDir, 'System32')];
+  end;
+end;
+
+class function TDxComplyGenerator.ResolveExternalDllFile(const ADllName,
+  AOutputDir: string; const ASystemDirs: TArray<string>;
+  out ASource: TDllLocationSource): string;
+var
+  LCandidates: TArray<string>;
+  LName, LCandidate, LDir, LPath: string;
+begin
+  Result := '';
+  ASource := dlsNotFound;
+  LName := Trim(ADllName);
+  if LName = '' then
+    Exit;
+
+  if TPath.GetExtension(LName) = '' then
+    LCandidates := [LName, LName + '.dll']
+  else
+    LCandidates := [LName];
+
+  // 1. Full path given in code.
+  if TPath.IsPathRooted(LName) and (TPath.GetDriveName(LName) <> '') then
+  begin
+    for LCandidate in LCandidates do
+      if TFile.Exists(LCandidate) then
+      begin
+        ASource := dlsExplicitPath;
+        Exit(TPath.GetFullPath(LCandidate));
+      end;
+    // Not there: look for the file name in the places below.
+    if TPath.GetExtension(LName) = '' then
+      LCandidates := [TPath.GetFileName(LName), TPath.GetFileName(LName) + '.dll']
+    else
+      LCandidates := [TPath.GetFileName(LName)];
+  end;
+
+  // 2. Application output directory.
+  if (AOutputDir <> '') and TDirectory.Exists(AOutputDir) then
+    for LCandidate in LCandidates do
+    begin
+      LPath := TPath.Combine(AOutputDir, LCandidate);
+      if TFile.Exists(LPath) then
+      begin
+        ASource := dlsOutputDirectory;
+        Exit(TPath.GetFullPath(LPath));
+      end;
+    end;
+
+  // 3. Windows system directory for the target bitness. Only a plain file
+  // name is looked up there.
+  for LDir in ASystemDirs do
+    for LCandidate in LCandidates do
+    begin
+      if TPath.GetFileName(LCandidate) <> LCandidate then
+        Continue;
+      LPath := TPath.Combine(LDir, LCandidate);
+      if TFile.Exists(LPath) then
+      begin
+        ASource := dlsSystemDirectory;
+        // Report the directory under the name the target program sees.
+        Result := StringReplace(TPath.GetFullPath(LPath), '\Sysnative\',
+          '\System32\', [rfIgnoreCase]);
+        Exit;
+      end;
+    end;
 end;
 
 class function TDxComplyGenerator.ScanPasFilesForDllReferences(

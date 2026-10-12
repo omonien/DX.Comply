@@ -305,7 +305,8 @@ begin
   LFileName := BsiComponentFileName(AArtefact.RelativePath);
   if (AArtefact.FileSize >= 0) or (Trim(AArtefact.Origin) <> '') or
      (Trim(AArtefact.Evidence) <> '') or (Trim(AArtefact.Confidence) <> '') or
-     AArtefact.Conditional or (LFileName <> '') or AUnresolvedSource then
+     AArtefact.Conditional or (LFileName <> '') or AUnresolvedSource or
+     (AArtefact.LocationSource <> '') or (AArtefact.Location <> '') then
   begin
     OpenTag('properties');
     if AArtefact.FileSize >= 0 then
@@ -346,6 +347,13 @@ begin
     if AArtefact.LibrarySourceFile and (AArtefact.RelativePath <> '') then
       AddLine('<property name="net.developer-experts.dx-comply:relativePath">' +
         EscapeXml(AArtefact.RelativePath) + '</property>');
+    // Issue #59: where a source-scanned DLL was found.
+    if AArtefact.LocationSource <> '' then
+      AddLine('<property name="net.developer-experts.dx-comply:locationSource">' +
+        EscapeXml(AArtefact.LocationSource) + '</property>');
+    if AArtefact.Location <> '' then
+      AddLine('<property name="net.developer-experts.dx-comply:location">' +
+        EscapeXml(AArtefact.Location) + '</property>');
     if LFileName <> '' then
     begin
       AddLine('<property name="bsi:component:filename">' + EscapeXml(LFileName) + '</property>');

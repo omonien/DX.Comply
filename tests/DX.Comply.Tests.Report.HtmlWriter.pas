@@ -59,6 +59,13 @@ type
     /// </summary>
     [Test]
     procedure Write_ExternalDllReference_AppearsInArtefactsTable;
+    /// <summary>
+    /// A DLL found in the output directory shows its size and SHA-256, and a
+    /// DLL found only in a system directory shows where it was found.
+    /// Issue #59.
+    /// </summary>
+    [Test]
+    procedure Write_ExternalDll_ShowsSizeHashAndSystemLocation;
   end;
 
 implementation
@@ -219,6 +226,37 @@ begin
     'the external DLL must be labelled as an external-reference artefact');
   Assert.IsTrue(Pos('>n/a<', LContent) > 0,
     'a missing file size must be shown as n/a rather than omitting the row');
+end;
+
+procedure THtmlReportWriterTests.Write_ExternalDll_ShowsSizeHashAndSystemLocation;
+var
+  LArtefact: TArtefactInfo;
+  LContent: string;
+  LWriter: IHumanReadableReportWriter;
+begin
+  LArtefact := Default(TArtefactInfo);
+  LArtefact.RelativePath := 'vendor.dll';
+  LArtefact.ArtefactType := 'external-reference';
+  LArtefact.FileSize := 12345;
+  LArtefact.Hash := StringOfChar('c', 64);
+  LArtefact.LocationSource := 'output-directory';
+  FArtefacts.Add(LArtefact);
+
+  LArtefact := Default(TArtefactInfo);
+  LArtefact.RelativePath := 'ws2_32.dll';
+  LArtefact.ArtefactType := 'external-reference';
+  LArtefact.FileSize := -1;
+  LArtefact.LocationSource := 'system-directory';
+  LArtefact.Location := 'C:\Windows\SysWOW64\ws2_32.dll';
+  FArtefacts.Add(LArtefact);
+
+  LWriter := THtmlReportWriter.Create;
+  Assert.IsTrue(LWriter.Write(FOutputPath, FData, THumanReadableReportConfig.Default));
+  LContent := TFile.ReadAllText(FOutputPath, TEncoding.UTF8);
+  Assert.IsTrue(Pos('<td>12345</td>', LContent) > 0, 'size of a shipped DLL must be shown');
+  Assert.IsTrue(Pos(StringOfChar('c', 64), LContent) > 0, 'SHA-256 of a shipped DLL must be shown');
+  Assert.IsTrue(Pos('System directory: C:\Windows\SysWOW64\ws2_32.dll', LContent) > 0,
+    'the system directory location must be shown');
 end;
 
 initialization

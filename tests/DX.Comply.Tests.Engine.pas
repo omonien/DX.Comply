@@ -188,6 +188,36 @@ type
     [Test]
     procedure Generate_ValidProject_ContainsExternalDllComponents;
 
+    // ---- ResolveExternalDllFile (issue #59) ---------------------------------
+
+    /// <summary>A DLL next to the program is found in the output directory.</summary>
+    [Test]
+    procedure ResolveDll_InOutputDir_ReturnsOutputDirectory;
+    /// <summary>A full path given in code wins over the output directory.</summary>
+    [Test]
+    procedure ResolveDll_ExplicitPath_WinsOverOutputDir;
+    /// <summary>A missing explicit path falls back to the file name in the output directory.</summary>
+    [Test]
+    procedure ResolveDll_MissingExplicitPath_FallsBackToOutputDir;
+    /// <summary>The output directory is searched before the system directories.</summary>
+    [Test]
+    procedure ResolveDll_OutputDirBeforeSystemDir;
+    /// <summary>A DLL found only in a system directory reports dlsSystemDirectory.</summary>
+    [Test]
+    procedure ResolveDll_OnlyInSystemDir_ReturnsSystemDirectory;
+    /// <summary>A DLL that is nowhere returns an empty path and dlsNotFound.</summary>
+    [Test]
+    procedure ResolveDll_NotFound_ReturnsEmpty;
+    /// <summary>A name without extension is also tried with .dll.</summary>
+    [Test]
+    procedure ResolveDll_NoExtension_TriesDll;
+    /// <summary>Non-Windows targets have no system directory.</summary>
+    [Test]
+    procedure SystemDirectories_NonWindowsPlatform_IsEmpty;
+    /// <summary>Win32 uses SysWOW64 on 64-bit Windows, Win64 uses System32.</summary>
+    [Test]
+    procedure SystemDirectories_Win32AndWin64_MatchBitness;
+
     // ---- ScanPasFilesForDllReferences (issue #24 regressions) ---------------
 
     /// <summary>const NAME = 'foo.dll' + LoadLibrary(NAME) must resolve to foo.dll.</summary>
@@ -1262,6 +1292,135 @@ begin
   finally
     LGen.Free;
   end;
+end;
+
+// ---- ResolveExternalDllFile (issue #59) ------------------------------------
+
+function MakeDummyDll(const ADir, AName: string): string;
+begin
+  TDirectory.CreateDirectory(ADir);
+  Result := TPath.Combine(ADir, AName);
+  TFile.WriteAllText(Result, 'MZ dummy ' + AName);
+end;
+
+procedure TEngineTests.ResolveDll_InOutputDir_ReturnsOutputDirectory;
+var
+  LOutDir, LExpected, LResult: string;
+  LSource: TDllLocationSource;
+begin
+  LOutDir := TPath.Combine(FTempDir, 'out');
+  LExpected := MakeDummyDll(LOutDir, 'vendor.dll');
+  LResult := TDxComplyGenerator.ResolveExternalDllFile('vendor.dll', LOutDir,
+    [], LSource);
+  Assert.AreEqual(Ord(dlsOutputDirectory), Ord(LSource));
+  Assert.IsTrue(SameText(TPath.GetFullPath(LExpected), LResult), LResult);
+end;
+
+procedure TEngineTests.ResolveDll_ExplicitPath_WinsOverOutputDir;
+var
+  LOutDir, LExplicit, LResult: string;
+  LSource: TDllLocationSource;
+begin
+  LOutDir := TPath.Combine(FTempDir, 'out');
+  MakeDummyDll(LOutDir, 'vendor.dll');
+  LExplicit := MakeDummyDll(TPath.Combine(FTempDir, 'explicit'), 'vendor.dll');
+  LResult := TDxComplyGenerator.ResolveExternalDllFile(LExplicit, LOutDir,
+    [], LSource);
+  Assert.AreEqual(Ord(dlsExplicitPath), Ord(LSource));
+  Assert.IsTrue(SameText(TPath.GetFullPath(LExplicit), LResult), LResult);
+end;
+
+procedure TEngineTests.ResolveDll_MissingExplicitPath_FallsBackToOutputDir;
+var
+  LOutDir, LExpected, LResult: string;
+  LSource: TDllLocationSource;
+begin
+  LOutDir := TPath.Combine(FTempDir, 'out');
+  LExpected := MakeDummyDll(LOutDir, 'vendor.dll');
+  LResult := TDxComplyGenerator.ResolveExternalDllFile(
+    TPath.Combine(FTempDir, 'missing\vendor.dll'), LOutDir, [], LSource);
+  Assert.AreEqual(Ord(dlsOutputDirectory), Ord(LSource));
+  Assert.IsTrue(SameText(TPath.GetFullPath(LExpected), LResult), LResult);
+end;
+
+procedure TEngineTests.ResolveDll_OutputDirBeforeSystemDir;
+var
+  LOutDir, LSysDir, LResult: string;
+  LSource: TDllLocationSource;
+begin
+  LOutDir := TPath.Combine(FTempDir, 'out');
+  LSysDir := TPath.Combine(FTempDir, 'sys');
+  MakeDummyDll(LOutDir, 'vendor.dll');
+  MakeDummyDll(LSysDir, 'vendor.dll');
+  LResult := TDxComplyGenerator.ResolveExternalDllFile('vendor.dll', LOutDir,
+    [LSysDir], LSource);
+  Assert.AreEqual(Ord(dlsOutputDirectory), Ord(LSource));
+end;
+
+procedure TEngineTests.ResolveDll_OnlyInSystemDir_ReturnsSystemDirectory;
+var
+  LOutDir, LSysDir, LExpected, LResult: string;
+  LSource: TDllLocationSource;
+begin
+  LOutDir := TPath.Combine(FTempDir, 'out');
+  TDirectory.CreateDirectory(LOutDir);
+  LSysDir := TPath.Combine(FTempDir, 'sys');
+  LExpected := MakeDummyDll(LSysDir, 'vendor.dll');
+  LResult := TDxComplyGenerator.ResolveExternalDllFile('vendor.dll', LOutDir,
+    [LSysDir], LSource);
+  Assert.AreEqual(Ord(dlsSystemDirectory), Ord(LSource));
+  Assert.IsTrue(SameText(TPath.GetFullPath(LExpected), LResult), LResult);
+end;
+
+procedure TEngineTests.ResolveDll_NotFound_ReturnsEmpty;
+var
+  LResult: string;
+  LSource: TDllLocationSource;
+begin
+  LResult := TDxComplyGenerator.ResolveExternalDllFile('no_such_dll_59.dll',
+    TPath.Combine(FTempDir, 'out'), [TPath.Combine(FTempDir, 'sys')], LSource);
+  Assert.AreEqual(Ord(dlsNotFound), Ord(LSource));
+  Assert.AreEqual('', LResult);
+end;
+
+procedure TEngineTests.ResolveDll_NoExtension_TriesDll;
+var
+  LOutDir, LResult: string;
+  LSource: TDllLocationSource;
+begin
+  LOutDir := TPath.Combine(FTempDir, 'out');
+  MakeDummyDll(LOutDir, 'vendor.dll');
+  LResult := TDxComplyGenerator.ResolveExternalDllFile('vendor', LOutDir,
+    [], LSource);
+  Assert.AreEqual(Ord(dlsOutputDirectory), Ord(LSource));
+  Assert.IsTrue(LResult.EndsWith('vendor.dll', True), LResult);
+end;
+
+procedure TEngineTests.SystemDirectories_NonWindowsPlatform_IsEmpty;
+begin
+  Assert.AreEqual(NativeInt(0), NativeInt(Length(
+    TDxComplyGenerator.SystemDirectoriesForPlatform('Android64'))));
+  Assert.AreEqual(NativeInt(0), NativeInt(Length(
+    TDxComplyGenerator.SystemDirectoriesForPlatform('Linux64'))));
+end;
+
+procedure TEngineTests.SystemDirectories_Win32AndWin64_MatchBitness;
+var
+  LDirs: TArray<string>;
+  LWin32Expected: string;
+begin
+  if TDirectory.Exists(TPath.Combine(GetEnvironmentVariable('SystemRoot'), 'SysWOW64')) then
+    LWin32Expected := 'SysWOW64'
+  else
+    LWin32Expected := 'System32';
+  LDirs := TDxComplyGenerator.SystemDirectoriesForPlatform('Win32');
+  Assert.AreEqual(NativeInt(1), NativeInt(Length(LDirs)));
+  Assert.IsTrue(SameText(TPath.GetFileName(LDirs[0]), LWin32Expected), LDirs[0]);
+
+  LDirs := TDxComplyGenerator.SystemDirectoriesForPlatform('Win64');
+  Assert.AreEqual(NativeInt(1), NativeInt(Length(LDirs)));
+  Assert.IsTrue(SameText(TPath.GetFileName(LDirs[0]), 'System32') or
+    SameText(TPath.GetFileName(LDirs[0]), 'Sysnative'), LDirs[0]);
 end;
 
 // ---- ScanPasFilesForDllReferences (issue #24) ------------------------------

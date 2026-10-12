@@ -147,6 +147,18 @@ type
     /// </summary>
     [Test]
     procedure Write_ExternalDll_MissingFile_KeepsEvidenceAndConditional;
+    /// <summary>
+    /// A DLL found in the output directory carries size, both hashes and
+    /// locationSource. Issue #59.
+    /// </summary>
+    [Test]
+    procedure Write_ExternalDll_InOutputDir_HasSizeHashesAndLocationSource;
+    /// <summary>
+    /// A DLL found only in a system directory carries its location but no
+    /// hash and no size. Issue #59.
+    /// </summary>
+    [Test]
+    procedure Write_ExternalDll_SystemDir_HasLocationButNoHash;
 
     /// <summary>The output file must contain valid parseable JSON.</summary>
     [Test]
@@ -709,6 +721,94 @@ begin
     LDependsOn := (LDeps.Items[0] as TJSONObject).GetValue('dependsOn') as TJSONArray;
     Assert.AreEqual(NativeInt(2), NativeInt(LDependsOn.Count),
       'the project must still reference every component');
+  finally
+    LJson.Free;
+  end;
+end;
+
+function FindPropertyValue(const AComponent: TJSONObject; const AName: string;
+  out AValue: string): Boolean;
+var
+  LProperties: TJSONArray;
+  I: Integer;
+begin
+  Result := False;
+  AValue := '';
+  LProperties := AComponent.GetValue('properties') as TJSONArray;
+  if not Assigned(LProperties) then
+    Exit;
+  for I := 0 to LProperties.Count - 1 do
+    if (LProperties.Items[I] as TJSONObject).GetValue<string>('name') = AName then
+    begin
+      AValue := (LProperties.Items[I] as TJSONObject).GetValue<string>('value');
+      Exit(True);
+    end;
+end;
+
+procedure TCycloneDxWriterTests.Write_ExternalDll_InOutputDir_HasSizeHashesAndLocationSource;
+var
+  LArtefact: TArtefactInfo;
+  LJson, LComponent: TJSONObject;
+  LHashes: TJSONArray;
+  LValue: string;
+begin
+  LArtefact := MakeArtefact('vendor.dll', 'external-reference',
+    StringOfChar('a', 64), 4096);
+  LArtefact.HashSha512 := StringOfChar('b', 128);
+  LArtefact.Evidence := 'DLL';
+  LArtefact.Confidence := 'Source-scan';
+  LArtefact.LocationSource := 'output-directory';
+  FArtefacts.Add(LArtefact);
+
+  Assert.IsTrue(FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LJson := LoadOutputJson;
+  Assert.IsNotNull(LJson);
+  try
+    LComponent := (LJson.GetValue('components') as TJSONArray).Items[0] as TJSONObject;
+    LHashes := LComponent.GetValue('hashes') as TJSONArray;
+    Assert.IsNotNull(LHashes, 'a DLL in the output directory must be hashed');
+    Assert.AreEqual(NativeInt(2), NativeInt(LHashes.Count));
+    Assert.IsTrue(FindPropertyValue(LComponent, 'file:size', LValue));
+    Assert.AreEqual('4096', LValue);
+    Assert.IsTrue(FindPropertyValue(LComponent,
+      'net.developer-experts.dx-comply:locationSource', LValue));
+    Assert.AreEqual('output-directory', LValue);
+    Assert.IsFalse(FindPropertyValue(LComponent,
+      'net.developer-experts.dx-comply:location', LValue),
+      'the build machine path must not be written for a shipped DLL');
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TCycloneDxWriterTests.Write_ExternalDll_SystemDir_HasLocationButNoHash;
+var
+  LArtefact: TArtefactInfo;
+  LJson, LComponent: TJSONObject;
+  LValue: string;
+begin
+  LArtefact := MakeArtefact('ws2_32.dll', 'external-reference', '', -1);
+  LArtefact.FilePath := '';
+  LArtefact.Evidence := 'DLL';
+  LArtefact.Confidence := 'Source-scan';
+  LArtefact.LocationSource := 'system-directory';
+  LArtefact.Location := 'C:\Windows\SysWOW64\ws2_32.dll';
+  FArtefacts.Add(LArtefact);
+
+  Assert.IsTrue(FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LJson := LoadOutputJson;
+  Assert.IsNotNull(LJson);
+  try
+    LComponent := (LJson.GetValue('components') as TJSONArray).Items[0] as TJSONObject;
+    Assert.IsNull(LComponent.GetValue('hashes'),
+      'a DLL found only in a system directory must not be hashed');
+    Assert.IsFalse(FindPropertyValue(LComponent, 'file:size', LValue));
+    Assert.IsTrue(FindPropertyValue(LComponent,
+      'net.developer-experts.dx-comply:locationSource', LValue));
+    Assert.AreEqual('system-directory', LValue);
+    Assert.IsTrue(FindPropertyValue(LComponent,
+      'net.developer-experts.dx-comply:location', LValue));
+    Assert.AreEqual('C:\Windows\SysWOW64\ws2_32.dll', LValue);
   finally
     LJson.Free;
   end;

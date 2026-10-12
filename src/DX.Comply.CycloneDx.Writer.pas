@@ -343,6 +343,11 @@ begin
   end;
   if AArtefact.LibrarySourceFile and (AArtefact.RelativePath <> '') then
     AddProperty('net.developer-experts.dx-comply:relativePath', AArtefact.RelativePath);
+  // Issue #59: where a source-scanned DLL was found.
+  if AArtefact.LocationSource <> '' then
+    AddProperty('net.developer-experts.dx-comply:locationSource', AArtefact.LocationSource);
+  if AArtefact.Location <> '' then
+    AddProperty('net.developer-experts.dx-comply:location', AArtefact.Location);
 
   // BSI TR-03183-2 file properties. Omitted when there is no file name,
   // which is how a logical component is left without these fields.
