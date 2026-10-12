@@ -72,6 +72,11 @@ type
     procedure InitializeReadmeBrowser;
     procedure LoadReadmeInfoPage;
     /// <summary>
+    /// Creates the README browser the first time the info tab is shown.
+    /// </summary>
+    procedure EnsureReadmePreview;
+    procedure PageControlChange(Sender: TObject);
+    /// <summary>
     /// Returns the cached temporary HTML file used by the embedded README preview.
     /// </summary>
     function GetReadmePreviewFilePath: string;
@@ -118,6 +123,23 @@ begin
   FAboutButton.OnClick := AboutButtonClick;
   FBrowseScriptButton.OnClick := BrowseScriptButtonClick;
   FPageControl.ActivePage := FSettingsTabSheet;
+  // The README browser is not created here. A TWebBrowser that navigates
+  // while the frame is created outside the Options dialog (IDE Insight
+  // indexing) can take the focus from the IDE main window. Issue #66.
+  FPageControl.OnChange := PageControlChange;
+end;
+
+procedure TFrameDXComplyOptions.PageControlChange(Sender: TObject);
+begin
+  EnsureReadmePreview;
+end;
+
+procedure TFrameDXComplyOptions.EnsureReadmePreview;
+begin
+  if not DXComplyShouldLoadReadmePreview(
+    FPageControl.ActivePage = FInfoTabSheet, Showing,
+    Assigned(FReadmeBrowser)) then
+    Exit;
   InitializeReadmeBrowser;
   LoadReadmeInfoPage;
 end;

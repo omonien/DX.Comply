@@ -312,12 +312,14 @@ end;
 procedure TDxComplyIdeMenuNotifier.BeforeCompile(const Project: IOTAProject;
   var Cancel: Boolean);
 begin
-  TryInjectMenuFromNotifier;
+  // Nothing runs during a compile. Clean all and Build all fire these
+  // events once per project, and the menu retry belongs to package load
+  // and file notifications. Issue #66.
 end;
 
 procedure TDxComplyIdeMenuNotifier.AfterCompile(Succeeded: Boolean);
 begin
-  TryInjectMenuFromNotifier;
+  // See BeforeCompile. Issue #66.
 end;
 
 { TDxComplyWizard }
