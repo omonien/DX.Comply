@@ -376,6 +376,20 @@ type
 
   end;
 
+  /// <summary>Build mode file components carry the product version.</summary>
+  [TestFixture]
+  TBuildFileVersionTests = class
+  public
+    [Test]
+    procedure Apply_ScannedFiles_GetProductVersion;
+    [Test]
+    procedure Apply_NonProductArtefacts_Unchanged;
+    [Test]
+    procedure Apply_ExistingVersion_Kept;
+    [Test]
+    procedure Apply_EmptyVersion_ChangesNothing;
+  end;
+
 implementation
 
 uses
@@ -2402,7 +2416,94 @@ begin
     LJson.Free;
   end;
 end;
+
+{ TBuildFileVersionTests }
+
+function MakeBuildArtefact(const APath, AType, AVersion: string): TArtefactInfo;
+begin
+  Result := Default(TArtefactInfo);
+  Result.RelativePath := APath;
+  Result.FilePath := 'C:\Build\' + APath;
+  Result.ArtefactType := AType;
+  Result.Version := AVersion;
+  Result.Hash := StringOfChar('a', 64);
+end;
+
+procedure TBuildFileVersionTests.Apply_ScannedFiles_GetProductVersion;
+var
+  LList: TArtefactList;
+begin
+  LList := TArtefactList.Create;
+  try
+    LList.Add(MakeBuildArtefact('App.exe', 'application', ''));
+    LList.Add(MakeBuildArtefact('plugin.dll', 'library', ''));
+    LList.Add(MakeBuildArtefact('data.res', 'resource', ''));
+    LList.Add(MakeBuildArtefact('readme.txt', 'unknown', ''));
+    ApplyProductVersionToBuildFiles(LList, ' 2.1.0 ');
+    Assert.AreEqual('2.1.0', LList[0].Version);
+    Assert.AreEqual('2.1.0', LList[1].Version);
+    Assert.AreEqual('2.1.0', LList[2].Version);
+    Assert.AreEqual('2.1.0', LList[3].Version);
+  finally
+    LList.Free;
+  end;
+end;
+
+procedure TBuildFileVersionTests.Apply_NonProductArtefacts_Unchanged;
+var
+  LList: TArtefactList;
+  LSource: TArtefactInfo;
+begin
+  LList := TArtefactList.Create;
+  try
+    LList.Add(MakeBuildArtefact('System.SysUtils.dcu', 'unit-evidence', ''));
+    LList.Add(MakeBuildArtefact('rtl290.bpl', 'runtime-package', ''));
+    LList.Add(MakeBuildArtefact('sqlite3.dll', 'external-reference', ''));
+    LSource := MakeBuildArtefact('src/A.pas', 'file', '');
+    LSource.LibrarySourceFile := True;
+    LList.Add(LSource);
+    LList.Add(MakeBuildArtefact('', 'application', ''));
+    ApplyProductVersionToBuildFiles(LList, '2.1.0');
+    Assert.AreEqual('', LList[0].Version);
+    Assert.AreEqual('', LList[1].Version);
+    Assert.AreEqual('', LList[2].Version);
+    Assert.AreEqual('', LList[3].Version);
+    Assert.AreEqual('', LList[4].Version);
+  finally
+    LList.Free;
+  end;
+end;
+
+procedure TBuildFileVersionTests.Apply_ExistingVersion_Kept;
+var
+  LList: TArtefactList;
+begin
+  LList := TArtefactList.Create;
+  try
+    LList.Add(MakeBuildArtefact('vendor.dll', 'library', '5.0'));
+    ApplyProductVersionToBuildFiles(LList, '2.1.0');
+    Assert.AreEqual('5.0', LList[0].Version);
+  finally
+    LList.Free;
+  end;
+end;
+
+procedure TBuildFileVersionTests.Apply_EmptyVersion_ChangesNothing;
+var
+  LList: TArtefactList;
+begin
+  LList := TArtefactList.Create;
+  try
+    LList.Add(MakeBuildArtefact('App.exe', 'application', ''));
+    ApplyProductVersionToBuildFiles(LList, '');
+    Assert.AreEqual('', LList[0].Version);
+  finally
+    LList.Free;
+  end;
+end;
+
 initialization
   TDUnitX.RegisterTestFixture(TEngineTests);
+  TDUnitX.RegisterTestFixture(TBuildFileVersionTests);
 
 end.

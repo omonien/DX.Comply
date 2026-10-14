@@ -449,10 +449,11 @@ begin
   LStart := Pos('<components>', LContent);
   LEnd := Pos('</components>', LContent);
   LComponents := Copy(LContent, LStart, LEnd - LStart);
-  Assert.IsTrue(Pos('<hashes>', LComponents) < Pos('<purl>', LComponents),
-    'component hashes must precede purl');
-  Assert.IsTrue(Pos('<purl>', LComponents) < Pos('<properties>', LComponents),
-    'component purl must precede properties');
+  // A file component has no purl. Hashes still precede properties.
+  Assert.AreEqual(0, Pos('<purl>', LComponents), 'a file component has no purl');
+  Assert.IsTrue(Pos('<hashes>', LComponents) > 0, LComponents);
+  Assert.IsTrue(Pos('<hashes>', LComponents) < Pos('<properties>', LComponents),
+    'component hashes must precede properties');
 end;
 
 procedure TCycloneDxXmlWriterTests.Validate_OutOfOrderElements_ReturnsFalse;

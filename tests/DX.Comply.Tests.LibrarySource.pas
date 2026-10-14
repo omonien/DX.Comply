@@ -136,7 +136,8 @@ begin
     LArtefact.Hash := StringOfChar('a', 64);
     LArtefact.FileSize := 10;
     LArtefacts.Add(LArtefact);
-    // A build mode file keeps the hash prefix version and the file: purl.
+    // A build mode file without a version gets no hash prefix version and
+    // no file: purl either.
     LArtefact := Default(TArtefactInfo);
     LArtefact.FilePath := 'C:\Build\data.res';
     LArtefact.RelativePath := 'data.res';
@@ -172,10 +173,8 @@ begin
       Assert.AreEqual('comp-0', LLib.GetValue<string>('bom-ref'));
       Assert.AreEqual('src/A.pas',
         PropertyValue(LLib, 'net.developer-experts.dx-comply:relativePath'));
-      Assert.AreEqual(StringOfChar('b', 12), LBuild.GetValue<string>('version'),
-        'build mode unchanged');
-      Assert.AreEqual('file:data.res', LBuild.GetValue<string>('purl'),
-        'build mode unchanged');
+      Assert.IsNull(LBuild.GetValue('version'), 'build mode: no hash prefix as version');
+      Assert.IsNull(LBuild.GetValue('purl'), 'build mode: no file: purl');
       Assert.AreEqual('',
         PropertyValue(LBuild, 'net.developer-experts.dx-comply:relativePath'));
     finally
@@ -201,9 +200,9 @@ begin
     Assert.IsFalse(LText.Contains('file:src/A.pas'));
     Assert.IsTrue(LText.Contains(
       '<property name="net.developer-experts.dx-comply:relativePath">src/A.pas</property>'));
-    Assert.IsTrue(LText.Contains('<version>' + StringOfChar('b', 12) + '</version>'),
-      'build mode unchanged');
-    Assert.IsTrue(LText.Contains('<purl>file:data.res</purl>'), 'build mode unchanged');
+    Assert.IsFalse(LText.Contains('<version>' + StringOfChar('b', 12) + '</version>'),
+      'build mode: no hash prefix as version');
+    Assert.IsFalse(LText.Contains('<purl>'), 'build mode: no file: purl');
   finally
     if TFile.Exists(LOutput) then
       TFile.Delete(LOutput);

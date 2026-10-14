@@ -401,6 +401,17 @@ type
     property Config: TSbomConfig read FConfig write FConfig;
   end;
 
+/// <summary>
+/// Build mode: sets AVersion on every file found in the build output that
+/// has no version yet (the program, DLLs, packages and other scanned files),
+/// the same way library mode gives every shipped file the release version.
+/// Unit evidence, runtime packages, DLL names from source, and requires
+/// packages are not product files and are left unchanged. An empty AVersion
+/// changes nothing.
+/// </summary>
+procedure ApplyProductVersionToBuildFiles(const AArtefacts: TArtefactList;
+  const AVersion: string);
+
 implementation
 
 uses
@@ -510,6 +521,31 @@ begin
   FHashService := nil;
   FSbomWriter := nil;
   inherited;
+end;
+
+procedure ApplyProductVersionToBuildFiles(const AArtefacts: TArtefactList;
+  const AVersion: string);
+var
+  I: Integer;
+  LArtefact: TArtefactInfo;
+  LType: string;
+begin
+  if (AArtefacts = nil) or (Trim(AVersion) = '') then
+    Exit;
+  for I := 0 to AArtefacts.Count - 1 do
+  begin
+    LArtefact := AArtefacts[I];
+    if LArtefact.LibrarySourceFile or (Trim(LArtefact.Version) <> '') or
+       (LArtefact.RelativePath = '') then
+      Continue;
+    LType := LArtefact.ArtefactType;
+    if (LType = 'unit-evidence') or (LType = 'runtime-package') or
+       (LType = 'external-reference') or (LType = 'framework') or
+       (LType = 'required-package') then
+      Continue;
+    LArtefact.Version := Trim(AVersion);
+    AArtefacts[I] := LArtefact;
+  end;
 end;
 
 function TDxComplyGenerator.ReadBuildEvidence(const AProjectInfo: TProjectInfo): TBuildEvidence;
@@ -2420,6 +2456,10 @@ begin
         LMetadata.ProductVersion := LProjectInfo.Version;
       if LMetadata.Supplier = '' then
         LMetadata.Supplier := LProjectInfo.CompanyName;
+
+      // Files from the build output carry the product version, as files do
+      // in library mode. The hash prefix is no longer used as a version.
+      ApplyProductVersionToBuildFiles(LArtefacts, LMetadata.ProductVersion);
 
       if LManifest.Loaded then
       begin

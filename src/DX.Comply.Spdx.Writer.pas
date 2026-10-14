@@ -276,10 +276,9 @@ begin
     LPackage.AddPair('comment', BsiPropertyComment(AArtefact));
   end;
 
+  // Only a known version is written. The hash is in checksums.
   if Trim(AArtefact.Version) <> '' then
-    LPackage.AddPair('versionInfo', Trim(AArtefact.Version))
-  else if (AArtefact.Hash <> '') and not AArtefact.LibrarySourceFile then
-    LPackage.AddPair('versionInfo', Copy(AArtefact.Hash, 1, 12));
+    LPackage.AddPair('versionInfo', Trim(AArtefact.Version));
 
   LPackage.AddPair('downloadLocation', 'NOASSERTION');
   LPackage.AddPair('filesAnalyzed', TJSONBool.Create(False));

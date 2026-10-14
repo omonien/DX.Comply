@@ -260,10 +260,9 @@ begin
 
   AddElement('name', ArtefactComponentName(AArtefact));
 
+  // Same rule as the JSON writer: only a known version is written.
   if Trim(AArtefact.Version) <> '' then
-    AddElement('version', Trim(AArtefact.Version))
-  else if (AArtefact.Hash <> '') and not AArtefact.LibrarySourceFile then
-    AddElement('version', Copy(AArtefact.Hash, 1, 12));
+    AddElement('version', Trim(AArtefact.Version));
 
   // Component sequence: name, version, then hashes, then purl, then properties.
   if (AArtefact.Hash <> '') or (AArtefact.HashSha512 <> '') then
@@ -276,9 +275,7 @@ begin
     CloseTag('hashes');
   end;
 
-  // A library source file has no package URL of its own.
-  if (AArtefact.RelativePath <> '') and not AArtefact.LibrarySourceFile then
-    AddElement('purl', 'file:' + AArtefact.RelativePath);
+  // A file has no package URL of its own, so no purl element is written.
 
   // Component sequence places externalReferences after purl and before
   // properties. The distribution url is the file: locator. bom-1.6 requires

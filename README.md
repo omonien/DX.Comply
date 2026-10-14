@@ -40,7 +40,7 @@ DX.Comply produces build evidence and that component list from a RAD Studio proj
 
 > **See it for yourself:** [Example SBOM (JSON)](docs/examples/ConwaysLifeFMX.cdx.json) from ConwaysLifeFMX in [RADStudio13Demos](https://github.com/Embarcadero/RADStudio13Demos.git), project `Object Pascal/RTL/Parallel Library/FMX/ConwaysLifeFMX.dproj`, built Release/Win32 with a map file.
 
-DX.Comply writes **CycloneDX 1.6** JSON by default. Each linked unit is a `library` component, with SHA-256 and SHA-512 hashes when the file could be opened, and with an origin classification. The fragment below is taken from the example file. It shows the metadata component and the application file. The full document has more properties.
+DX.Comply writes **CycloneDX 1.6** JSON by default. Each linked unit is a `library` component, with SHA-256 and SHA-512 hashes when the file could be opened, and with an origin classification. Files from the build output, such as the program and DLLs next to it, carry the product version and no package URL, the same as files in library mode. The fragment below shows the metadata component and the application file. The full document has more properties. The checked-in example file was written by an older version, which used the first 12 hex characters of the SHA-256 as the file version and a `file:` package URL.
 
 ```json
 {
@@ -58,9 +58,8 @@ DX.Comply writes **CycloneDX 1.6** JSON by default. Each linked unit is a `libra
     {
       "type": "application",
       "name": "ConwaysLifeFMX.exe",
-      "version": "c6cc9155675b",
+      "version": "1.0.0.0",
       "bom-ref": "comp-0",
-      "purl": "file:ConwaysLifeFMX.exe",
       "hashes": [
         {
           "alg": "SHA-256",
@@ -320,13 +319,13 @@ The units come from the MAP file, including a Delphi 7 `.dpr` with its `.dof` an
 
 `own_code_units` and `own_code_prefixes` mark the project's own units. Those units stay in the evidence. They are not dropped, and they are not attributed to a third-party library. Unmatched units stay as they are: one component each, linked from the program that was built.
 
-A matched unit stays as its own evidence component (hash, origin, `file:` package URL). The SBOM adds one library component for the row (`name`, `version`, `type`, supplier and author from `vendor`, optional `vendor_url`). The program that was built depends on that library, and the library depends on the matched units. Other binaries stay linked from that program. This is written for CycloneDX JSON, CycloneDX XML, and SPDX 2.3 JSON.
+A matched unit stays as its own evidence component (hash, origin). The SBOM adds one library component for the row (`name`, `version`, `type`, supplier and author from `vendor`, optional `vendor_url`). The program that was built depends on that library, and the library depends on the matched units. Other binaries stay linked from that program. This is written for CycloneDX JSON, CycloneDX XML, and SPDX 2.3 JSON.
 
 `licence` (British spelling) is an SPDX identifier such as `MIT` (written as `license.id`), an SPDX expression such as `MPL-1.1 OR LGPL-2.1-or-later` (written as `expression`), or any other text such as `Commercial` or `Proprietary` (written as `license.name`). `licence_url` is optional and is omitted for expressions. `license` and `license_url` are accepted as aliases. `type` is `library`, `framework`, or `application`.
 
 If `vendor` is an email address, that address is also written as the supplier contact. `vendor_url` is the URL. A company name is not rewritten into an email.
 
-There is no required `purl` field. When it is absent, DX.Comply writes `pkg:delphi/<name>@<version>` with the name and version percent-encoded. `pkg:delphi` is not a registered package-url type. Scanned files keep the existing `file:` locator. Set `purl` on a row when you want a different locator.
+There is no required `purl` field. When it is absent, DX.Comply writes `pkg:delphi/<name>@<version>` with the name and version percent-encoded. `pkg:delphi` is not a registered package-url type. Scanned files have no package URL. Set `purl` on a row when you want a different locator.
 
 A file that cannot be read (missing, not JSON, or not an object or array) stops generation. The message names the file and the reason. Missing fields, a short prefix, or an unrecognised licence name are warnings, and the SBOM is still written. A row with match rules that hits no unit is reported as a warning. The root `supplier` is the application publisher. It is used only when `--supplier` and `product.supplier` are both empty. Its URL is copied only when `--supplier-url` and `product.supplierUrl` are also empty.
 

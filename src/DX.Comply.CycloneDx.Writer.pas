@@ -241,21 +241,18 @@ begin
   // to the relative path so two files with the same name stay distinct.
   LComponent.AddPair('name', ArtefactComponentName(AArtefact));
 
-  // Version. An explicit version wins. Otherwise the hash prefix stands in
-  // for a file that has no product version. A library source file without
-  // a release version has no version.
+  // Version. Build mode and library mode both set the product or release
+  // version on the files they ship. A component without a known version has
+  // no version field. The hash is in hashes, not in version.
   if Trim(AArtefact.Version) <> '' then
-    LComponent.AddPair('version', Trim(AArtefact.Version))
-  else if (AArtefact.Hash <> '') and not AArtefact.LibrarySourceFile then
-    LComponent.AddPair('version', Copy(AArtefact.Hash, 1, 12));
+    LComponent.AddPair('version', Trim(AArtefact.Version));
 
   // BOM reference
   LComponent.AddPair('bom-ref', 'comp-' + IntToStr(AIndex));
 
-  // File path. A requires package has no file, so it has no purl. A library
-  // source file has no package URL of its own; bom-ref identifies it.
-  if (AArtefact.RelativePath <> '') and not AArtefact.LibrarySourceFile then
-    LComponent.AddPair('purl', 'file:' + AArtefact.RelativePath);
+  // A file has no package URL of its own. A file: path is not a purl, so
+  // none is written; bom-ref and the file name identify the component. A
+  // manifest library component carries its purl through the manifest.
 
   // Hashes. SHA-256 stays first. SHA-512 is added when the file was hashed.
   if (AArtefact.Hash <> '') or (AArtefact.HashSha512 <> '') then
@@ -282,7 +279,7 @@ begin
 
   // TR-03183-2 maps the deployable SHA-512 to externalReferences type
   // distribution. bom-1.6 requires a url, and no download URL is known, so
-  // the url is the same file: locator already written as purl. The reference
+  // the url is the file: locator of the shipped file. The reference
   // is written for a hashed executable or archive. Unit evidence is not a
   // deployable file. The component hashes above stay as well.
   if (AArtefact.HashSha512 <> '') and

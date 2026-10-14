@@ -239,8 +239,9 @@ begin
   LJson := LoadJson;
   try
     LComponent := (LJson.GetValue('components') as TJSONArray).Items[0] as TJSONObject;
-    Assert.AreEqual(Copy(cSha256, 1, 12), LComponent.GetValue<string>('version'),
-      'A file with no assigned version keeps the hash prefix');
+    Assert.IsNull(LComponent.GetValue('version'),
+      'A file with no assigned version has no hash prefix version');
+    Assert.IsNull(LComponent.GetValue('purl'), 'A file has no file: purl');
     LHashes := LComponent.GetValue('hashes') as TJSONArray;
     Assert.AreEqual(NativeInt(2), NativeInt(LHashes.Count));
     LHash := LHashes.Items[0] as TJSONObject;
@@ -426,8 +427,8 @@ begin
   LExecutable := Pos('<property name="bsi:component:executable">executable</property>', LComponent);
   Assert.IsTrue(LHash256 > 0, LComponent);
   Assert.IsTrue(LHash256 < LHash512, LComponent);
-  Assert.IsTrue(LHash512 < LPurl, LComponent);
-  Assert.IsTrue(LPurl < LExt, LComponent);
+  Assert.AreEqual(0, LPurl, 'A file has no purl element');
+  Assert.IsTrue(LHash512 < LExt, LComponent);
   Assert.IsTrue(LExt < LFileName, LComponent);
   LRefs := SliceBetween(LComponent, '<externalReferences>', '</externalReferences>');
   Assert.IsTrue(Pos('<reference type="distribution">', LRefs) > 0, LRefs);
@@ -489,7 +490,7 @@ begin
   try
     LPackage := (LJson.GetValue('packages') as TJSONArray).Items[0] as TJSONObject;
     Assert.AreEqual('TestApp.exe', LPackage.GetValue<string>('packageFileName'));
-    Assert.AreEqual(Copy(cSha256, 1, 12), LPackage.GetValue<string>('versionInfo'));
+    Assert.IsNull(LPackage.GetValue('versionInfo'), 'no hash prefix as versionInfo');
     Assert.AreEqual('NOASSERTION', LPackage.GetValue<string>('licenseConcluded'));
     Assert.AreEqual('NOASSERTION', LPackage.GetValue<string>('licenseDeclared'));
     Assert.AreEqual(
