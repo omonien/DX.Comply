@@ -388,7 +388,6 @@ type
     procedure Apply_ExistingVersion_Kept;
     [Test]
     procedure Apply_EmptyVersion_ChangesNothing;
-<<<<<<< HEAD
     [Test]
     procedure GetFileVersionText_SystemDll_ReturnsVersion;
     [Test]
@@ -403,8 +402,12 @@ type
     procedure Apply_DllWithoutResource_GetsNoVersion;
     [Test]
     procedure Apply_OwnOutputDll_GetsProductVersion;
-=======
->>>>>>> origin/main
+    [Test]
+    procedure Apply_ThirdPartyBpl_GetsOwnVersion;
+    [Test]
+    procedure Apply_BplWithoutResource_GetsNoVersion;
+    [Test]
+    procedure Apply_OwnOutputBpl_GetsProductVersion;
   end;
 
 implementation
@@ -2453,24 +2456,17 @@ begin
   LList := TArtefactList.Create;
   try
     LList.Add(MakeBuildArtefact('App.exe', 'application', ''));
-<<<<<<< HEAD
     LList.Add(MakeBuildArtefact('MyPkg.bpl', 'package', ''));
     LList.Add(MakeBuildArtefact('MyPkg.dcp', 'dcu-package', ''));
-=======
-    LList.Add(MakeBuildArtefact('plugin.dll', 'library', ''));
->>>>>>> origin/main
     LList.Add(MakeBuildArtefact('data.res', 'resource', ''));
     LList.Add(MakeBuildArtefact('readme.txt', 'unknown', ''));
-    ApplyProductVersionToBuildFiles(LList, ' 2.1.0 ');
+    // MyPkg.bpl is the project's own output here.
+    ApplyProductVersionToBuildFiles(LList, ' 2.1.0 ', 'C:\Build\MyPkg.bpl');
     Assert.AreEqual('2.1.0', LList[0].Version);
     Assert.AreEqual('2.1.0', LList[1].Version);
     Assert.AreEqual('2.1.0', LList[2].Version);
-<<<<<<< HEAD
     Assert.AreEqual('', LList[3].Version, 'a resource is not a product output');
     Assert.AreEqual('', LList[4].Version, 'an unknown file is not a product output');
-=======
-    Assert.AreEqual('2.1.0', LList[3].Version);
->>>>>>> origin/main
   finally
     LList.Free;
   end;
@@ -2529,7 +2525,6 @@ begin
   end;
 end;
 
-<<<<<<< HEAD
 
 function SystemDllPath: string;
 begin
@@ -2652,8 +2647,80 @@ begin
   end;
 end;
 
-=======
->>>>>>> origin/main
+
+function CopyAsBpl(const ASource: string): string;
+begin
+  Result := TPath.Combine(TPath.GetTempPath,
+    'dxc-pkg-' + TGUID.NewGuid.ToString.Replace('{', '').Replace('}', '') + '.bpl');
+  if ASource <> '' then
+    TFile.Copy(ASource, Result)
+  else
+    TFile.WriteAllText(Result, 'not a PE file');
+end;
+
+procedure TBuildFileVersionTests.Apply_ThirdPartyBpl_GetsOwnVersion;
+var
+  LList: TArtefactList;
+  LArtefact: TArtefactInfo;
+  LPath: string;
+begin
+  // A copy of kernel32.dll stands in for a third-party package with a
+  // version resource.
+  LPath := CopyAsBpl(SystemDllPath);
+  LList := TArtefactList.Create;
+  try
+    LArtefact := MakeBuildArtefact(TPath.GetFileName(LPath), 'package', '');
+    LArtefact.FilePath := LPath;
+    LList.Add(LArtefact);
+    ApplyProductVersionToBuildFiles(LList, '2.1.0', 'C:\Build\App.exe');
+    Assert.AreEqual(GetFileVersionText(SystemDllPath), LList[0].Version);
+    Assert.AreNotEqual('2.1.0', LList[0].Version);
+  finally
+    LList.Free;
+    TFile.Delete(LPath);
+  end;
+end;
+
+procedure TBuildFileVersionTests.Apply_BplWithoutResource_GetsNoVersion;
+var
+  LList: TArtefactList;
+  LArtefact: TArtefactInfo;
+  LPath: string;
+begin
+  LPath := CopyAsBpl('');
+  LList := TArtefactList.Create;
+  try
+    LArtefact := MakeBuildArtefact(TPath.GetFileName(LPath), 'package', '');
+    LArtefact.FilePath := LPath;
+    LList.Add(LArtefact);
+    ApplyProductVersionToBuildFiles(LList, '2.1.0', 'C:\Build\App.exe');
+    Assert.AreEqual('', LList[0].Version);
+  finally
+    LList.Free;
+    TFile.Delete(LPath);
+  end;
+end;
+
+procedure TBuildFileVersionTests.Apply_OwnOutputBpl_GetsProductVersion;
+var
+  LList: TArtefactList;
+  LArtefact: TArtefactInfo;
+  LPath: string;
+begin
+  LPath := CopyAsBpl(SystemDllPath);
+  LList := TArtefactList.Create;
+  try
+    LArtefact := MakeBuildArtefact(TPath.GetFileName(LPath), 'package', '');
+    LArtefact.FilePath := LPath;
+    LList.Add(LArtefact);
+    ApplyProductVersionToBuildFiles(LList, '2.1.0', LPath);
+    Assert.AreEqual('2.1.0', LList[0].Version);
+  finally
+    LList.Free;
+    TFile.Delete(LPath);
+  end;
+end;
+
 initialization
   TDUnitX.RegisterTestFixture(TEngineTests);
   TDUnitX.RegisterTestFixture(TBuildFileVersionTests);

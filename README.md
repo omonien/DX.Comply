@@ -40,11 +40,7 @@ DX.Comply produces build evidence and that component list from a RAD Studio proj
 
 > **See it for yourself:** [Example SBOM (JSON)](docs/examples/ConwaysLifeFMX.cdx.json) from ConwaysLifeFMX in [RADStudio13Demos](https://github.com/Embarcadero/RADStudio13Demos.git), project `Object Pascal/RTL/Parallel Library/FMX/ConwaysLifeFMX.dproj`, built Release/Win32 with a map file.
 
-<<<<<<< HEAD
 DX.Comply writes **CycloneDX 1.6** JSON by default. Each linked unit is a `library` component, with SHA-256 and SHA-512 hashes when the file could be opened, and with an origin classification. The project's own outputs (the program, the package a package project builds, and `.dcp`) carry the product version and no package URL, the same as files in library mode. A third-party DLL or `.bpl` next to the program, or a DLL found at a path named in source, carries the version from its own version resource (FileVersion, else ProductVersion), and no version when it has none. The fragment below shows the metadata component and the application file. The full document has more properties. The checked-in example file was written by an older version, which used the first 12 hex characters of the SHA-256 as the file version and a `file:` package URL.
-=======
-DX.Comply writes **CycloneDX 1.6** JSON by default. Each linked unit is a `library` component, with SHA-256 and SHA-512 hashes when the file could be opened, and with an origin classification. Files from the build output, such as the program and DLLs next to it, carry the product version and no package URL, the same as files in library mode. The fragment below shows the metadata component and the application file. The full document has more properties. The checked-in example file was written by an older version, which used the first 12 hex characters of the SHA-256 as the file version and a `file:` package URL.
->>>>>>> origin/main
 
 ```json
 {
