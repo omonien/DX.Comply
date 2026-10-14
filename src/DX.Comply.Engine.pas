@@ -402,17 +402,29 @@ type
   end;
 
 /// <summary>
+<<<<<<< HEAD
 /// Build mode versions for files that have no version yet.
-/// The project's own outputs (.exe, .bpl, .dcp, and the file at
-/// AOwnOutputPath) get AVersion, the product version. Any other DLL that was
-/// found on disk, next to the program or resolved by the DLL reference scan,
-/// gets its own version from its version resource, and no version when it
-/// has none. Other files (.res, .map, ...) get no version. Unit evidence,
+/// The project's own outputs (.exe, .dcp, and the file at AOwnOutputPath,
+/// which is the .bpl of a package project) get AVersion, the product
+/// version. Any other DLL or .bpl that was found on disk, next to the
+/// program or resolved by the DLL reference scan, gets its own version from
+/// its version resource, and no version when it has none. Other files (.res, .map, ...) get no version. Unit evidence,
 /// runtime packages, requires packages and library source files are left
 /// unchanged.
 /// </summary>
 procedure ApplyProductVersionToBuildFiles(const AArtefacts: TArtefactList;
   const AVersion: string; const AOwnOutputPath: string = '');
+=======
+/// Build mode: sets AVersion on every file found in the build output that
+/// has no version yet (the program, DLLs, packages and other scanned files),
+/// the same way library mode gives every shipped file the release version.
+/// Unit evidence, runtime packages, DLL names from source, and requires
+/// packages are not product files and are left unchanged. An empty AVersion
+/// changes nothing.
+/// </summary>
+procedure ApplyProductVersionToBuildFiles(const AArtefacts: TArtefactList;
+  const AVersion: string);
+>>>>>>> origin/main
 
 implementation
 
@@ -526,6 +538,7 @@ begin
 end;
 
 procedure ApplyProductVersionToBuildFiles(const AArtefacts: TArtefactList;
+<<<<<<< HEAD
   const AVersion: string; const AOwnOutputPath: string);
 var
   I: Integer;
@@ -534,6 +547,15 @@ var
   LOwnOutput: Boolean;
 begin
   if AArtefacts = nil then
+=======
+  const AVersion: string);
+var
+  I: Integer;
+  LArtefact: TArtefactInfo;
+  LType: string;
+begin
+  if (AArtefacts = nil) or (Trim(AVersion) = '') then
+>>>>>>> origin/main
     Exit;
   for I := 0 to AArtefacts.Count - 1 do
   begin
@@ -543,6 +565,7 @@ begin
       Continue;
     LType := LArtefact.ArtefactType;
     if (LType = 'unit-evidence') or (LType = 'runtime-package') or
+<<<<<<< HEAD
        (LType = 'framework') or (LType = 'required-package') then
       Continue;
 
@@ -555,13 +578,20 @@ begin
       SameText(ExpandFileName(LArtefact.FilePath), ExpandFileName(AOwnOutputPath));
 
     if LOwnOutput or (LType <> 'external-reference') and
-       ((LExt = '.exe') or (LExt = '.bpl') or (LExt = '.dcp')) then
+       ((LExt = '.exe') or (LExt = '.dcp')) then
       LArtefact.Version := Trim(AVersion)
-    else if LExt = '.dll' then
-      // A third-party DLL carries its own version, or none.
+    else if (LExt = '.dll') or (LExt = '.bpl') then
+      // A third-party DLL or package carries its own version, or none.
+      // The project's own .dll or .bpl was handled above via AOwnOutputPath.
       LArtefact.Version := GetFileVersionText(LArtefact.FilePath)
     else
       Continue;
+=======
+       (LType = 'external-reference') or (LType = 'framework') or
+       (LType = 'required-package') then
+      Continue;
+    LArtefact.Version := Trim(AVersion);
+>>>>>>> origin/main
     AArtefacts[I] := LArtefact;
   end;
 end;
@@ -2477,8 +2507,12 @@ begin
 
       // Files from the build output carry the product version, as files do
       // in library mode. The hash prefix is no longer used as a version.
+<<<<<<< HEAD
       ApplyProductVersionToBuildFiles(LArtefacts, LMetadata.ProductVersion,
         LProjectInfo.OutputFilePath);
+=======
+      ApplyProductVersionToBuildFiles(LArtefacts, LMetadata.ProductVersion);
+>>>>>>> origin/main
 
       if LManifest.Loaded then
       begin

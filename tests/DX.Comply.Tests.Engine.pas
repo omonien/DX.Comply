@@ -388,6 +388,7 @@ type
     procedure Apply_ExistingVersion_Kept;
     [Test]
     procedure Apply_EmptyVersion_ChangesNothing;
+<<<<<<< HEAD
     [Test]
     procedure GetFileVersionText_SystemDll_ReturnsVersion;
     [Test]
@@ -402,6 +403,8 @@ type
     procedure Apply_DllWithoutResource_GetsNoVersion;
     [Test]
     procedure Apply_OwnOutputDll_GetsProductVersion;
+=======
+>>>>>>> origin/main
   end;
 
 implementation
@@ -2450,16 +2453,24 @@ begin
   LList := TArtefactList.Create;
   try
     LList.Add(MakeBuildArtefact('App.exe', 'application', ''));
+<<<<<<< HEAD
     LList.Add(MakeBuildArtefact('MyPkg.bpl', 'package', ''));
     LList.Add(MakeBuildArtefact('MyPkg.dcp', 'dcu-package', ''));
+=======
+    LList.Add(MakeBuildArtefact('plugin.dll', 'library', ''));
+>>>>>>> origin/main
     LList.Add(MakeBuildArtefact('data.res', 'resource', ''));
     LList.Add(MakeBuildArtefact('readme.txt', 'unknown', ''));
     ApplyProductVersionToBuildFiles(LList, ' 2.1.0 ');
     Assert.AreEqual('2.1.0', LList[0].Version);
     Assert.AreEqual('2.1.0', LList[1].Version);
     Assert.AreEqual('2.1.0', LList[2].Version);
+<<<<<<< HEAD
     Assert.AreEqual('', LList[3].Version, 'a resource is not a product output');
     Assert.AreEqual('', LList[4].Version, 'an unknown file is not a product output');
+=======
+    Assert.AreEqual('2.1.0', LList[3].Version);
+>>>>>>> origin/main
   finally
     LList.Free;
   end;
@@ -2518,6 +2529,7 @@ begin
   end;
 end;
 
+<<<<<<< HEAD
 
 function SystemDllPath: string;
 begin
@@ -2640,6 +2652,8 @@ begin
   end;
 end;
 
+=======
+>>>>>>> origin/main
 initialization
   TDUnitX.RegisterTestFixture(TEngineTests);
   TDUnitX.RegisterTestFixture(TBuildFileVersionTests);
