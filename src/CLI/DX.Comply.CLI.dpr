@@ -31,7 +31,8 @@ uses
   System.IOUtils,
   DX.Comply.Engine,
   DX.Comply.Engine.Intf,
-  DX.Comply.CLI.Options in 'DX.Comply.CLI.Options.pas';
+  DX.Comply.CLI.Options in 'DX.Comply.CLI.Options.pas',
+  DX.Comply.CLI.GitTag in 'DX.Comply.CLI.GitTag.pas';
 
 // ---------------------------------------------------------------------------
 // Progress callback — negative progress signals an error
@@ -62,6 +63,7 @@ var
   LLibraryWithoutProject: Boolean;
   LFileConfig: TSbomConfig;
   LPeek: TDxComplyGenerator;
+  LGitTagWarning: string;
   {$IFNDEF CI}
   LNoPause: Boolean;
   {$ENDIF}
@@ -125,6 +127,19 @@ begin
     // Capture verbose flag before LOptions is freed.
     LVerbose := LOptions.Verbose;
     LConfig  := LOptions.ToSbomConfig;
+
+    // --version-from-git-tag: an explicit --version still wins. Without git
+    // or a tag the warning is printed and the usual version source is used.
+    if LOptions.VersionFromGitTag then
+    begin
+      if ApplyVersionFromGitTag(LConfig, LOptions.GitTagDirectory, LGitTagWarning) then
+      begin
+        if LVerbose then
+          Writeln('Version from git tag: ', LConfig.ProductVersion);
+      end
+      else if LGitTagWarning <> '' then
+        OnProgress(LGitTagWarning, 0);
+    end;
 
     LGenerator := TDxComplyGenerator.Create(LConfig);
     try

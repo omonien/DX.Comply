@@ -70,6 +70,7 @@ type
     FManifestFile: string;
     FManifestExplicit: Boolean;
     FSbomCreator: string;
+    FVersionFromGitTag: Boolean;
     FParseError: string;
     /// <summary>
     /// Parses the --report value (markdown | html | both | none) and updates
@@ -116,6 +117,12 @@ type
     /// Call only after a successful Parse.
     /// </summary>
     function ToSbomConfig: TSbomConfig;
+    /// <summary>
+    /// Directory whose latest git tag --version-from-git-tag reads: the
+    /// folder of --project, else the first --source-dir, else the current
+    /// directory.
+    /// </summary>
+    function GitTagDirectory: string;
 
     property Project: string read FProject;
     property Format: TSbomFormat read FFormat;
@@ -124,6 +131,8 @@ type
     property Configuration: string read FConfiguration;
     property ProductName: string read FProductName;
     property ProductVersion: string read FProductVersion;
+    /// <summary>True when --version-from-git-tag was passed.</summary>
+    property VersionFromGitTag: Boolean read FVersionFromGitTag;
     property Supplier: string read FSupplier;
     /// <summary>Supplier contact URL from --supplier-url.</summary>
     property SupplierUrl: string read FSupplierUrl;
@@ -331,6 +340,12 @@ begin
     begin
       FScanTree := True;
       Include(FExplicitOverrides, scoScanTree);
+      Continue;
+    end;
+
+    if LArg = '--version-from-git-tag' then
+    begin
+      FVersionFromGitTag := True;
       Continue;
     end;
 
@@ -581,6 +596,11 @@ begin
   Writeln('                                you set is reported and ignored.');
   Writeln('  --product=<name>              Product name override');
   Writeln('  --version=<version>           Product version override');
+  Writeln('  --version-from-git-tag        Product version from the latest git tag');
+  Writeln('                                of the project folder. A leading v or V');
+  Writeln('                                is removed. --version wins when both');
+  Writeln('                                are set. Without git or a tag, a warning');
+  Writeln('                                is printed and the usual version is used.');
   Writeln('  --supplier=<name>             Supplier/company name');
   Writeln('  --supplier-url=<url>          Supplier contact URL.');
   Writeln('                                Used when the supplier is not an email.');
@@ -671,6 +691,16 @@ begin
   for LChar in AValue do
     if CharInSet(LChar, ['A'..'Z', 'a'..'z', '0'..'9', '-', '_']) then
       Result := Result + LChar;
+end;
+
+function TCliOptions.GitTagDirectory: string;
+begin
+  if FProject <> '' then
+    Result := ExtractFileDir(ExpandFileName(FProject))
+  else if Length(FSourceDirs) > 0 then
+    Result := ExpandFileName(FSourceDirs[0])
+  else
+    Result := GetCurrentDir;
 end;
 
 function TCliOptions.ToSbomConfig: TSbomConfig;

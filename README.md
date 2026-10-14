@@ -137,6 +137,12 @@ When building the same project for several targets, append the platform and conf
 dxcomply --project=MyApp.dproj --platform=Win64 --config-name=Release --include-platform-in-output --no-pause
 ```
 
+To take the product version from git, pass `--version-from-git-tag`. DX.Comply reads the newest tag reachable from the checked-out commit in the project folder (`git describe --tags --abbrev=0`) and removes a leading `v` or `V`, so `v2.1.0` becomes `2.1.0`. In library mode without `--project`, the first `--source-dir` is used. `--version` wins when both are set. The tag also wins over `product.version` in a `--ci` config file. When git is not installed, the folder is not a git work tree, or there is no tag, DX.Comply prints a warning and uses the version it would use without the option.
+
+```cmd
+dxcomply --project=MyApp.dproj --version-from-git-tag --no-pause
+```
+
 Run `dxcomply --help` for the full list of switches. See [docs/CI-Integration.md](docs/CI-Integration.md) for GitHub Actions / GitLab CI examples.
 
 ### Option C: Older Delphi, with a detailed MAP file
