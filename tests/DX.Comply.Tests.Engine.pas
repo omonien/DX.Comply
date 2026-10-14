@@ -388,6 +388,20 @@ type
     procedure Apply_ExistingVersion_Kept;
     [Test]
     procedure Apply_EmptyVersion_ChangesNothing;
+    [Test]
+    procedure GetFileVersionText_SystemDll_ReturnsVersion;
+    [Test]
+    procedure GetFileVersionText_NoResource_ReturnsEmpty;
+    [Test]
+    procedure GetFileVersionText_MissingFile_ReturnsEmpty;
+    [Test]
+    procedure Apply_ThirdPartyDll_GetsOwnVersion;
+    [Test]
+    procedure Apply_ResolvedExternalDll_GetsOwnVersion;
+    [Test]
+    procedure Apply_DllWithoutResource_GetsNoVersion;
+    [Test]
+    procedure Apply_OwnOutputDll_GetsProductVersion;
   end;
 
 implementation
@@ -2436,14 +2450,16 @@ begin
   LList := TArtefactList.Create;
   try
     LList.Add(MakeBuildArtefact('App.exe', 'application', ''));
-    LList.Add(MakeBuildArtefact('plugin.dll', 'library', ''));
+    LList.Add(MakeBuildArtefact('MyPkg.bpl', 'package', ''));
+    LList.Add(MakeBuildArtefact('MyPkg.dcp', 'dcu-package', ''));
     LList.Add(MakeBuildArtefact('data.res', 'resource', ''));
     LList.Add(MakeBuildArtefact('readme.txt', 'unknown', ''));
     ApplyProductVersionToBuildFiles(LList, ' 2.1.0 ');
     Assert.AreEqual('2.1.0', LList[0].Version);
     Assert.AreEqual('2.1.0', LList[1].Version);
     Assert.AreEqual('2.1.0', LList[2].Version);
-    Assert.AreEqual('2.1.0', LList[3].Version);
+    Assert.AreEqual('', LList[3].Version, 'a resource is not a product output');
+    Assert.AreEqual('', LList[4].Version, 'an unknown file is not a product output');
   finally
     LList.Free;
   end;
@@ -2499,6 +2515,128 @@ begin
     Assert.AreEqual('', LList[0].Version);
   finally
     LList.Free;
+  end;
+end;
+
+
+function SystemDllPath: string;
+begin
+  // kernel32.dll always has a version resource. A Win32 process sees the
+  // SysWOW64 copy through redirection; either copy works here.
+  Result := TPath.Combine(GetEnvironmentVariable('SystemRoot'), 'System32\kernel32.dll');
+end;
+
+function NewDllWithoutResource: string;
+begin
+  Result := TPath.Combine(TPath.GetTempPath,
+    'dxc-noversion-' + TGUID.NewGuid.ToString.Replace('{', '').Replace('}', '') + '.dll');
+  TFile.WriteAllText(Result, 'not a PE file');
+end;
+
+procedure TBuildFileVersionTests.GetFileVersionText_SystemDll_ReturnsVersion;
+var
+  LVersion: string;
+begin
+  LVersion := GetFileVersionText(SystemDllPath);
+  Assert.IsTrue(LVersion <> '', 'kernel32.dll must report a version');
+  Assert.IsTrue(CharInSet(LVersion[1], ['0'..'9']), LVersion);
+end;
+
+procedure TBuildFileVersionTests.GetFileVersionText_NoResource_ReturnsEmpty;
+var
+  LPath: string;
+begin
+  LPath := NewDllWithoutResource;
+  try
+    Assert.AreEqual('', GetFileVersionText(LPath));
+  finally
+    TFile.Delete(LPath);
+  end;
+end;
+
+procedure TBuildFileVersionTests.GetFileVersionText_MissingFile_ReturnsEmpty;
+begin
+  Assert.AreEqual('', GetFileVersionText('C:\does-not-exist\nothing.dll'));
+  Assert.AreEqual('', GetFileVersionText(''));
+end;
+
+procedure TBuildFileVersionTests.Apply_ThirdPartyDll_GetsOwnVersion;
+var
+  LList: TArtefactList;
+  LArtefact: TArtefactInfo;
+begin
+  LList := TArtefactList.Create;
+  try
+    LArtefact := MakeBuildArtefact('kernel32.dll', 'library', '');
+    LArtefact.FilePath := SystemDllPath;
+    LList.Add(LArtefact);
+    ApplyProductVersionToBuildFiles(LList, '2.1.0', 'C:\Build\App.exe');
+    Assert.AreEqual(GetFileVersionText(SystemDllPath), LList[0].Version);
+    Assert.AreNotEqual('2.1.0', LList[0].Version);
+  finally
+    LList.Free;
+  end;
+end;
+
+procedure TBuildFileVersionTests.Apply_ResolvedExternalDll_GetsOwnVersion;
+var
+  LList: TArtefactList;
+  LArtefact: TArtefactInfo;
+begin
+  LList := TArtefactList.Create;
+  try
+    LArtefact := MakeBuildArtefact('kernel32.dll', 'external-reference', '');
+    LArtefact.FilePath := SystemDllPath;
+    LList.Add(LArtefact);
+    // Not found on disk: only the name from source is known.
+    LArtefact := MakeBuildArtefact('missing.dll', 'external-reference', '');
+    LArtefact.FilePath := '';
+    LList.Add(LArtefact);
+    ApplyProductVersionToBuildFiles(LList, '2.1.0');
+    Assert.AreEqual(GetFileVersionText(SystemDllPath), LList[0].Version);
+    Assert.AreEqual('', LList[1].Version);
+  finally
+    LList.Free;
+  end;
+end;
+
+procedure TBuildFileVersionTests.Apply_DllWithoutResource_GetsNoVersion;
+var
+  LList: TArtefactList;
+  LArtefact: TArtefactInfo;
+  LPath: string;
+begin
+  LPath := NewDllWithoutResource;
+  LList := TArtefactList.Create;
+  try
+    LArtefact := MakeBuildArtefact(TPath.GetFileName(LPath), 'library', '');
+    LArtefact.FilePath := LPath;
+    LList.Add(LArtefact);
+    ApplyProductVersionToBuildFiles(LList, '2.1.0');
+    Assert.AreEqual('', LList[0].Version);
+  finally
+    LList.Free;
+    TFile.Delete(LPath);
+  end;
+end;
+
+procedure TBuildFileVersionTests.Apply_OwnOutputDll_GetsProductVersion;
+var
+  LList: TArtefactList;
+  LArtefact: TArtefactInfo;
+  LPath: string;
+begin
+  LPath := NewDllWithoutResource;
+  LList := TArtefactList.Create;
+  try
+    LArtefact := MakeBuildArtefact(TPath.GetFileName(LPath), 'library', '');
+    LArtefact.FilePath := LPath;
+    LList.Add(LArtefact);
+    ApplyProductVersionToBuildFiles(LList, '2.1.0', LPath);
+    Assert.AreEqual('2.1.0', LList[0].Version);
+  finally
+    LList.Free;
+    TFile.Delete(LPath);
   end;
 end;
 

@@ -34,7 +34,52 @@ function GetModuleProductVersion(AModule: HMODULE): string;
 /// Named string from AModule's version resource, for example CompanyName.
 /// Pass 0 for HInstance. Returns an empty string when the value is absent.
 /// </summary>
+function QueryFixedFileVersion(const AVersionData: TBytes): string;
+var
+  LVersionInfo: PVSFixedFileInfo;
+  LVersionLength: UINT;
+begin
+  Result := '';
+  if (Length(AVersionData) = 0) or
+    not VerQueryValue(@AVersionData[0], '\', Pointer(LVersionInfo), LVersionLength) or
+    (LVersionLength < SizeOf(VS_FIXEDFILEINFO)) then
+    Exit;
+  if (LVersionInfo^.dwFileVersionMS = 0) and (LVersionInfo^.dwFileVersionLS = 0) then
+    Exit;
+
+  Result := Format('%d.%d.%d.%d', [
+    HiWord(LVersionInfo^.dwFileVersionMS),
+    LoWord(LVersionInfo^.dwFileVersionMS),
+    HiWord(LVersionInfo^.dwFileVersionLS),
+    LoWord(LVersionInfo^.dwFileVersionLS)]);
+end;
+
+function GetFileVersionText(const APath: string): string;
+var
+  LVersionData: TBytes;
+begin
+  Result := '';
+  if (APath = '') or not FileExists(APath) then
+    Exit;
+  LVersionData := LoadFileVersionData(APath);
+  if Length(LVersionData) = 0 then
+    Exit;
+  Result := QueryVersionString(LVersionData, 'FileVersion');
+  if Result = '' then
+    Result := QueryVersionString(LVersionData, 'ProductVersion');
+  if Result = '' then
+    Result := QueryFixedFileVersion(LVersionData);
+end;
+
 function GetModuleVersionString(AModule: HMODULE; const AName: string): string;
+
+/// <summary>
+/// Version of the file at APath from its version resource: the FileVersion
+/// string, else the ProductVersion string, else the fixed file version.
+/// Returns an empty string when the file is missing or has no version
+/// resource. Used for third-party DLLs listed in a build SBOM.
+/// </summary>
+function GetFileVersionText(const APath: string): string;
 
 /// <summary>
 /// Tool version of the module that contains this unit.
@@ -91,14 +136,12 @@ begin
   SetLength(Result, LLength);
 end;
 
-function LoadVersionData(AModule: HMODULE): TBytes;
+function LoadFileVersionData(const LPath: string): TBytes;
 var
   LDummy: DWORD;
-  LPath: string;
   LSize: DWORD;
 begin
   SetLength(Result, 0);
-  LPath := ModuleFilePath(AModule);
   if LPath = '' then
     Exit;
 
@@ -109,6 +152,11 @@ begin
   SetLength(Result, LSize);
   if not GetFileVersionInfo(PChar(LPath), 0, LSize, @Result[0]) then
     SetLength(Result, 0);
+end;
+
+function LoadVersionData(AModule: HMODULE): TBytes;
+begin
+  Result := LoadFileVersionData(ModuleFilePath(AModule));
 end;
 
 function QueryVersionString(const AVersionData: TBytes; const AName: string): string;
