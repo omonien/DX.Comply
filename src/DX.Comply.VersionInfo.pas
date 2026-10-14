@@ -34,43 +34,6 @@ function GetModuleProductVersion(AModule: HMODULE): string;
 /// Named string from AModule's version resource, for example CompanyName.
 /// Pass 0 for HInstance. Returns an empty string when the value is absent.
 /// </summary>
-function QueryFixedFileVersion(const AVersionData: TBytes): string;
-var
-  LVersionInfo: PVSFixedFileInfo;
-  LVersionLength: UINT;
-begin
-  Result := '';
-  if (Length(AVersionData) = 0) or
-    not VerQueryValue(@AVersionData[0], '\', Pointer(LVersionInfo), LVersionLength) or
-    (LVersionLength < SizeOf(VS_FIXEDFILEINFO)) then
-    Exit;
-  if (LVersionInfo^.dwFileVersionMS = 0) and (LVersionInfo^.dwFileVersionLS = 0) then
-    Exit;
-
-  Result := Format('%d.%d.%d.%d', [
-    HiWord(LVersionInfo^.dwFileVersionMS),
-    LoWord(LVersionInfo^.dwFileVersionMS),
-    HiWord(LVersionInfo^.dwFileVersionLS),
-    LoWord(LVersionInfo^.dwFileVersionLS)]);
-end;
-
-function GetFileVersionText(const APath: string): string;
-var
-  LVersionData: TBytes;
-begin
-  Result := '';
-  if (APath = '') or not FileExists(APath) then
-    Exit;
-  LVersionData := LoadFileVersionData(APath);
-  if Length(LVersionData) = 0 then
-    Exit;
-  Result := QueryVersionString(LVersionData, 'FileVersion');
-  if Result = '' then
-    Result := QueryVersionString(LVersionData, 'ProductVersion');
-  if Result = '' then
-    Result := QueryFixedFileVersion(LVersionData);
-end;
-
 function GetModuleVersionString(AModule: HMODULE; const AName: string): string;
 
 /// <summary>
@@ -212,6 +175,43 @@ begin
     LoWord(LVersionInfo^.dwProductVersionMS),
     HiWord(LVersionInfo^.dwProductVersionLS),
     LoWord(LVersionInfo^.dwProductVersionLS)]);
+end;
+
+function QueryFixedFileVersion(const AVersionData: TBytes): string;
+var
+  LVersionInfo: PVSFixedFileInfo;
+  LVersionLength: UINT;
+begin
+  Result := '';
+  if (Length(AVersionData) = 0) or
+    not VerQueryValue(@AVersionData[0], '\', Pointer(LVersionInfo), LVersionLength) or
+    (LVersionLength < SizeOf(VS_FIXEDFILEINFO)) then
+    Exit;
+  if (LVersionInfo^.dwFileVersionMS = 0) and (LVersionInfo^.dwFileVersionLS = 0) then
+    Exit;
+
+  Result := Format('%d.%d.%d.%d', [
+    HiWord(LVersionInfo^.dwFileVersionMS),
+    LoWord(LVersionInfo^.dwFileVersionMS),
+    HiWord(LVersionInfo^.dwFileVersionLS),
+    LoWord(LVersionInfo^.dwFileVersionLS)]);
+end;
+
+function GetFileVersionText(const APath: string): string;
+var
+  LVersionData: TBytes;
+begin
+  Result := '';
+  if (APath = '') or not FileExists(APath) then
+    Exit;
+  LVersionData := LoadFileVersionData(APath);
+  if Length(LVersionData) = 0 then
+    Exit;
+  Result := QueryVersionString(LVersionData, 'FileVersion');
+  if Result = '' then
+    Result := QueryVersionString(LVersionData, 'ProductVersion');
+  if Result = '' then
+    Result := QueryFixedFileVersion(LVersionData);
 end;
 
 function GetModuleVersionString(AModule: HMODULE; const AName: string): string;
