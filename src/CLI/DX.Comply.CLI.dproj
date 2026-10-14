@@ -82,6 +82,7 @@
         </DelphiCompile>
         <DCCReference Include="..\DX.Comply.Locale.EN.pas"/>
         <DCCReference Include="DX.Comply.CLI.Options.pas"/>
+        <DCCReference Include="DX.Comply.CLI.GitTag.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>
