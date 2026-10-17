@@ -2673,7 +2673,11 @@ begin
     LArtefact.FilePath := LPath;
     LList.Add(LArtefact);
     ApplyProductVersionToBuildFiles(LList, '2.1.0', 'C:\Build\App.exe');
-    Assert.AreEqual(GetFileVersionText(SystemDllPath), LList[0].Version);
+    // Compare with the copy, not the system path. For a file under System32
+    // Windows can read the version strings from the language .mui file, which
+    // lags behind the binary after an update. The copy has no .mui file.
+    Assert.AreEqual(GetFileVersionText(LPath), LList[0].Version);
+    Assert.AreNotEqual('', LList[0].Version);
     Assert.AreNotEqual('2.1.0', LList[0].Version);
   finally
     LList.Free;
