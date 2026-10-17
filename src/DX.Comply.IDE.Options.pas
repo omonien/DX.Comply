@@ -45,6 +45,7 @@ type
 implementation
 
 uses
+  DX.Comply.IDE.ReadmeSupport,
   DX.Comply.IDE.Settings;
 
 procedure TDXComplyIDEOptionsPage.DialogClosed(Accepted: Boolean);
@@ -91,7 +92,8 @@ end;
 
 function TDXComplyIDEOptionsPage.IncludeInIDEInsight: Boolean;
 begin
-  Result := True;
+  // Indexing creates the frame outside the Options dialog. Issue #66.
+  Result := cDXComplyOptionsIncludeInIDEInsight;
 end;
 
 function TDXComplyIDEOptionsPage.ValidateContents: Boolean;
