@@ -46,6 +46,8 @@ begin
     Writeln('[DONE ] ', AMessage)
   else if AMessage.StartsWith('Warning:', True) then
     Writeln('[WARN ] ', AMessage)
+  else if AMessage.StartsWith('Info: ', True) then
+    Writeln('[INFO ] ', AMessage.Substring(Length('Info: ')))
   else
     Writeln(Format('[%3d%%] %s', [AProgress, AMessage]));
 end;
@@ -153,6 +155,7 @@ begin
             or (AProgress < 0)
             or (AProgress = 100)
             or AMessage.StartsWith('Warning:', True)
+            or AMessage.StartsWith('Info: ', True)
             or AMessage.StartsWith('[WARN', True) then
             OnProgress(AMessage, AProgress);
         end;

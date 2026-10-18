@@ -276,6 +276,21 @@ type
 function DetectBdsProductVersion: string;
 
 /// <summary>
+/// When AProjectPath is a .dpr and a .dproj with the same base name is in
+/// the same folder, returns True and that .dproj in ADprojPath. Delphi
+/// opens the .dproj in that case too. A .dpr without a .dproj (a Delphi 7
+/// project) and any other extension return False and an empty ADprojPath.
+/// </summary>
+function TryFindDprojForDpr(const AProjectPath: string;
+  out ADprojPath: string): Boolean;
+
+/// <summary>
+/// Info text for a .dpr that was replaced by its .dproj, for example
+/// "Using Foo.dproj found next to Foo.dpr."
+/// </summary>
+function DprojForDprMessage(const ADprPath, ADprojPath: string): string;
+
+/// <summary>
 /// Reads DLL names from a PE import directory (PE32 and PE32+).
 /// Returns False when the file is missing, unreadable, or not a valid PE.
 /// ANames is empty on failure. A valid PE with no imports returns True and
@@ -327,6 +342,31 @@ begin
     LVersionNames.Free;
     LRegistry.Free;
   end;
+end;
+
+function TryFindDprojForDpr(const AProjectPath: string;
+  out ADprojPath: string): Boolean;
+var
+  LCandidate: string;
+begin
+  ADprojPath := '';
+  Result := False;
+  if Trim(AProjectPath) = '' then
+    Exit;
+  if not SameText(ExtractFileExt(AProjectPath), '.dpr') then
+    Exit;
+  LCandidate := ChangeFileExt(AProjectPath, '.dproj');
+  if TFile.Exists(LCandidate) then
+  begin
+    ADprojPath := LCandidate;
+    Result := True;
+  end;
+end;
+
+function DprojForDprMessage(const ADprPath, ADprojPath: string): string;
+begin
+  Result := 'Using ' + ExtractFileName(ADprojPath) + ' found next to ' +
+    ExtractFileName(ADprPath) + '.';
 end;
 
 function DetectBdsProductVersion: string;

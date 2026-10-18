@@ -384,6 +384,12 @@ type
     /// </summary>
     function GenerateFromConfig(const AProjectPath, AConfigPath: string): Boolean;
     /// <summary>
+    /// Project file a build mode run uses. A .dpr with a .dproj of the same
+    /// name in the same folder resolves to that .dproj and reports an
+    /// "Info: " progress message. Any other path is returned unchanged.
+    /// </summary>
+    function ResolveProjectPath(const AProjectPath: string): string;
+    /// <summary>
     /// Validates a project file.
     /// </summary>
     function ValidateProject(const AProjectPath: string): Boolean;
@@ -2275,6 +2281,7 @@ var
   LNote: string;
   LCraWarnings: TList<string>;
   LCraText: string;
+  LDprojPath: string;
 begin
   Result := False;
 
@@ -2288,6 +2295,16 @@ begin
   if FConfig.LibraryMode then
   begin
     Result := GenerateLibrary(AProjectPath, AOutputPath, AFormat);
+    Exit;
+  end;
+
+  // A .dpr with a .dproj of the same name next to it is a Delphi 2007 or
+  // later project. Use the .dproj, as Delphi does when it opens the .dpr.
+  // A .dpr without a .dproj keeps the Delphi 7 path. Issue #75.
+  LDprojPath := ResolveProjectPath(AProjectPath);
+  if LDprojPath <> AProjectPath then
+  begin
+    Result := Generate(LDprojPath, AOutputPath, AFormat);
     Exit;
   end;
 
@@ -2640,6 +2657,18 @@ begin
     FConfig.ManifestFileExplicit := True;
   end;
   Result := Generate(AProjectPath);
+end;
+
+function TDxComplyGenerator.ResolveProjectPath(const AProjectPath: string): string;
+var
+  LDprojPath: string;
+begin
+  Result := AProjectPath;
+  if TryFindDprojForDpr(AProjectPath, LDprojPath) then
+  begin
+    DoProgress('Info: ' + DprojForDprMessage(AProjectPath, LDprojPath), 5);
+    Result := LDprojPath;
+  end;
 end;
 
 function TDxComplyGenerator.ValidateProject(const AProjectPath: string): Boolean;

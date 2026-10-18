@@ -52,7 +52,8 @@ uses
   DX.Comply.Tests.VersionInfo in 'DX.Comply.Tests.VersionInfo.pas',
   DX.Comply.Tests.CraChecks in 'DX.Comply.Tests.CraChecks.pas',
   DX.Comply.Tests.LibrarySource in 'DX.Comply.Tests.LibrarySource.pas',
-  DX.Comply.Tests.CLI.GitTag in 'DX.Comply.Tests.CLI.GitTag.pas';
+  DX.Comply.Tests.CLI.GitTag in 'DX.Comply.Tests.CLI.GitTag.pas',
+  DX.Comply.Tests.DprojForDpr in 'DX.Comply.Tests.DprojForDpr.pas';
 
 var
   LRunner: ITestRunner;

@@ -80,7 +80,7 @@ The IDE plugin compiles the project directly via the OTA (`IOTAProject.ProjectBu
 
 ### CLI tool
 
-The CLI tool does **not** compile the project. It expects the MAP file to already exist, either from a prior build with `DCC_MapFile=3` in the IDE or via MSBuild in a CI pipeline. `--project` may be a `.dproj`, `.dpk`, or `.groupproj`. A Delphi 7 `.dpr` is also accepted when the sibling `.dof` and `.cfg` are present. A `.dof` alone is not a project file. This keeps the CLI independent of the IDE.
+The CLI tool does **not** compile the project. It expects the MAP file to already exist, either from a prior build with `DCC_MapFile=3` in the IDE or via MSBuild in a CI pipeline. `--project` may be a `.dproj`, `.dpk`, or `.groupproj`. A Delphi 7 `.dpr` is also accepted when the sibling `.dof` and `.cfg` are present. When a `.dproj` with the same name is next to a `.dpr`, build mode uses the `.dproj` and reports it with an info message. A `.dof` alone is not a project file. This keeps the CLI independent of the IDE.
 
 ## Unit origin classification
 

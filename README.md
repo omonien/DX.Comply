@@ -151,7 +151,7 @@ The command line tool can write an SBOM for a project that was built with an old
 
 1. In the IDE that builds the project, set **Map file** to **Detailed**.
 2. Build the project. This produces a `.map` file.
-3. Run the CLI against the project file. Delphi 2007 and later use a `.dproj`, `.dpk`, or `.groupproj`. A Delphi 7 project is the `.dpr` together with its `.dof` and `.cfg`, or the `.dpk` when a package has no `.dproj`. Delphi 2005 and 2006 can use the `.bdsproj`. If a `.dproj` is also present, pass the `.dproj`.
+3. Run the CLI against the project file. Delphi 2007 and later use a `.dproj`, `.dpk`, or `.groupproj`. A Delphi 7 project is the `.dpr` together with its `.dof` and `.cfg`, or the `.dpk` when a package has no `.dproj`. Delphi 2005 and 2006 can use the `.bdsproj`. If a `.dproj` with the same name is next to the `.dpr`, DX.Comply uses the `.dproj`, as Delphi does when it opens the project, and prints `[INFO ] Using MyApp.dproj found next to MyApp.dpr.`
 
 ```cmd
 dxcomply --project=MyApp.dpr --output=bom.json --no-pause
