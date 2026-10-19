@@ -66,8 +66,10 @@ type
 
     /// <summary>
     /// 40,000 distinct units must not take quadratic time. The old list scan
-    /// needed about 15 seconds for the dedupe alone. The bound is generous,
-    /// because the per-line regex still costs a few seconds on slow machines.
+    /// needed about 90 seconds here. The test measures the CPU time of the
+    /// thread, not wall-clock time, so a busy build machine does not fail it.
+    /// The bound is generous, because the per-line regex still costs a few
+    /// seconds.
     /// </summary>
     [Test]
     [Category('Performance')]
@@ -77,9 +79,27 @@ type
 implementation
 
 uses
-  System.Diagnostics,
+  Winapi.Windows,
   System.IOUtils,
   System.SysUtils;
+
+/// <summary>
+/// CPU time of the calling thread in milliseconds (user plus kernel). Unlike
+/// wall-clock time it does not grow when other processes load the machine.
+/// </summary>
+function ThreadCpuMilliseconds: Int64;
+var
+  LCreation: TFileTime;
+  LExit: TFileTime;
+  LKernel: TFileTime;
+  LUser: TFileTime;
+begin
+  if not GetThreadTimes(GetCurrentThread, LCreation, LExit, LKernel, LUser) then
+    RaiseLastOSError;
+  var LKernel100ns := Int64(LKernel.dwHighDateTime) shl 32 or LKernel.dwLowDateTime;
+  var LUser100ns := Int64(LUser.dwHighDateTime) shl 32 or LUser.dwLowDateTime;
+  Result := (LKernel100ns + LUser100ns) div 10000;
+end;
 
 procedure TMapFileReaderTests.ReadUnitNames_DetailedMap_ExtractsUniqueUnitNames;
 var
@@ -269,17 +289,17 @@ begin
       LBuilder.Free;
     end;
 
-    var LStopwatch := TStopwatch.StartNew;
+    var LCpuStart := ThreadCpuMilliseconds;
     var LUnitNames := TMapFileReader.ReadUnitNames(LMapFilePath);
-    LStopwatch.Stop;
+    var LCpuMilliseconds := ThreadCpuMilliseconds - LCpuStart;
 
     Assert.AreEqual(NativeInt(cUnitCount), NativeInt(Length(LUnitNames)),
       'Every synthetic unit must be extracted once');
     Assert.AreEqual('Unit0', LUnitNames[0]);
     Assert.AreEqual('Unit' + IntToStr(cUnitCount - 1), LUnitNames[cUnitCount - 1]);
-    Assert.IsTrue(LStopwatch.ElapsedMilliseconds < cMaxMilliseconds,
-      Format('Reading %d units took %d ms, limit is %d ms',
-        [cUnitCount, LStopwatch.ElapsedMilliseconds, cMaxMilliseconds]));
+    Assert.IsTrue(LCpuMilliseconds < cMaxMilliseconds,
+      Format('Reading %d units took %d ms CPU time, limit is %d ms',
+        [cUnitCount, LCpuMilliseconds, cMaxMilliseconds]));
   finally
     if TFile.Exists(LMapFilePath) then
     begin
