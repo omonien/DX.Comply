@@ -51,11 +51,31 @@ type
     /// </summary>
     [Test]
     procedure ReadUnitNames_SegmentMap_DeduplicatesAcrossSections;
+
+    /// <summary>
+    /// Units come back in the order of their first appearance.
+    /// </summary>
+    [Test]
+    procedure ReadUnitNames_ManyUnits_KeepsFirstAppearanceOrder;
+
+    /// <summary>
+    /// Names that differ only in case count once, with the first spelling.
+    /// </summary>
+    [Test]
+    procedure ReadUnitNames_DifferentCase_KeepsFirstSpelling;
+
+    /// <summary>
+    /// 50,000 distinct units must not take quadratic time. The old list scan
+    /// needed tens of seconds here; the bound is generous for slow machines.
+    /// </summary>
+    [Test]
+    procedure ReadUnitNames_FiftyThousandUnits_DedupesInLinearTime;
   end;
 
 implementation
 
 uses
+  System.Diagnostics,
   System.IOUtils,
   System.SysUtils;
 
@@ -174,6 +194,99 @@ begin
   finally
     if TFile.Exists(LMapFilePath) then
       TFile.Delete(LMapFilePath);
+  end;
+end;
+
+procedure TMapFileReaderTests.ReadUnitNames_ManyUnits_KeepsFirstAppearanceOrder;
+begin
+  var LMapContent :=
+    '  Line numbers for Zeta.Unit(Zeta.Unit.pas) segment CODE' + sLineBreak +
+    ' 0001:00000000 00000010 C=CODE     S=.text    G=(none)   M=Alpha.Unit ACBP=A9' + sLineBreak +
+    '  Line numbers for Zeta.Unit(Zeta.Unit.pas) segment ICODE' + sLineBreak +
+    ' 0001:00000010 00000010 C=CODE     S=.text    G=(none)   M=Mid.Unit ACBP=A9' + sLineBreak +
+    '  Line numbers for Alpha.Unit(Alpha.Unit.pas) segment CODE';
+
+  var LMapFilePath := TPath.GetTempFileName;
+  try
+    TFile.WriteAllText(LMapFilePath, LMapContent, TEncoding.UTF8);
+    var LUnitNames := TMapFileReader.ReadUnitNames(LMapFilePath);
+
+    Assert.AreEqual(NativeInt(3), NativeInt(Length(LUnitNames)));
+    Assert.AreEqual('Zeta.Unit', LUnitNames[0]);
+    Assert.AreEqual('Alpha.Unit', LUnitNames[1]);
+    Assert.AreEqual('Mid.Unit', LUnitNames[2]);
+  finally
+    if TFile.Exists(LMapFilePath) then
+    begin
+      TFile.Delete(LMapFilePath);
+    end;
+  end;
+end;
+
+procedure TMapFileReaderTests.ReadUnitNames_DifferentCase_KeepsFirstSpelling;
+begin
+  var LMapContent :=
+    ' 0001:00000000 00000010 C=CODE     S=.text    G=(none)   M=Vcl.Forms ACBP=A9' + sLineBreak +
+    ' 0001:00000010 00000010 C=CODE     S=.text    G=(none)   M=VCL.FORMS ACBP=A9' + sLineBreak +
+    '  Line numbers for vcl.forms(Vcl.Forms.pas) segment CODE';
+
+  var LMapFilePath := TPath.GetTempFileName;
+  try
+    TFile.WriteAllText(LMapFilePath, LMapContent, TEncoding.UTF8);
+    var LUnitNames := TMapFileReader.ReadUnitNames(LMapFilePath);
+
+    Assert.AreEqual(NativeInt(1), NativeInt(Length(LUnitNames)),
+      'Unit names that differ only in case must be deduplicated');
+    Assert.AreEqual('Vcl.Forms', LUnitNames[0]);
+  finally
+    if TFile.Exists(LMapFilePath) then
+    begin
+      TFile.Delete(LMapFilePath);
+    end;
+  end;
+end;
+
+procedure TMapFileReaderTests.ReadUnitNames_FiftyThousandUnits_DedupesInLinearTime;
+const
+  cUnitCount = 50000;
+  cMaxMilliseconds = 10000;
+begin
+  var LMapFilePath := TPath.GetTempFileName;
+  try
+    var LBuilder := TStringBuilder.Create;
+    try
+      for var i := 0 to cUnitCount - 1 do
+      begin
+        // Each unit appears in a header and a segment entry, and every block
+        // repeats the first unit, as real map files list units many times.
+        LBuilder.AppendFormat('  Line numbers for Unit%0:d(Unit%0:d.pas) segment CODE', [i]);
+        LBuilder.AppendLine;
+        LBuilder.AppendFormat(' 0001:00000000 00000010 C=CODE     S=.text    G=(none)   M=Unit%d ACBP=A9', [i]);
+        LBuilder.AppendLine;
+        LBuilder.Append(' 0002:00000000 00000010 C=DATA     S=.data    G=DGROUP   M=Unit0 ACBP=A9');
+        LBuilder.AppendLine;
+      end;
+      TFile.WriteAllText(LMapFilePath, LBuilder.ToString, TEncoding.UTF8);
+    finally
+      LBuilder.Free;
+    end;
+
+    var LStopwatch := TStopwatch.StartNew;
+    var LUnitNames := TMapFileReader.ReadUnitNames(LMapFilePath);
+    LStopwatch.Stop;
+
+    Assert.AreEqual(NativeInt(cUnitCount), NativeInt(Length(LUnitNames)),
+      'Every synthetic unit must be extracted once');
+    Assert.AreEqual('Unit0', LUnitNames[0]);
+    Assert.AreEqual('Unit' + IntToStr(cUnitCount - 1), LUnitNames[cUnitCount - 1]);
+    Assert.IsTrue(LStopwatch.ElapsedMilliseconds < cMaxMilliseconds,
+      Format('Reading %d units took %d ms, limit is %d ms',
+        [cUnitCount, LStopwatch.ElapsedMilliseconds, cMaxMilliseconds]));
+  finally
+    if TFile.Exists(LMapFilePath) then
+    begin
+      TFile.Delete(LMapFilePath);
+    end;
   end;
 end;
 

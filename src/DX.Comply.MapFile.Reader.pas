@@ -25,10 +25,6 @@ type
   TMapFileReader = class
   private
     /// <summary>
-    /// Adds a unit name to the result only once, case-insensitively.
-    /// </summary>
-    class procedure AddUniqueUnitName(const AUnitName: string; var AUnitNames: TArray<string>); static;
-    /// <summary>
     /// Tries to extract a unit name from a "Line numbers for" section header.
     /// </summary>
     class function TryExtractLineNumbersUnitName(const ALine: string; out AUnitName: string): Boolean; static;
@@ -47,26 +43,28 @@ implementation
 
 uses
   System.Classes,
+  System.Generics.Collections,
+  System.Generics.Defaults,
   System.IOUtils,
   System.RegularExpressions,
   System.SysUtils;
 
-class procedure TMapFileReader.AddUniqueUnitName(const AUnitName: string;
-  var AUnitNames: TArray<string>);
-var
-  LExistingUnitName: string;
+/// <summary>
+/// Adds a unit name to AUnitNames only once, case-insensitively. ASeen holds
+/// the names added so far, so each call is O(1) instead of a scan of the list.
+/// The first spelling and the order of first appearance are kept.
+/// </summary>
+procedure AddUniqueUnitName(const AUnitName: string;
+  const ASeen: TDictionary<string, Boolean>; const AUnitNames: TList<string>);
 begin
   if Trim(AUnitName) = '' then
     Exit;
 
-  for LExistingUnitName in AUnitNames do
-  begin
-    if SameText(LExistingUnitName, AUnitName) then
-      Exit;
-  end;
+  if ASeen.ContainsKey(AUnitName) then
+    Exit;
 
-  SetLength(AUnitNames, Length(AUnitNames) + 1);
-  AUnitNames[High(AUnitNames)] := AUnitName;
+  ASeen.Add(AUnitName, True);
+  AUnitNames.Add(AUnitName);
 end;
 
 class function TMapFileReader.ReadUnitNames(const AMapFilePath: string): TArray<string>;
@@ -79,18 +77,27 @@ begin
   if not TFile.Exists(AMapFilePath) then
     Exit;
 
+  var LSeen := TDictionary<string, Boolean>.Create(TIStringComparer.Ordinal);
+  var LUnitNames := TList<string>.Create;
   LLines := TStringList.Create;
   try
     LLines.LoadFromFile(AMapFilePath);
     for LLine in LLines do
     begin
       if TryExtractLineNumbersUnitName(LLine, LUnitName) then
-        AddUniqueUnitName(LUnitName, Result)
+      begin
+        AddUniqueUnitName(LUnitName, LSeen, LUnitNames);
+      end
       else if TryExtractSegmentUnitName(LLine, LUnitName) then
-        AddUniqueUnitName(LUnitName, Result);
+      begin
+        AddUniqueUnitName(LUnitName, LSeen, LUnitNames);
+      end;
     end;
+    Result := LUnitNames.ToArray;
   finally
     LLines.Free;
+    LUnitNames.Free;
+    LSeen.Free;
   end;
 end;
 
