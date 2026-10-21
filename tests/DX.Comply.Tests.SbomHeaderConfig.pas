@@ -89,6 +89,7 @@ uses
   System.SysUtils,
   System.IOUtils,
   System.JSON,
+  System.Generics.Collections,
   DX.Comply.Engine;
 
 function TSbomHeaderConfigTests.SampleHeader: TSbomHeaderData;
