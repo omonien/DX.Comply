@@ -37,6 +37,21 @@ function BuildCraMetadataWarnings(const AConfig: TSbomConfig;
   const AMetadata: TSbomMetadata; const AProjectInfo: TProjectInfo;
   const AArtefacts: TArtefactList): TArray<string>;
 
+/// <summary>
+/// True for a warning from BuildCraMetadataWarnings that asks for SBOM
+/// header data the user can enter (supplier, supplier URL, SBOM creator,
+/// version, licence). False for the missing deployable and anything else.
+/// A leading "Warning:" as written by the progress callback is ignored.
+/// </summary>
+function IsSbomHeaderWarning(const AText: string): Boolean;
+
+const
+  /// <summary>
+  /// Menu path of the IDE dialog that edits the SBOM header data. The IDE
+  /// warning texts name it.
+  /// </summary>
+  cIdeSbomHeaderDialogPath = 'Project > DX.Comply - SBOM > SBOM Header Data';
+
 implementation
 
 uses
@@ -45,27 +60,82 @@ uses
   System.Generics.Collections;
 
 const
-  cNoSupplier =
-    'CRA/BSI: The SBOM names no supplier for the product. BSI TR-03183-2 section 5.2.2 requires the component creator, and CRA Annex II point 1 requires the name and contact of the manufacturer. Pass --supplier=<name>, set product.supplier in .dxcomply.json, or fill CompanyName in the project version info.';
-  cNoSbomCreator =
-    'CRA/BSI: The SBOM creator contact is missing. BSI TR-03183-2 section 5.2.1 requires the email address or URL of the entity that created the SBOM. Pass --sbom-creator=<email-or-url> or set sbomCreator in .dxcomply.json.';
-  cNoVersion =
-    'CRA/BSI: The product has no version. BSI TR-03183-2 section 5.2.2 requires the component version, and CRA Annex II point 3 requires information that identifies the product uniquely. Pass --version=<version>, set product.version in .dxcomply.json, or set the version info in the project options.';
-  cDefaultVersion =
-    'CRA/BSI: The product version is 1.0.0.0, the Delphi default for new projects. BSI TR-03183-2 section 5.2.2 requires the version the creator uses to tell releases apart, and CRA Annex II point 3 requires information that identifies the product uniquely. If 1.0.0.0 is not the real release version, pass --version=<version>, set product.version in .dxcomply.json, or update the version info in the project options.';
-  cNoLicence =
-    'CRA/BSI: The product has no distribution licence. BSI TR-03183-2 section 5.2.2 requires the distribution licences of each component, named by SPDX identifier (section 6.1). Pass --licence=<SPDX expression> or set product.licence in .dxcomply.json.';
+  cNoSupplierBody =
+    'CRA/BSI: The SBOM names no supplier for the product. BSI TR-03183-2 section 5.2.2 requires the component creator, and CRA Annex II point 1 requires the name and contact of the manufacturer. ';
+  cNoSupplierCli =
+    'Pass --supplier=<name>, set product.supplier in .dxcomply.json, or fill CompanyName in the project version info.';
+  cNoSupplierIde =
+    'Enter the supplier in ' + cIdeSbomHeaderDialogPath + ', or fill CompanyName in the project version info.';
+  cNoSbomCreatorBody =
+    'CRA/BSI: The SBOM creator contact is missing. BSI TR-03183-2 section 5.2.1 requires the email address or URL of the entity that created the SBOM. ';
+  cNoSbomCreatorCli =
+    'Pass --sbom-creator=<email-or-url> or set sbomCreator in .dxcomply.json.';
+  cNoSbomCreatorIde =
+    'Enter the SBOM creator in ' + cIdeSbomHeaderDialogPath + '.';
+  cNoVersionBody =
+    'CRA/BSI: The product has no version. BSI TR-03183-2 section 5.2.2 requires the component version, and CRA Annex II point 3 requires information that identifies the product uniquely. ';
+  cNoVersionCli =
+    'Pass --version=<version>, set product.version in .dxcomply.json, or set the version info in the project options.';
+  cNoVersionIde =
+    'Set the version info in the project options, or enter a product version in ' + cIdeSbomHeaderDialogPath + '.';
+  cDefaultVersionBody =
+    'CRA/BSI: The product version is 1.0.0.0, the Delphi default for new projects. BSI TR-03183-2 section 5.2.2 requires the version the creator uses to tell releases apart, and CRA Annex II point 3 requires information that identifies the product uniquely. ';
+  cDefaultVersionCli =
+    'If 1.0.0.0 is not the real release version, pass --version=<version>, set product.version in .dxcomply.json, or update the version info in the project options.';
+  cDefaultVersionIde =
+    'If 1.0.0.0 is not the real release version, update the version info in the project options, or enter a product version in ' + cIdeSbomHeaderDialogPath + '.';
+  cNoLicenceBody =
+    'CRA/BSI: The product has no distribution licence. BSI TR-03183-2 section 5.2.2 requires the distribution licences of each component, named by SPDX identifier (section 6.1). ';
+  cNoLicenceCli =
+    'Pass --licence=<SPDX expression> or set product.licence in .dxcomply.json.';
+  cNoLicenceIde =
+    'Enter the licence in ' + cIdeSbomHeaderDialogPath + '.';
+  cSupplierContactCli =
+    'Pass --supplier-url=<url> or set product.supplierUrl in .dxcomply.json.';
+  cSupplierContactIde =
+    'Enter the supplier URL in ' + cIdeSbomHeaderDialogPath + '.';
+  cDeployablePrefix = 'CRA/BSI: The built file ';
 
-function SupplierContactWarning(const ASupplier: string): string;
+function ForContext(const AContext: TSbomWarningContext;
+  const ABody, ACliHint, AIdeHint: string): string;
 begin
-  Result := 'CRA/BSI: The supplier "' + ASupplier +
-    '" has no email address or URL. BSI TR-03183-2 section 5.2.2 requires the component creator as an email address, or a URL when there is none, and CRA Annex II point 1 requires an email address or other digital contact of the manufacturer. Pass --supplier-url=<url> or set product.supplierUrl in .dxcomply.json.';
+  if AContext = swcIde then
+  begin
+    Result := ABody + AIdeHint;
+  end
+  else
+  begin
+    Result := ABody + ACliHint;
+  end;
 end;
 
-function DeployableWarning(const APath: string): string;
+function SupplierContactWarning(const ASupplier: string;
+  const AContext: TSbomWarningContext): string;
 begin
-  Result := 'CRA/BSI: The built file ' + APath +
-    ' was not found, so the SBOM has no hash for it. BSI TR-03183-2 section 5.2.2 requires the SHA-512 of the deployable component, and CRA Annex I Part II point 1 requires an SBOM of the product. Build the project first, or check the output directory, --platform and --config-name.';
+  Result := ForContext(AContext, 'CRA/BSI: The supplier "' + ASupplier +
+    '" has no email address or URL. BSI TR-03183-2 section 5.2.2 requires the component creator as an email address, or a URL when there is none, and CRA Annex II point 1 requires an email address or other digital contact of the manufacturer. ',
+    cSupplierContactCli, cSupplierContactIde);
+end;
+
+function DeployableWarning(const APath: string;
+  const AContext: TSbomWarningContext): string;
+begin
+  Result := ForContext(AContext, cDeployablePrefix + APath +
+    ' was not found, so the SBOM has no hash for it. BSI TR-03183-2 section 5.2.2 requires the SHA-512 of the deployable component, and CRA Annex I Part II point 1 requires an SBOM of the product. ',
+    'Build the project first, or check the output directory, --platform and --config-name.',
+    'Build the project first, or check the output directory and the active platform and configuration.');
+end;
+
+function IsSbomHeaderWarning(const AText: string): Boolean;
+var
+  LText: string;
+begin
+  LText := Trim(AText);
+  if LText.StartsWith('Warning:', True) then
+  begin
+    LText := Trim(Copy(LText, Length('Warning:') + 1, MaxInt));
+  end;
+  Result := LText.StartsWith('CRA/BSI:') and not LText.StartsWith(cDeployablePrefix);
 end;
 
 function ArtefactIsHashed(const AArtefact: TArtefactInfo): Boolean;
@@ -118,26 +188,39 @@ var
   end;
 
 begin
+  var LContext := AConfig.WarningContext;
   LWarnings := TList<string>.Create;
   try
     LSupplier := Trim(AMetadata.Supplier);
     if LSupplier = '' then
-      Add(cNoSupplier)
+    begin
+      Add(ForContext(LContext, cNoSupplierBody, cNoSupplierCli, cNoSupplierIde));
+    end
     else if (Trim(AMetadata.SupplierUrl) = '') and
             not IsBsiEmailAddress(LSupplier) then
-      Add(SupplierContactWarning(LSupplier));
+    begin
+      Add(SupplierContactWarning(LSupplier, LContext));
+    end;
 
     if BsiCreatorKind(AMetadata.SbomCreator) = '' then
-      Add(cNoSbomCreator);
+    begin
+      Add(ForContext(LContext, cNoSbomCreatorBody, cNoSbomCreatorCli, cNoSbomCreatorIde));
+    end;
 
     LVersion := Trim(AMetadata.ProductVersion);
     if (LVersion = '') or (LVersion = '0.0.0.0') then
-      Add(cNoVersion)
+    begin
+      Add(ForContext(LContext, cNoVersionBody, cNoVersionCli, cNoVersionIde));
+    end
     else if (LVersion = '1.0.0.0') and (Trim(AConfig.ProductVersion) = '') then
-      Add(cDefaultVersion);
+    begin
+      Add(ForContext(LContext, cDefaultVersionBody, cDefaultVersionCli, cDefaultVersionIde));
+    end;
 
     if Trim(AMetadata.Licence) = '' then
-      Add(cNoLicence);
+    begin
+      Add(ForContext(LContext, cNoLicenceBody, cNoLicenceCli, cNoLicenceIde));
+    end;
 
     // Library mode has no deliverable binary. A package project still
     // names a .bpl that was never built.
@@ -145,7 +228,7 @@ begin
     begin
       LOutput := Trim(AProjectInfo.OutputFilePath);
       if (LOutput <> '') and not DeployableWasHashed(LOutput, AArtefacts) then
-        Add(DeployableWarning(LOutput));
+        Add(DeployableWarning(LOutput, LContext));
     end;
 
     Result := LWarnings.ToArray;

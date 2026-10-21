@@ -132,6 +132,16 @@ type
     /// </summary>
     procedure OnOptionsMenuItemClick(ASender: TObject);
     /// <summary>
+    /// Opens the SBOM header dialog for the active project.
+    /// </summary>
+    procedure OnSbomHeaderMenuItemClick(ASender: TObject);
+    /// <summary>
+    /// After a generation that reported missing SBOM header data, offers the
+    /// SBOM header dialog and, once saved, a new generation.
+    /// </summary>
+    procedure OfferSbomHeaderDialog(const AProjectPath: string;
+      const AHeaderWarnings: TArray<string>; AForceDeepEvidence: Boolean);
+    /// <summary>
     /// Shows the About dialog.
     /// </summary>
     procedure OnAboutMenuItemClick(ASender: TObject);
@@ -226,7 +236,9 @@ uses
   DX.Comply.IDE.OptionsFrame,
   DX.Comply.IDE.PathSupport,
   DX.Comply.IDE.ProgressDialog,
-  DX.Comply.IDE.Resources;
+  DX.Comply.IDE.Resources,
+  DX.Comply.IDE.SbomHeaderDialog,
+  DX.Comply.SbomHeaderConfig;
 
 var
   /// <summary>
@@ -537,6 +549,11 @@ begin
     FProjectMenuItem.Add(LSubMenuItem);
 
     LSubMenuItem := TMenuItem.Create(FProjectMenuItem);
+    LSubMenuItem.Caption := 'SBOM Header Data...';
+    LSubMenuItem.OnClick := OnSbomHeaderMenuItemClick;
+    FProjectMenuItem.Add(LSubMenuItem);
+
+    LSubMenuItem := TMenuItem.Create(FProjectMenuItem);
     LSubMenuItem.Caption := 'Options';
     LSubMenuItem.OnClick := OnOptionsMenuItemClick;
     FProjectMenuItem.Add(LSubMenuItem);
@@ -634,6 +651,8 @@ begin
   Result.WarnOnEmptyCompositionEvidence := ASettings.WarnWhenCompositionEvidenceIsEmpty;
   Result.HumanReadableReport := ASettings.HumanReadableReport;
   Result.DeepEvidenceMode := debAlways;
+  // Warning texts name the SBOM header dialog instead of CLI flags.
+  Result.WarningContext := swcIde;
 
   if ASettings.UseActiveBuildConfiguration and Assigned(AProject) then
   begin
@@ -655,6 +674,9 @@ var
   LConfigPath: string;
   LManifestFromConfig: string;
   LManifestError: string;
+  LHeader: TSbomHeaderData;
+  LHeaderError: string;
+  LHeaderWarnings: TArray<string>;
 begin
   TIDELogger.Clear;
   TIDELogger.Info('DX.Comply: Starting SBOM generation...');
@@ -694,6 +716,18 @@ begin
       LConfig.ManifestFile := LManifestFromConfig;
       TIDELogger.Info('DX.Comply: Component manifest: ' + LManifestFromConfig);
     end;
+
+    // SBOM header keys, the same ones the CLI reads with --ci. They are
+    // edited in Project > DX.Comply - SBOM > SBOM Header Data.
+    if TSbomHeaderConfig.TryRead(LConfigPath, LHeader, LHeaderError) then
+    begin
+      TSbomHeaderConfig.ApplyToConfig(LHeader, LConfig);
+    end
+    else
+    begin
+      TIDELogger.Warning('DX.Comply: Could not read the SBOM header data from .dxcomply.json: ' +
+        LHeaderError + '. The SBOM header uses the project version info only.');
+    end;
     if not TryPrepareDeepEvidenceBuild(LProjectPath, LSettings, LConfig, AForceDeepEvidence) then
       Exit;
 
@@ -701,7 +735,8 @@ begin
     TIDELogger.Info('DX.Comply: Project : ' + LProjectPath);
     TIDELogger.Info('DX.Comply: Output  : ' + LOutputPath);
 
-    LSuccess := ShowDXComplyProgressDialog(LProjectPath, LOutputPath, sfCycloneDxJson, LConfig);
+    LSuccess := ShowDXComplyProgressDialog(LProjectPath, LOutputPath, sfCycloneDxJson,
+      LConfig, LHeaderWarnings);
 
     if LSuccess then
     begin
@@ -710,6 +745,11 @@ begin
     end
     else
       TIDELogger.Warning('DX.Comply: SBOM generation failed or was cancelled.');
+
+    if LSuccess and (Length(LHeaderWarnings) > 0) then
+    begin
+      OfferSbomHeaderDialog(LProjectPath, LHeaderWarnings, AForceDeepEvidence);
+    end;
   except
     on E: Exception do
       TIDELogger.Error('DX.Comply: Unhandled exception: ' + E.ClassName + ': ' + E.Message);
@@ -729,6 +769,55 @@ end;
 procedure TDxComplyWizard.OnOptionsMenuItemClick(ASender: TObject);
 begin
   OpenOptionsPage;
+end;
+
+procedure TDxComplyWizard.OnSbomHeaderMenuItemClick(ASender: TObject);
+begin
+  try
+    var LProject := GetActiveProject;
+    if not Assigned(LProject) then
+    begin
+      MessageDlg('No project is currently active. Open a project first.', mtInformation, [mbOK], 0);
+      Exit;
+    end;
+    var LProjectPath := Trim(LProject.FileName);
+    if not LProjectPath.EndsWith('.dproj', True) then
+    begin
+      MessageDlg('The SBOM header data is stored next to a saved .dproj file. Save the project first.',
+        mtInformation, [mbOK], 0);
+      Exit;
+    end;
+    if ShowSbomHeaderDialog(LProjectPath, nil) then
+    begin
+      TIDELogger.Info('DX.Comply: SBOM header data saved to ' +
+        TSbomHeaderConfig.ConfigPathForProject(LProjectPath));
+    end;
+  except
+    on E: Exception do
+    begin
+      TIDELogger.Error('DX.Comply: Unhandled exception: ' + E.ClassName + ': ' + E.Message);
+    end;
+  end;
+end;
+
+procedure TDxComplyWizard.OfferSbomHeaderDialog(const AProjectPath: string;
+  const AHeaderWarnings: TArray<string>; AForceDeepEvidence: Boolean);
+begin
+  var LQuestion := Format('The SBOM was written, but %d CRA/BSI warning(s) report missing ' +
+    'SBOM header data (for example the SBOM creator).' + sLineBreak + sLineBreak +
+    'Enter the missing SBOM data now?', [Length(AHeaderWarnings)]);
+  if MessageDlg(LQuestion, mtConfirmation, [mbYes, mbNo], 0) <> mrYes then
+    Exit;
+  if not ShowSbomHeaderDialog(AProjectPath, AHeaderWarnings) then
+    Exit;
+
+  TIDELogger.Info('DX.Comply: SBOM header data saved to ' +
+    TSbomHeaderConfig.ConfigPathForProject(AProjectPath));
+  if MessageDlg('The SBOM header data was saved. Generate the SBOM again now?',
+    mtConfirmation, [mbYes, mbNo], 0) = mrYes then
+  begin
+    ExecuteGeneration(AForceDeepEvidence);
+  end;
 end;
 
 procedure TDxComplyWizard.OnProjectMenuItemClick(ASender: TObject);

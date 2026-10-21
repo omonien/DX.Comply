@@ -53,7 +53,8 @@ uses
   DX.Comply.Tests.CraChecks in 'DX.Comply.Tests.CraChecks.pas',
   DX.Comply.Tests.LibrarySource in 'DX.Comply.Tests.LibrarySource.pas',
   DX.Comply.Tests.CLI.GitTag in 'DX.Comply.Tests.CLI.GitTag.pas',
-  DX.Comply.Tests.DprojForDpr in 'DX.Comply.Tests.DprojForDpr.pas';
+  DX.Comply.Tests.DprojForDpr in 'DX.Comply.Tests.DprojForDpr.pas',
+  DX.Comply.Tests.SbomHeaderConfig in 'DX.Comply.Tests.SbomHeaderConfig.pas';
 
 var
   LRunner: ITestRunner;

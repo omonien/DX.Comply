@@ -209,11 +209,31 @@ The checked-in example is [docs/examples/ConwaysLifeFMX.cdx.json](docs/examples/
 
 [BSI TR-03183-2](https://www.bsi.bund.de/dok/TR-03183-en) version 2.1.0 (20 August 2025) asks for CycloneDX 1.6 or later, or SPDX 3.0.1 or later. CycloneDX output is 1.6. SPDX stays at 2.3. SPDX 3.0.1 is out of scope. DX.Comply writes the fields it can fill from the build or from values you set. Where a unit's Pascal source was read, direct uses edges to other units already in the SBOM are written as well. A unit with no source stays a leaf. That is not a certification, and it is not full coverage of the technical guideline. The field list, including when a dependency set is complete, is in [docs/BSI-TR-03183-2.md](docs/BSI-TR-03183-2.md).
 
-Set the SBOM creator with `--sbom-creator=<email-or-url>` or with `sbomCreator` in `.dxcomply.json`. Use an email address or an http(s) URL. Leave it unset when you do not have one. A company name is rejected.
+### SBOM creator and header data
+
+The SBOM creator is whoever creates the SBOM: the person, team, or organisation that runs DX.Comply for the product, which is often the manufacturer itself. It is not the tool. [BSI TR-03183-2](https://www.bsi.bund.de/dok/TR-03183-en) section 5.2.1 requires the email address or URL of the SBOM creator, so you need it when you hand in the SBOM as part of the CRA technical documentation. Use an email address or an http(s) URL. A company name is rejected.
+
+The same header also carries the product data that section 5.2.2 and CRA Annex II ask for. DX.Comply warns when one of these values is missing (see below):
+
+| Field | Meaning | CLI flag | `.dxcomply.json` key | IDE dialog field |
+|---|---|---|---|---|
+| SBOM creator | Email or http(s) URL of whoever creates the SBOM (BSI 5.2.1) | `--sbom-creator=<email-or-url>` | `sbomCreator` | SBOM creator |
+| Supplier | Name of the manufacturer. Falls back to CompanyName in the project version info | `--supplier=<name>` | `product.supplier` | Supplier / manufacturer |
+| Supplier URL | Contact URL of the manufacturer. Not needed when the supplier is an email address | `--supplier-url=<url>` | `product.supplierUrl` | Supplier URL |
+| Licence | Distribution licence as SPDX expression, for example `MIT` or `LicenseRef-Proprietary` | `--licence=<SPDX expression>` | `product.licence` | Licence |
+| Version | Product version. Falls back to the project version info | `--version=<version>` | `product.version` | Product version |
+
+There are three ways to set them. All of them end up in the same SBOM fields.
+
+- **Command line.** Pass the flags above, for example `dxcomply --project=MyApp.dproj --sbom-creator=sbom@acme.example --licence=MIT`.
+- **`.dxcomply.json`.** Put the keys into the `.dxcomply.json` in the project folder (see [Configuration](#configuration)) and run the CLI with `--ci`. A flag you pass on the command line wins over the file.
+- **IDE.** Choose **Project > DX.Comply - SBOM > SBOM Header Data...** The dialog edits the values for the active project and saves them in the `.dxcomply.json` next to the `.dproj`. Other keys in that file are kept, and an empty field removes its key. The SBOM creator is checked like on the command line, and the supplier URL must start with `http://` or `https://`. Because the dialog writes the same keys, `dxcomply --ci` run from the project folder produces the same header. When a generation in the IDE reports missing header data, DX.Comply offers to open the dialog right away and to generate the SBOM again after you save.
 
 ### CRA and BSI header warnings
 
 When the product header is missing data that the EU Cyber Resilience Act and BSI TR-03183-2 expect, DX.Comply prints a warning and still writes the SBOM. The process exit code stays unchanged. The CLI prints each line as `[WARN ]` without `--verbose`. The HTML and Markdown reports list the same lines under Warnings.
+
+The CLI warnings name the flag and the `.dxcomply.json` key, as listed below. In the IDE the same warnings name the **SBOM Header Data** dialog instead, because the IDE has no command line.
 
 - No supplier. Pass `--supplier=<name>`, set `product.supplier`, or fill CompanyName in the project version info.
 - A supplier with no email address and no URL. Pass `--supplier-url=<url>` or set `product.supplierUrl`.

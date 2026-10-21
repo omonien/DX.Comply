@@ -75,6 +75,26 @@ type
 
     [Test]
     procedure EmailSupplier_NoContactWarning;
+
+    /// <summary>
+    /// In the IDE context every header warning names the SBOM header dialog
+    /// and no command line flag or file key.
+    /// </summary>
+    [Test]
+    procedure IdeContext_HeaderWarningsNameDialog;
+
+    /// <summary>
+    /// The CLI context is the default and keeps the flag and key hints.
+    /// </summary>
+    [Test]
+    procedure DefaultContext_IsCli;
+
+    /// <summary>
+    /// IsSbomHeaderWarning accepts header warnings, with or without the
+    /// "Warning: " prefix, and rejects the deployable warning.
+    /// </summary>
+    [Test]
+    procedure IsSbomHeaderWarning_ClassifiesWarnings;
   end;
 
 implementation
@@ -383,6 +403,74 @@ begin
   finally
     LArtefacts.Free;
   end;
+end;
+
+procedure TCraChecksTests.IdeContext_HeaderWarningsNameDialog;
+var
+  LConfig: TSbomConfig;
+  LMetadata: TSbomMetadata;
+  LProject: TProjectInfo;
+  LArtefacts: TArtefactList;
+begin
+  LArtefacts := TArtefactList.Create;
+  try
+    FillComplete(LConfig, LMetadata, LProject, LArtefacts);
+    LConfig.WarningContext := swcIde;
+    LConfig.ProductVersion := '';
+    LMetadata.Supplier := '';
+    LMetadata.SbomCreator := '';
+    LMetadata.ProductVersion := '';
+    LMetadata.Licence := '';
+    var LWarnings := BuildCraMetadataWarnings(LConfig, LMetadata, LProject, LArtefacts);
+    Assert.AreEqual(4, Integer(Length(LWarnings)));
+    for var LText in LWarnings do
+    begin
+      Assert.IsTrue(Pos(cIdeSbomHeaderDialogPath, LText) > 0, LText);
+      Assert.IsTrue(Pos('--', LText) = 0, LText);
+      Assert.IsTrue(Pos('.dxcomply.json', LText) = 0, LText);
+      Assert.IsTrue(IsSbomHeaderWarning(LText), LText);
+    end;
+    Assert.IsTrue(LWarnings[1].StartsWith(
+      'CRA/BSI: The SBOM creator contact is missing. BSI TR-03183-2 section 5.2.1'), LWarnings[1]);
+
+    LMetadata.Supplier := 'Acme GmbH';
+    LMetadata.SupplierUrl := '';
+    LWarnings := BuildCraMetadataWarnings(LConfig, LMetadata, LProject, LArtefacts);
+    Assert.IsTrue(Pos('Enter the supplier URL in ' + cIdeSbomHeaderDialogPath, LWarnings[0]) > 0,
+      LWarnings[0]);
+  finally
+    LArtefacts.Free;
+  end;
+end;
+
+procedure TCraChecksTests.DefaultContext_IsCli;
+var
+  LConfig: TSbomConfig;
+  LMetadata: TSbomMetadata;
+  LProject: TProjectInfo;
+  LArtefacts: TArtefactList;
+begin
+  Assert.IsTrue(TSbomConfig.Default.WarningContext = swcCli);
+  LArtefacts := TArtefactList.Create;
+  try
+    FillComplete(LConfig, LMetadata, LProject, LArtefacts);
+    LMetadata.SbomCreator := '';
+    var LWarnings := BuildCraMetadataWarnings(LConfig, LMetadata, LProject, LArtefacts);
+    Assert.IsTrue(HasWarning(LWarnings, cNoSbomCreator));
+  finally
+    LArtefacts.Free;
+  end;
+end;
+
+procedure TCraChecksTests.IsSbomHeaderWarning_ClassifiesWarnings;
+begin
+  Assert.IsTrue(IsSbomHeaderWarning(cNoSbomCreator));
+  Assert.IsTrue(IsSbomHeaderWarning('Warning: ' + cNoLicence));
+  Assert.IsTrue(IsSbomHeaderWarning(SupplierContactWarning('Acme GmbH')));
+  Assert.IsFalse(IsSbomHeaderWarning(DeployableWarning(cOutputPath)));
+  Assert.IsFalse(IsSbomHeaderWarning('Warning: ' + DeployableWarning(cOutputPath)));
+  Assert.IsFalse(IsSbomHeaderWarning('Warning: No MAP file found'));
+  Assert.IsFalse(IsSbomHeaderWarning(''));
 end;
 
 initialization

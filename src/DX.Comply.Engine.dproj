@@ -115,6 +115,7 @@
         <DCCReference Include="DX.Comply.CraChecks.pas"/>
         <DCCReference Include="DX.Comply.LibrarySource.pas"/>
         <DCCReference Include="DX.Comply.Engine.pas"/>
+        <DCCReference Include="DX.Comply.SbomHeaderConfig.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>

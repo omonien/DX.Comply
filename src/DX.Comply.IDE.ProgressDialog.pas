@@ -27,6 +27,7 @@ interface
 uses
   System.SysUtils,
   System.Classes,
+  System.Generics.Collections,
   Winapi.Windows,
   Winapi.Messages,
   Vcl.Forms,
@@ -76,6 +77,7 @@ type
   TFormDXComplyProgressDialog = class(TForm)
   private
     FThread: TGenerationThread;
+    FHeaderWarnings: TList<string>;
     FCompleted: Boolean;
     FSuccess: Boolean;
     FProjectPath: string;
@@ -112,6 +114,10 @@ type
     /// </summary>
     procedure StartGeneration;
     property Success: Boolean read FSuccess;
+    /// <summary>
+    /// CRA/BSI warnings about missing SBOM header data seen in the log.
+    /// </summary>
+    function HeaderWarnings: TArray<string>;
   end;
 
 /// <summary>
@@ -120,9 +126,21 @@ type
 /// </summary>
 function ShowDXComplyProgressDialog(
   const AProjectPath, AOutputPath: string;
-  AFormat: TSbomFormat; const AConfig: TSbomConfig): Boolean;
+  AFormat: TSbomFormat; const AConfig: TSbomConfig): Boolean; overload;
+
+/// <summary>
+/// Same as above. AHeaderWarnings returns the CRA/BSI warnings about missing
+/// SBOM header data, so the caller can offer the SBOM header dialog.
+/// </summary>
+function ShowDXComplyProgressDialog(
+  const AProjectPath, AOutputPath: string;
+  AFormat: TSbomFormat; const AConfig: TSbomConfig;
+  out AHeaderWarnings: TArray<string>): Boolean; overload;
 
 implementation
+
+uses
+  DX.Comply.CraChecks;
 
 const
   cColorHeader   = $2B2E36;  // Dark charcoal header
@@ -204,6 +222,7 @@ begin
   FCompleted := False;
   FSuccess := False;
   FThread := nil;
+  FHeaderWarnings := TList<string>.Create;
   BuildUI;
   OnCloseQuery := FormCloseQuery;
 end;
@@ -217,7 +236,13 @@ begin
     FThread.Free;
     FThread := nil;
   end;
+  FHeaderWarnings.Free;
   inherited;
+end;
+
+function TFormDXComplyProgressDialog.HeaderWarnings: TArray<string>;
+begin
+  Result := FHeaderWarnings.ToArray;
 end;
 
 procedure TFormDXComplyProgressDialog.BuildUI;
@@ -459,6 +484,10 @@ procedure TFormDXComplyProgressDialog.PostProgress(
   const AMessage: string; AProgress: Integer);
 begin
   FMemoLog.Lines.Add(AMessage);
+  if IsSbomHeaderWarning(AMessage) and not FHeaderWarnings.Contains(AMessage) then
+  begin
+    FHeaderWarnings.Add(AMessage);
+  end;
   // Scroll log to the latest entry
   SendMessage(FMemoLog.Handle, WM_VSCROLL, SB_BOTTOM, 0);
 
@@ -564,6 +593,17 @@ function ShowDXComplyProgressDialog(
   const AProjectPath, AOutputPath: string;
   AFormat: TSbomFormat; const AConfig: TSbomConfig): Boolean;
 var
+  LHeaderWarnings: TArray<string>;
+begin
+  Result := ShowDXComplyProgressDialog(AProjectPath, AOutputPath, AFormat,
+    AConfig, LHeaderWarnings);
+end;
+
+function ShowDXComplyProgressDialog(
+  const AProjectPath, AOutputPath: string;
+  AFormat: TSbomFormat; const AConfig: TSbomConfig;
+  out AHeaderWarnings: TArray<string>): Boolean;
+var
   LDialog: TFormDXComplyProgressDialog;
 begin
   LDialog := TFormDXComplyProgressDialog.Create(nil,
@@ -572,6 +612,7 @@ begin
     LDialog.StartGeneration;
     LDialog.ShowModal;
     Result := LDialog.Success;
+    AHeaderWarnings := LDialog.HeaderWarnings;
   finally
     LDialog.Free;
   end;

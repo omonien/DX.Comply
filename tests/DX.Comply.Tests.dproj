@@ -112,6 +112,7 @@
         <DCCReference Include="DX.Comply.Tests.LibrarySource.pas"/>
         <DCCReference Include="DX.Comply.Tests.CLI.GitTag.pas"/>
         <DCCReference Include="DX.Comply.Tests.DprojForDpr.pas"/>
+        <DCCReference Include="DX.Comply.Tests.SbomHeaderConfig.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>

@@ -85,6 +85,16 @@ type
   TSbomConfigOverrides = set of TSbomConfigOverride;
 
   /// <summary>
+  /// Who runs the generator. Warnings that ask for missing data name the
+  /// way to supply it in that context: command line flags and
+  /// .dxcomply.json keys for the CLI, the SBOM header dialog for the IDE.
+  /// </summary>
+  TSbomWarningContext = (
+    swcCli,
+    swcIde
+  );
+
+  /// <summary>
   /// Configuration for SBOM generation.
   /// </summary>
   TSbomConfig = record
@@ -213,6 +223,10 @@ type
     /// trailing .git or slash, can supply the root purl.
     /// </summary>
     RepoUrl: string;
+    /// <summary>
+    /// Context the warning texts are written for. Default swcCli.
+    /// </summary>
+    WarningContext: TSbomWarningContext;
     /// <summary>Creates a new TSbomConfig with default values.</summary>
     class function Default: TSbomConfig; static;
     /// <summary>
@@ -467,6 +481,7 @@ begin
   SetLength(Result.SourceDirs, 0);
   Result.Purl := '';
   Result.RepoUrl := '';
+  Result.WarningContext := swcCli;
 end;
 
 
@@ -2287,7 +2302,15 @@ begin
 
   if not IsAcceptableBsiCreator(FConfig.SbomCreator) then
   begin
-    DoProgress('Error: sbomCreator must be an email address or an http(s) URL.', -1);
+    if FConfig.WarningContext = swcIde then
+    begin
+      DoProgress('Error: The SBOM creator must be an email address or an http(s) URL. ' +
+        'Correct it in ' + cIdeSbomHeaderDialogPath + '.', -1);
+    end
+    else
+    begin
+      DoProgress('Error: sbomCreator must be an email address or an http(s) URL.', -1);
+    end;
     Exit;
   end;
 
@@ -2631,6 +2654,7 @@ begin
 
   Result.IncludePlatformInOutput := ACaller.IncludePlatformInOutput;
   Result.ExplicitOverrides := ACaller.ExplicitOverrides;
+  Result.WarningContext := ACaller.WarningContext;
 
   if Result.IncludePlatformInOutput and
      not (scoOutputPath in ACaller.ExplicitOverrides) and
