@@ -1026,6 +1026,17 @@ begin
   Result := ScanDprojWithOverrides(OverrideDproj(AExeOutput), AOverrides);
 end;
 
+function ProgressText(const AInfo: TProjectInfo): string;
+var
+  LNote: string;
+begin
+  Result := '';
+  if not Assigned(AInfo.ProgressNotes) then
+    Exit;
+  for LNote in AInfo.ProgressNotes do
+    Result := Result + LNote + sLineBreak;
+end;
+
 // ---- Search path variables and property inheritance -------------------------
 
 /// <summary>
@@ -1690,17 +1701,6 @@ begin
     Winapi.Windows.SetEnvironmentVariable(PChar('BDS'), nil)
   else
     Winapi.Windows.SetEnvironmentVariable(PChar('BDS'), PChar(APrevious));
-end;
-
-function ProgressText(const AInfo: TProjectInfo): string;
-var
-  LNote: string;
-begin
-  Result := '';
-  if not Assigned(AInfo.ProgressNotes) then
-    Exit;
-  for LNote in AInfo.ProgressNotes do
-    Result := Result + LNote + sLineBreak;
 end;
 
 procedure WriteU16(var ABytes: TBytes; AOffset: Integer; AValue: Word);
