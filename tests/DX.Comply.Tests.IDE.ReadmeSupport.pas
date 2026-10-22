@@ -31,6 +31,18 @@ type
     procedure LoadDXComplyReadmeMarkdown_LoadsRepositoryReadme;
     [Test]
     procedure EmbeddedReadme_MatchesRepositoryFile;
+    /// <summary>
+    /// The options page must not be indexed for IDE Insight, which creates
+    /// the frame outside the Options dialog. Issue #66.
+    /// </summary>
+    [Test]
+    procedure OptionsPage_IsNotIndexedForIDEInsight;
+    /// <summary>
+    /// The README browser is created only for the visible info tab, and
+    /// only once. Issue #66.
+    /// </summary>
+    [Test]
+    procedure ReadmePreview_LoadsOnlyForVisibleInfoTab;
   end;
 
 implementation
@@ -109,6 +121,23 @@ begin
   Assert.AreEqual(NormalizeReadmeText(LFromResource),
     NormalizeReadmeText(LoadDXComplyReadmeMarkdown),
     'The info page must prefer the embedded README over a file lookup');
+end;
+
+procedure TIDEReadmeSupportTests.OptionsPage_IsNotIndexedForIDEInsight;
+begin
+  Assert.IsFalse(cDXComplyOptionsIncludeInIDEInsight);
+end;
+
+procedure TIDEReadmeSupportTests.ReadmePreview_LoadsOnlyForVisibleInfoTab;
+begin
+  Assert.IsTrue(DXComplyShouldLoadReadmePreview(True, True, False),
+    'the info tab of a visible frame loads the preview');
+  Assert.IsFalse(DXComplyShouldLoadReadmePreview(False, True, False),
+    'the settings tab must not create the browser');
+  Assert.IsFalse(DXComplyShouldLoadReadmePreview(True, False, False),
+    'a frame that is not shown must not create the browser');
+  Assert.IsFalse(DXComplyShouldLoadReadmePreview(True, True, True),
+    'the browser is created only once');
 end;
 
 initialization

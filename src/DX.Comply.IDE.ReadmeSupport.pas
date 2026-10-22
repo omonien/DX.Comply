@@ -23,6 +23,23 @@ function LoadDXComplyReadmeMarkdown: string;
 function ConvertMarkdownToHtmlDocument(const AMarkdown, ATitle: string): string;
 function BuildDXComplyReadmeHtmlDocument: string;
 
+const
+  /// <summary>
+  /// Whether the IDE may index the DX.Comply options page for IDE Insight.
+  /// False: indexing makes the IDE create the options frame in the
+  /// background, and the embedded browser of that frame took the focus away
+  /// from the IDE main window. Issue #66.
+  /// </summary>
+  cDXComplyOptionsIncludeInIDEInsight = False;
+
+/// <summary>
+/// True when the options frame should create the README preview browser
+/// now. The browser is created only when the user opens the info tab of a
+/// visible frame, and only once. Issue #66.
+/// </summary>
+function DXComplyShouldLoadReadmePreview(const AInfoPageActive,
+  AFrameShowing, AAlreadyLoaded: Boolean): Boolean;
+
 implementation
 
 uses
@@ -309,6 +326,12 @@ begin
     LInputLines.Free;
     LHtmlLines.Free;
   end;
+end;
+
+function DXComplyShouldLoadReadmePreview(const AInfoPageActive,
+  AFrameShowing, AAlreadyLoaded: Boolean): Boolean;
+begin
+  Result := AInfoPageActive and AFrameShowing and not AAlreadyLoaded;
 end;
 
 function BuildDXComplyReadmeHtmlDocument: string;
