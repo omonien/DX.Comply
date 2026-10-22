@@ -230,6 +230,62 @@ type
     procedure Scan_PlatformNamespace_KeepsInheritedNames;
 
     /// <summary>
+    /// A variable that holds several paths separated by ';' yields one search
+    /// path entry per path, because the value is expanded before it is split.
+    /// </summary>
+    [Test]
+    procedure Scan_SearchPathVariableWithSeveralPaths_AddsEachPath;
+
+    /// <summary>
+    /// Base, Base_Win32, and Cfg_1_Win32 each prepend an entry with
+    /// x;$(DCC_UnitSearchPath). All three entries are kept.
+    /// </summary>
+    [Test]
+    procedure Scan_ThreeLevelSearchPathChain_KeepsAllLevels;
+
+    /// <summary>
+    /// $(DCC_UnitSearchPath) in the first group that defines it is empty
+    /// when no variable of that name exists. It is not reported as unresolved.
+    /// </summary>
+    [Test]
+    procedure Scan_SelfReferenceWithoutPriorValue_IsEmpty;
+
+    /// <summary>
+    /// $(DCC_UnitSearchPath) in the first group that defines it takes the
+    /// environment variable of the same name when there is one.
+    /// </summary>
+    [Test]
+    procedure Scan_SelfReferenceWithoutPriorValue_UsesEnvironment;
+
+    /// <summary>
+    /// An empty element in a later group clears the inherited value.
+    /// </summary>
+    [Test]
+    procedure Scan_EmptyElementInLaterGroup_ClearsInheritedValue;
+
+    /// <summary>
+    /// A self-closing element in a later group clears the inherited value.
+    /// </summary>
+    [Test]
+    procedure Scan_SelfClosingElementInLaterGroup_ClearsInheritedValue;
+
+    /// <summary>
+    /// SetBdsVersion selects the BDS version, and the scan reports it and its source.
+    /// </summary>
+    [Test]
+    procedure Scan_BdsVersionOption_IsUsedAndReported;
+
+    /// <summary>
+    /// Without SetBdsVersion the scan still reports which BDS version it used.
+    /// </summary>
+    [Test]
+    procedure Scan_WithoutBdsVersionOption_ReportsVersion;
+
+    /// <summary>A BDS version without a dot gets .0, so 23 becomes 23.0.</summary>
+    [Test]
+    procedure NormalizeBdsVersion_AddsMinorVersion;
+
+    /// <summary>
     /// The engine package output is the BPL name plus DllSuffix, in the
     /// active config/platform output directory.
     /// </summary>
@@ -915,7 +971,7 @@ end;
 /// AOverrides (name, value pairs) as the IDE override source. The caller frees the result.
 /// </summary>
 function ScanDprojWithOverrides(const ADprojContent: string;
-  const AOverrides: array of string): TProjectInfo;
+  const AOverrides: array of string; const ABdsVersion: string = ''): TProjectInfo;
 var
   LOverrides: TDictionary<string, string>;
   LScanner: TProjectScanner;
@@ -944,6 +1000,7 @@ begin
         begin
           Result := LOverrides.TryGetValue(UpperCase(AName), AValue);
         end);
+      LScannerIntf.SetBdsVersion(ABdsVersion);
       Result := LScannerIntf.Scan(LTempDproj, 'Win32', 'Release');
     finally
       if TFile.Exists(LTempDproj) then
@@ -989,6 +1046,35 @@ begin
     '  <PropertyGroup Condition="''$(Base_Win32)''!=''''">' + sLineBreak +
     '    ' + AWin32Elements + sLineBreak +
     '  </PropertyGroup>' + sLineBreak +
+    '</Project>';
+end;
+
+/// <summary>
+/// A .dproj with Base, Base_Win32, and Cfg_1_Win32 groups, where Cfg_1 is
+/// the Release configuration. Each group gets its own raw XML elements.
+/// </summary>
+function ThreeLevelDproj(const ABaseElements, AWin32Elements, ACfgElements: string): string;
+begin
+  Result :=
+    '<?xml version="1.0" encoding="utf-8"?>' + sLineBreak +
+    '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">' + sLineBreak +
+    '  <PropertyGroup>' + sLineBreak +
+    '    <MainSource>OverrideApp.dpr</MainSource>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '  <PropertyGroup Condition="''$(Base)''!=''''">' + sLineBreak +
+    '    ' + ABaseElements + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '  <PropertyGroup Condition="''$(Base_Win32)''!=''''">' + sLineBreak +
+    '    ' + AWin32Elements + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '  <PropertyGroup Condition="''$(Cfg_1_Win32)''!=''''">' + sLineBreak +
+    '    ' + ACfgElements + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '  <ItemGroup>' + sLineBreak +
+    '    <BuildConfiguration Include="Release">' + sLineBreak +
+    '      <Key>Cfg_1</Key>' + sLineBreak +
+    '    </BuildConfiguration>' + sLineBreak +
+    '  </ItemGroup>' + sLineBreak +
     '</Project>';
 end;
 
@@ -1181,6 +1267,168 @@ begin
   finally
     LProjectInfo.Free;
   end;
+end;
+
+procedure TProjectScannerTests.Scan_SearchPathVariableWithSeveralPaths_AddsEachPath;
+var
+  LProjectInfo: TProjectInfo;
+begin
+  LProjectInfo := ScanDprojWithOverrides(
+    InheritanceDproj('<DCC_UnitSearchPath>$(DxcMyLibs)</DCC_UnitSearchPath>', ''),
+    ['DxcMyLibs', 'C:\DxcLibA;C:\DxcLibB']);
+  try
+    Assert.IsTrue(HasEntry(LProjectInfo.ProjectSearchPaths, 'C:\DxcLibA'),
+      'The first path of the variable must be an entry: ' + JoinEntries(LProjectInfo.ProjectSearchPaths));
+    Assert.IsTrue(HasEntry(LProjectInfo.ProjectSearchPaths, 'C:\DxcLibB'),
+      'The second path of the variable must be an entry: ' + JoinEntries(LProjectInfo.ProjectSearchPaths));
+    for var LEntry in LProjectInfo.ProjectSearchPaths do
+    begin
+      Assert.IsTrue(Pos(';', LEntry) = 0, 'No entry may hold a separator: ' + LEntry);
+    end;
+  finally
+    LProjectInfo.Free;
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_ThreeLevelSearchPathChain_KeepsAllLevels;
+var
+  LProjectInfo: TProjectInfo;
+begin
+  LProjectInfo := ScanDprojWithOverrides(ThreeLevelDproj(
+    '<DCC_UnitSearchPath>C:\DxcBaseDir;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>',
+    '<DCC_UnitSearchPath>C:\DxcWin32Dir;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>',
+    '<DCC_UnitSearchPath>C:\DxcCfgDir;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>'), []);
+  try
+    var LPaths := LProjectInfo.ProjectSearchPaths;
+    Assert.IsTrue(HasEntry(LPaths, 'C:\DxcCfgDir'), 'The Cfg_1_Win32 entry must be kept: ' + JoinEntries(LPaths));
+    Assert.IsTrue(HasEntry(LPaths, 'C:\DxcWin32Dir'), 'The Base_Win32 entry must be kept: ' + JoinEntries(LPaths));
+    Assert.IsTrue(HasEntry(LPaths, 'C:\DxcBaseDir'), 'The Base entry must be kept: ' + JoinEntries(LPaths));
+    Assert.IsTrue(LPaths.IndexOf('C:\DxcCfgDir') < LPaths.IndexOf('C:\DxcWin32Dir'),
+      'The most specific entry must come first: ' + JoinEntries(LPaths));
+    Assert.IsTrue(LPaths.IndexOf('C:\DxcWin32Dir') < LPaths.IndexOf('C:\DxcBaseDir'),
+      'The platform entry must come before the base entry: ' + JoinEntries(LPaths));
+  finally
+    LProjectInfo.Free;
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_SelfReferenceWithoutPriorValue_IsEmpty;
+var
+  LProjectInfo: TProjectInfo;
+begin
+  LProjectInfo := ScanDprojWithOverrides(InheritanceDproj(
+    '<DCC_UnitSearchPath>C:\DxcOnlyDir;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>', ''), []);
+  try
+    // The project directory is always the first entry.
+    Assert.AreEqual(2, LProjectInfo.ProjectSearchPaths.Count,
+      'The self-reference must expand to nothing: ' + JoinEntries(LProjectInfo.ProjectSearchPaths));
+    Assert.IsTrue(HasEntry(LProjectInfo.ProjectSearchPaths, 'C:\DxcOnlyDir'),
+      'The literal entry must be kept: ' + JoinEntries(LProjectInfo.ProjectSearchPaths));
+    for var LWarning in LProjectInfo.Warnings do
+    begin
+      Assert.IsTrue(Pos('$(DCC_UnitSearchPath)', LWarning) = 0,
+        'The self-reference must not be reported as unresolved: ' + LWarning);
+    end;
+  finally
+    LProjectInfo.Free;
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_SelfReferenceWithoutPriorValue_UsesEnvironment;
+var
+  LProjectInfo: TProjectInfo;
+begin
+  LProjectInfo := ScanDprojWithOverrides(InheritanceDproj(
+    '<DCC_UnitSearchPath>C:\DxcOnlyDir;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>', ''),
+    ['DCC_UnitSearchPath', 'C:\DxcFromEnv']);
+  try
+    Assert.IsTrue(HasEntry(LProjectInfo.ProjectSearchPaths, 'C:\DxcOnlyDir'),
+      'The literal entry must be kept: ' + JoinEntries(LProjectInfo.ProjectSearchPaths));
+    Assert.IsTrue(HasEntry(LProjectInfo.ProjectSearchPaths, 'C:\DxcFromEnv'),
+      'The self-reference must take the variable of the same name: ' + JoinEntries(LProjectInfo.ProjectSearchPaths));
+  finally
+    LProjectInfo.Free;
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_EmptyElementInLaterGroup_ClearsInheritedValue;
+var
+  LProjectInfo: TProjectInfo;
+begin
+  LProjectInfo := ScanDprojWithOverrides(InheritanceDproj(
+    '<DCC_UnitSearchPath>C:\DxcBaseDir</DCC_UnitSearchPath>',
+    '<DCC_UnitSearchPath></DCC_UnitSearchPath>'), []);
+  try
+    Assert.IsFalse(HasEntry(LProjectInfo.ProjectSearchPaths, 'C:\DxcBaseDir'),
+      'The empty element must clear the base value: ' + JoinEntries(LProjectInfo.ProjectSearchPaths));
+  finally
+    LProjectInfo.Free;
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_SelfClosingElementInLaterGroup_ClearsInheritedValue;
+var
+  LProjectInfo: TProjectInfo;
+begin
+  LProjectInfo := ScanDprojWithOverrides(ThreeLevelDproj(
+    '<DCC_UnitSearchPath>C:\DxcBaseDir</DCC_UnitSearchPath>',
+    '<DCC_UnitSearchPath/>',
+    '<DCC_UnitSearchPath>C:\DxcCfgDir;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>'), []);
+  try
+    Assert.IsTrue(HasEntry(LProjectInfo.ProjectSearchPaths, 'C:\DxcCfgDir'),
+      'The Cfg_1_Win32 entry must be kept: ' + JoinEntries(LProjectInfo.ProjectSearchPaths));
+    Assert.IsFalse(HasEntry(LProjectInfo.ProjectSearchPaths, 'C:\DxcBaseDir'),
+      'The self-closing element must clear the base value: ' + JoinEntries(LProjectInfo.ProjectSearchPaths));
+  finally
+    LProjectInfo.Free;
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_BdsVersionOption_IsUsedAndReported;
+var
+  LProjectInfo: TProjectInfo;
+begin
+  LProjectInfo := ScanDprojWithOverrides(InheritanceDproj('', ''), [], '99');
+  try
+    Assert.AreEqual('99.0', LProjectInfo.Toolchain.Version, 'The chosen BDS version must be used');
+    var LNotes := ProgressText(LProjectInfo);
+    Assert.IsTrue(Pos('Info: Delphi BDS version: 99.0 (set with --bds-version', LNotes) > 0,
+      'The chosen version and its source must be reported: ' + LNotes);
+    var LWarned := False;
+    for var LWarning in LProjectInfo.Warnings do
+    begin
+      if Pos('99.0 was requested but is not installed', LWarning) > 0 then
+      begin
+        LWarned := True;
+      end;
+    end;
+    Assert.IsTrue(LWarned, 'A version that is not installed must be reported');
+  finally
+    LProjectInfo.Free;
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_WithoutBdsVersionOption_ReportsVersion;
+var
+  LProjectInfo: TProjectInfo;
+begin
+  LProjectInfo := ScanDprojWithOverrides(InheritanceDproj('', ''), []);
+  try
+    var LNotes := ProgressText(LProjectInfo);
+    Assert.IsTrue(Pos('Info: Delphi BDS version: ', LNotes) > 0,
+      'The BDS version used must be reported: ' + LNotes);
+    Assert.IsTrue((Pos('BDS environment variable', LNotes) > 0) or (Pos('BDS is not set', LNotes) > 0),
+      'The report must say where the version came from: ' + LNotes);
+  finally
+    LProjectInfo.Free;
+  end;
+end;
+
+procedure TProjectScannerTests.NormalizeBdsVersion_AddsMinorVersion;
+begin
+  Assert.AreEqual('23.0', NormalizeBdsVersion('23'));
+  Assert.AreEqual('23.0', NormalizeBdsVersion(' 23.0 '));
+  Assert.AreEqual('', NormalizeBdsVersion(''));
 end;
 
 procedure TProjectScannerTests.Scan_EngineDproj_ResolvesPackageOutputFile;

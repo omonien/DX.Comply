@@ -67,6 +67,7 @@ type
     FPurl: string;
     FRepoUrl: string;
     FDelphi7Root: string;
+    FBdsVersion: string;
     FManifestFile: string;
     FManifestExplicit: Boolean;
     FSbomCreator: string;
@@ -171,6 +172,8 @@ type
     property RepoUrl: string read FRepoUrl;
     /// <summary>Delphi 7 installation directory from --delphi7-root.</summary>
     property Delphi7Root: string read FDelphi7Root;
+    /// <summary>BDS version from --bds-version, for example 23.0.</summary>
+    property BdsVersion: string read FBdsVersion;
     /// <summary>Path from --manifest. Empty when the flag was not passed.</summary>
     property ManifestFile: string read FManifestFile;
     /// <summary>True when --manifest was passed. That path wins over the config file.</summary>
@@ -447,6 +450,8 @@ begin
       end
       else if LKey = 'delphi7-root' then
         FDelphi7Root := LValue
+      else if (LKey = 'bds-version') or (LKey = 'delphi-version') then
+        FBdsVersion := LValue
       else if LKey = 'report' then
       begin
         if not TryParseReport(LValue) then
@@ -644,6 +649,7 @@ begin
   Writeln('                                Overrides the manifest key in .dxcomply.json');
   Writeln('  --map-dir=<path>              Directory containing the pre-built MAP file');
   Writeln('  --delphi7-root=<path>         Delphi 7 install directory (RootDir).');
+  Writeln('  --bds-version=<ver>           Delphi BDS version to use, e.g. 23.0 (default: BDS, then newest).');
   Writeln('                                Optional. Used to resolve library units');
   Writeln('                                for .dpr, .dpk, and .bdsproj projects.');
   Writeln('  --no-composition-evidence     Omit source/DCU units from SBOM (binary-only)');
@@ -728,6 +734,7 @@ begin
   Result.RepoUrl                     := FRepoUrl;
   Result.MapFileDir                  := FMapDir;
   Result.Delphi7Root                 := FDelphi7Root;
+  Result.BdsVersion                  := FBdsVersion;
   Result.IncludeCompositionEvidence  := not FNoCompositionEvidence;
   Result.ManifestFile                := FManifestFile;
   Result.ManifestFileExplicit        := FManifestExplicit;

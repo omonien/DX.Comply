@@ -125,6 +125,10 @@ dxcomply --project=MyApp.dproj --map-dir=build\Win32\Release --output=bom.json -
 
 Paths in the `.dproj` can use `$(Name)` variables, for example `<DCC_ExeOutput>$(MyProject_bin)</DCC_ExeOutput>`. The CLI looks each one up in the process environment first, then in the user overrides from Tools > Options > Environment Variables of the detected Delphi version (`HKCU\Software\Embarcadero\BDS\<version>\Environment Variables`). A variable that is found in neither place stays in the path, and the CLI names it in a warning. A search path entry with such a variable is left out.
 
+The detected Delphi version is the one in the `BDS` environment variable. When `BDS` is not set, the CLI uses the newest installed Delphi. The CLI always prints the version it used and where it came from. To choose another version, pass `--bds-version=23.0` (or `--bds-version=23`) or set `bdsVersion` in `.dxcomply.json`. That version also sets `$(ProductVersion)` and the library paths.
+
+A variable can hold several paths, for example `MyLibs=C:\A;C:\B`. As in MSBuild, the CLI expands the whole value first and then splits it on `;`, so `$(MyLibs)` in `DCC_UnitSearchPath` adds two entries. A later property group can extend an earlier one with `x;$(DCC_UnitSearchPath)`. In the first group that defines a property, `$(DCC_UnitSearchPath)` is the environment variable of the same name, or empty. An empty element such as `<DCC_UnitSearchPath></DCC_UnitSearchPath>` in a later group clears the inherited value.
+
 To also generate the HTML/Markdown companion report from the CLI (the report ships disabled by default), pass `--report`. `--report=html` writes HTML only. `--report=both` writes HTML and Markdown. `--report` is the same as `--report=both`.
 
 ```cmd

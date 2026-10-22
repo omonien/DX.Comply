@@ -125,6 +125,10 @@ type
     [Test]
     procedure Parse_Delphi7Root_CopiesToConfig;
 
+    /// <summary>--bds-version is copied into the engine configuration.</summary>
+    [Test]
+    procedure Parse_BdsVersion_CopiesToConfig;
+
     /// <summary>The built-in Win32 and Release defaults are not explicit.</summary>
     [Test]
     procedure Parse_DefaultTarget_IsNotExplicit;
@@ -472,6 +476,23 @@ begin
     LConfig := LOptions.ToSbomConfig;
     Assert.AreEqual('C:\Delphi7', LConfig.Delphi7Root,
       'ToSbomConfig must copy the Delphi 7 root');
+  finally
+    LOptions.Free;
+  end;
+end;
+
+procedure TCliOptionsTests.Parse_BdsVersion_CopiesToConfig;
+var
+  LConfig: TSbomConfig;
+  LOptions: TCliOptions;
+begin
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsTrue(LOptions.Parse(TArray<string>.Create('--project=App.dproj', '--bds-version=23.0')),
+      '--bds-version must parse');
+    Assert.AreEqual('23.0', LOptions.BdsVersion);
+    LConfig := LOptions.ToSbomConfig;
+    Assert.AreEqual('23.0', LConfig.BdsVersion, 'ToSbomConfig must copy the BDS version');
   finally
     LOptions.Free;
   end;

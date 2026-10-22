@@ -33,7 +33,9 @@ this file and the splash bitmap.
 The committed .res goes stale when README.md changes.
 DX.Comply.Tests.IDE.ReadmeSupport.EmbeddedReadme_MatchesRepositoryFile
 compares DXCOMPLYREADME with README.md at the repository root and fails
-when they differ. Regenerate and commit the .res in the same change as
+when they differ. The script stores README.md with LF line endings, so the
+.res is the same whether the checkout uses CRLF (.gitattributes sets
+*.md eol=crlf) or LF. The test ignores line endings. Regenerate and commit the .res in the same change as
 the README or the icon files.
 
 src/DX.Comply.IDE.Resources.rc lists the same three files for a machine
@@ -57,6 +59,8 @@ ENTRIES = (
     ("DXCOMPLYICONBMP", ROOT / "assets" / "DX.Comply.Icon.bmp"),
     ("DXCOMPLYICONPNG", ROOT / "assets" / "DX.Comply.Icon.png"),
 )
+# Text resources whose line endings are normalized to LF.
+TEXT_ENTRIES = {"DXCOMPLYREADME"}
 
 # First record of a Win32 .res file. DataSize 0, HeaderSize 32, type 0, name 0.
 EMPTY_HEADER = bytes.fromhex(
@@ -135,12 +139,20 @@ def parse_res(blob: bytes) -> list[tuple[object, object, bytes]]:
     return found
 
 
+def payload_for(name: str, path: Path) -> bytes:
+    """File content; text resources get LF line endings."""
+    data = path.read_bytes()
+    if name in TEXT_ENTRIES:
+        data = data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    return data
+
+
 def build() -> bytes:
     parts = [EMPTY_HEADER]
     for name, path in ENTRIES:
         if not path.is_file():
             raise FileNotFoundError(path)
-        parts.append(resource_entry(name, path.read_bytes()))
+        parts.append(resource_entry(name, payload_for(name, path)))
     return b"".join(parts)
 
 
@@ -148,7 +160,7 @@ def verify(blob: bytes) -> None:
     records = parse_res(blob)
     if not records or records[0] != (0, 0, b""):
         raise RuntimeError("missing the leading empty 32-byte record")
-    expected = [(name, path.read_bytes()) for name, path in ENTRIES]
+    expected = [(name, payload_for(name, path)) for name, path in ENTRIES]
     actual = records[1:]
     if len(actual) != len(expected):
         raise RuntimeError(f"expected {len(expected)} resources, found {len(actual)}")

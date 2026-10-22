@@ -92,6 +92,11 @@ type
     /// </summary>
     FIdeOverrideLookup: TEnvironmentLookup;
     /// <summary>
+    /// BDS version passed in with SetBdsVersion, for example 23.0. Empty
+    /// means the BDS environment variable, then the newest installed Delphi.
+    /// </summary>
+    FBdsVersionOverride: string;
+    /// <summary>
     /// Variable names already reported as unresolved in this scan.
     /// </summary>
     FReportedUnresolved: TDictionary<string, Boolean>;
@@ -124,19 +129,26 @@ type
     /// </summary>
     function GetElementValue(const AXmlBlock, AName: string): string;
     /// <summary>
+    /// True when AXmlBlock holds an AName element, also an empty one such as
+    /// &lt;AName&gt;&lt;/AName&gt; or &lt;AName/&gt;. AValue is the trimmed text.
+    /// </summary>
+    function TryGetElementValue(const AXmlBlock, AName: string; out AValue: string): Boolean;
+    /// <summary>
     /// Reads AName from property groups matching Base, platform, and config
     /// (later groups override earlier ones). A $(AName) in a later value is
     /// replaced with the value of the earlier groups, as MSBuild does.
     /// </summary>
     function GetPropertyValue(const AName: string; const ADefault: string = ''): string;
     /// <summary>
-    /// Takes AValue, the value of AName in a later property group, over
+    /// Takes the value of AName in AXmlBlock, a later property group, over
     /// AValueSoFar, the value of the earlier groups. As in MSBuild, $(AName) in
-    /// AValue stands for AValueSoFar, so x;$(DCC_UnitSearchPath) extends the
-    /// base group instead of replacing it. An empty AValue changes nothing;
-    /// otherwise AFound becomes True.
+    /// the value stands for AValueSoFar, so x;$(DCC_UnitSearchPath) extends the
+    /// base group instead of replacing it. Before any group defines AName,
+    /// $(AName) is the environment variable of the same name, or empty.
+    /// A missing element changes nothing. An empty element clears the value.
+    /// AFound becomes True once a group defines AName.
     /// </summary>
-    procedure TakeValue(const AName, AValue: string; var AValueSoFar: string;
+    procedure TakeValue(const AName, AXmlBlock: string; var AValueSoFar: string;
       var AFound: Boolean);
     /// <summary>
     /// Extracts runtime packages from DCC_UsePackage when UsePackages is true.
@@ -158,6 +170,17 @@ type
     /// ADepth levels. Unknown tokens stay in place and are reported once.
     /// </summary>
     function ExpandVariableTokens(const AInput: string; ADepth: Integer): string;
+    /// <summary>
+    /// Replaces known MSBuild tokens, then environment variables, without
+    /// touching path separators. AValue may hold a list separated by ';'.
+    /// </summary>
+    function ExpandMsBuildVariables(const AValue, AProjectName: string;
+      AEmptyProductVersion: Boolean): string;
+    /// <summary>
+    /// BDS version for this scan and, in ASource, where it came from:
+    /// SetBdsVersion, the BDS environment variable, or the newest install.
+    /// </summary>
+    function SelectBdsVersion(out ASource: string): string;
     /// <summary>
     /// Replaces known MSBuild tokens, then environment variables.
     /// When AEmptyProductVersion is true, $(ProductVersion) and its aliases
@@ -310,6 +333,7 @@ type
     function Scan(const AProjectPath, APlatform, AConfiguration: string): TProjectInfo;
     function Validate(const AProjectPath: string): Boolean;
     procedure SetDelphi7Root(const ARoot: string);
+    procedure SetBdsVersion(const AVersion: string);
     procedure SetExplicitTargetRequest(APlatformExplicit,
       AConfigurationExplicit: Boolean);
     /// <summary>
@@ -325,6 +349,11 @@ type
 /// $(ProductVersion), $(BDSVersion), and $(BDSVER) expand to this value.
 /// </summary>
 function DetectBdsProductVersion: string;
+
+/// <summary>
+/// Trims AVersion and adds .0 when it has no dot, so 23 becomes 23.0.
+/// </summary>
+function NormalizeBdsVersion(const AVersion: string): string;
 
 /// <summary>
 /// Reads the user overrides from Tools, Options, Environment Variables of the
@@ -467,6 +496,49 @@ function DprojForDprMessage(const ADprPath, ADprojPath: string): string;
 begin
   Result := 'Using ' + ExtractFileName(ADprojPath) + ' found next to ' +
     ExtractFileName(ADprPath) + '.';
+end;
+
+function NormalizeBdsVersion(const AVersion: string): string;
+begin
+  Result := Trim(AVersion);
+  if (Result <> '') and (Pos('.', Result) = 0) then
+  begin
+    Result := Result + '.0';
+  end;
+end;
+
+/// <summary>
+/// Turns '/' into '\', collapses doubled separators (keeping a UNC prefix),
+/// and removes a trailing separator unless the path is a drive root.
+/// </summary>
+function NormalizePathText(const APath: string): string;
+var
+  LBody: string;
+  LPrefix: string;
+  LPrev: string;
+begin
+  Result := StringReplace(APath, '/', '\', [rfReplaceAll]);
+  // A leading \\ is a UNC prefix and must survive collapsing.
+  if Result.StartsWith('\\') then
+  begin
+    LPrefix := '\\';
+    LBody := Copy(Result, 3, MaxInt);
+  end
+  else
+  begin
+    LPrefix := '';
+    LBody := Result;
+  end;
+  repeat
+    LPrev := LBody;
+    LBody := StringReplace(LBody, '\\', '\', [rfReplaceAll]);
+  until LBody = LPrev;
+  Result := LPrefix + LBody;
+  // Remove trailing backslash, but keep a drive root such as C:\
+  if (Length(Result) > 1) and (Result[Length(Result)] = '\') and not Result.EndsWith(':\') then
+  begin
+    Result := Copy(Result, 1, Length(Result) - 1);
+  end;
 end;
 
 function DetectBdsProductVersion: string;
@@ -864,6 +936,7 @@ var
   LItem: string;
   LResolvedItem: string;
   LItems: TArray<string>;
+  LValue: string;
 begin
   if not Assigned(AValues) then
     Exit;
@@ -871,7 +944,15 @@ begin
   if Trim(AValue) = '' then
     Exit;
 
-  LItems := AValue.Split([';']);
+  LValue := AValue;
+  if ANormalizeAsPath then
+  begin
+    // MSBuild expands variables on the whole value before it splits on ';',
+    // so a variable that holds C:\A;C:\B yields two entries.
+    LValue := ExpandMsBuildVariables(LValue, AProjectName, False);
+  end;
+
+  LItems := LValue.Split([';']);
   for LItem in LItems do
   begin
     LResolvedItem := Trim(LItem);
@@ -887,7 +968,7 @@ begin
 
     if ANormalizeAsPath then
     begin
-      LResolvedItem := NormalizePath(LResolvedItem, AProjectName);
+      LResolvedItem := NormalizePathText(LResolvedItem);
       // A path that still holds a $(Name) after expansion cannot exist on disk.
       // ExpandVariableTokens has already reported the variable.
       if Pos('$(', LResolvedItem) > 0 then
@@ -1026,9 +1107,10 @@ begin
   Result := Default(TDelphiToolchainInfo);
 
   // Same version string $(ProductVersion) expands to.
-  LVersion := DetectBdsProductVersion;
+  LVersion := FBdsProductVersion;
   LBdsPath := Trim(GetEnvironmentVariable('BDS'));
-  if (LBdsPath <> '') and TDirectory.Exists(LBdsPath) then
+  // A version chosen with SetBdsVersion uses its own install, not BDS.
+  if (FBdsVersionOverride = '') and (LBdsPath <> '') and TDirectory.Exists(LBdsPath) then
     Result.RootDir := ExcludeTrailingPathDelimiter(TPath.GetFullPath(LBdsPath))
   else
     Result.RootDir := GetBdsRootDirForVersion(LVersion);
@@ -1398,20 +1480,35 @@ begin
 end;
 
 function TProjectScanner.GetElementValue(const AXmlBlock, AName: string): string;
-var
-  LPattern: string;
-  LMatch: TMatch;
 begin
-  Result := '';
-  if AXmlBlock = '' then
-    Exit;
+  TryGetElementValue(AXmlBlock, AName, Result);
+end;
 
-  // Match <Name>value</Name> — handles optional namespace prefix and attributes
-  LPattern := '<(?:\w+:)?' + TRegEx.Escape(AName) +
-              '(?:\s[^>]*)?>([^<]*)</(?:\w+:)?' + TRegEx.Escape(AName) + '>';
-  LMatch := TRegEx.Match(AXmlBlock, LPattern, [roIgnoreCase]);
+function TProjectScanner.TryGetElementValue(const AXmlBlock, AName: string;
+  out AValue: string): Boolean;
+var
+  LMatch: TMatch;
+  LName: string;
+begin
+  AValue := '';
+  Result := False;
+  if AXmlBlock = '' then
+  begin
+    Exit;
+  end;
+
+  // Match <Name>value</Name> with an optional namespace prefix and attributes.
+  LName := TRegEx.Escape(AName);
+  LMatch := TRegEx.Match(AXmlBlock, '<(?:\w+:)?' + LName + '(?:\s[^>]*)?>([^<]*)</(?:\w+:)?' + LName + '>',
+    [roIgnoreCase]);
   if LMatch.Success then
-    Result := Trim(LMatch.Groups[1].Value);
+  begin
+    AValue := Trim(LMatch.Groups[1].Value);
+    Exit(True);
+  end;
+
+  // <Name/> is an explicit empty value.
+  Result := TRegEx.IsMatch(AXmlBlock, '<(?:\w+:)?' + LName + '(?:\s[^>]*)?/>', [roIgnoreCase]);
 end;
 
 function TProjectScanner.GetBdsRootDirForVersion(const AVersion: string): string;
@@ -1484,16 +1581,37 @@ begin
     LoWord(LFixedInfo.dwFileVersionLS)]);
 end;
 
-procedure TProjectScanner.TakeValue(const AName, AValue: string;
+procedure TProjectScanner.TakeValue(const AName, AXmlBlock: string;
   var AValueSoFar: string; var AFound: Boolean);
+var
+  LValue: string;
 begin
-  if AValue = '' then
+  if not TryGetElementValue(AXmlBlock, AName, LValue) then
   begin
     Exit;
   end;
 
-  AValueSoFar := StringReplace(AValue, '$(' + AName + ')', AValueSoFar,
-    [rfReplaceAll, rfIgnoreCase]);
+  // An explicit empty element clears the inherited value, as in MSBuild.
+  if LValue = '' then
+  begin
+    AValueSoFar := '';
+    AFound := True;
+    Exit;
+  end;
+
+  var LPrevious := AValueSoFar;
+  var LSelfReference := '$(' + AName + ')';
+  // Before any group defines AName, MSBuild reads $(AName) from the
+  // environment variable of the same name, or empty when there is none.
+  if not AFound and (Pos(UpperCase(LSelfReference), UpperCase(LValue)) > 0) then
+  begin
+    if not TryLookupVariable(AName, LPrevious) then
+    begin
+      LPrevious := '';
+    end;
+  end;
+
+  AValueSoFar := StringReplace(LValue, LSelfReference, LPrevious, [rfReplaceAll, rfIgnoreCase]);
   AFound := True;
 end;
 
@@ -1513,7 +1631,7 @@ begin
   LBlock := GetUnconditionalPropertyGroupContent;
   if LBlock <> '' then
   begin
-    TakeValue(AName, GetElementValue(LBlock, AName), LValueSoFar, LFound);
+    TakeValue(AName, LBlock, LValueSoFar, LFound);
   end;
 
   // 1. Base PropertyGroup (Condition contains '$(Base)')
@@ -1524,7 +1642,7 @@ begin
     // Skip Base_ groups (Base_Win32 etc.) — they are handled in step 2
     if (Pos('Base_', LBlock) > 0) and (Pos('''$(Base)''!=''''', LBlock) = 0) then
       Continue;
-    TakeValue(AName, GetElementValue(LBlock, AName), LValueSoFar, LFound);
+    TakeValue(AName, LBlock, LValueSoFar, LFound);
   end;
 
   // 2. Platform-specific (Condition contains '$(Base_Win32)' etc.)
@@ -1533,7 +1651,7 @@ begin
     LBlocks := GetPropertyGroupContents('$(Base_' + FCurrentPlatform + ')');
     for I := 0 to High(LBlocks) do
     begin
-      TakeValue(AName, GetElementValue(LBlocks[I], AName), LValueSoFar, LFound);
+      TakeValue(AName, LBlocks[I], LValueSoFar, LFound);
     end;
   end;
 
@@ -1543,7 +1661,7 @@ begin
     LBlocks := GetPropertyGroupContents('$(' + FConfigKey + ')');
     for I := 0 to High(LBlocks) do
     begin
-      TakeValue(AName, GetElementValue(LBlocks[I], AName), LValueSoFar, LFound);
+      TakeValue(AName, LBlocks[I], LValueSoFar, LFound);
     end;
   end;
 
@@ -1553,7 +1671,7 @@ begin
     LBlocks := GetPropertyGroupContents(FConfigKey + '_' + FCurrentPlatform);
     for I := 0 to High(LBlocks) do
     begin
-      TakeValue(AName, GetElementValue(LBlocks[I], AName), LValueSoFar, LFound);
+      TakeValue(AName, LBlocks[I], LValueSoFar, LFound);
     end;
   end;
 
@@ -1566,18 +1684,19 @@ begin
       LBlock := GetPropertyGroupContent(FCurrentConfig + '|' + FCurrentPlatform);
       if LBlock <> '' then
       begin
-        TakeValue(AName, GetElementValue(LBlock, AName), LValueSoFar, LFound);
+        TakeValue(AName, LBlock, LValueSoFar, LFound);
       end;
     end;
     // AnyCPU fallback — used by old .dproj files without platform-specific blocks
     LBlock := GetPropertyGroupContent(FCurrentConfig + '|AnyCPU');
     if LBlock <> '' then
     begin
-      TakeValue(AName, GetElementValue(LBlock, AName), LValueSoFar, LFound);
+      TakeValue(AName, LBlock, LValueSoFar, LFound);
     end;
   end;
 
-  if LFound then
+  // An empty value counts as not set, as in MSBuild.
+  if LFound and (LValueSoFar <> '') then
   begin
     Result := LValueSoFar;
   end;
@@ -1703,70 +1822,46 @@ begin
   AddDelimitedValues(LNamespaceValue, Result, '', '', False);
 end;
 
-function TProjectScanner.ExpandMsBuildPath(const APath, AProjectName: string;
+function TProjectScanner.ExpandMsBuildVariables(const AValue, AProjectName: string;
   AEmptyProductVersion: Boolean): string;
 var
-  LPath: string;
   LProductVersion: string;
-
-  function CollapseSeparators(const AInput: string): string;
-  var
-    LPrefix: string;
-    LBody: string;
-    LPrev: string;
-  begin
-    // A leading \\ is a UNC prefix and must survive collapsing.
-    if AInput.StartsWith('\\') then
-    begin
-      LPrefix := '\\';
-      LBody := Copy(AInput, 3, MaxInt);
-    end
-    else
-    begin
-      LPrefix := '';
-      LBody := AInput;
-    end;
-    repeat
-      LPrev := LBody;
-      LBody := StringReplace(LBody, '\\', '\', [rfReplaceAll]);
-    until LBody = LPrev;
-    Result := LPrefix + LBody;
-  end;
-
 begin
-  LPath := APath;
+  Result := AValue;
   // Standard MSBuild variables
-  LPath := StringReplace(LPath, '$(Platform)', FCurrentPlatform, [rfIgnoreCase, rfReplaceAll]);
-  LPath := StringReplace(LPath, '$(Config)', FCurrentConfig, [rfIgnoreCase, rfReplaceAll]);
-  LPath := StringReplace(LPath, '$(Configuration)', FCurrentConfig, [rfIgnoreCase, rfReplaceAll]);
-  LPath := StringReplace(LPath, '$(MSBuildProjectName)', AProjectName, [rfIgnoreCase, rfReplaceAll]);
-  LPath := StringReplace(LPath, '$(ProjectName)', AProjectName, [rfIgnoreCase, rfReplaceAll]);
+  Result := StringReplace(Result, '$(Platform)', FCurrentPlatform, [rfIgnoreCase, rfReplaceAll]);
+  Result := StringReplace(Result, '$(Config)', FCurrentConfig, [rfIgnoreCase, rfReplaceAll]);
+  Result := StringReplace(Result, '$(Configuration)', FCurrentConfig, [rfIgnoreCase, rfReplaceAll]);
+  Result := StringReplace(Result, '$(MSBuildProjectName)', AProjectName, [rfIgnoreCase, rfReplaceAll]);
+  Result := StringReplace(Result, '$(ProjectName)', AProjectName, [rfIgnoreCase, rfReplaceAll]);
   // $(ProductVersion) is the BDS version the IDE substitutes (37.0 on Delphi 13).
   // A command-line build with no rsvars leaves it empty. BDSVER and BDSVersion
   // are the same value. Replace the longer alias before $(BDSVER).
   if AEmptyProductVersion or (FBdsProductVersion <> '') then
   begin
     if AEmptyProductVersion then
-      LProductVersion := ''
+    begin
+      LProductVersion := '';
+    end
     else
+    begin
       LProductVersion := FBdsProductVersion;
-    LPath := StringReplace(LPath, '$(ProductVersion)', LProductVersion, [rfIgnoreCase, rfReplaceAll]);
-    LPath := StringReplace(LPath, '$(BDSVersion)', LProductVersion, [rfIgnoreCase, rfReplaceAll]);
-    LPath := StringReplace(LPath, '$(BDSVER)', LProductVersion, [rfIgnoreCase, rfReplaceAll]);
+    end;
+    Result := StringReplace(Result, '$(ProductVersion)', LProductVersion, [rfIgnoreCase, rfReplaceAll]);
+    Result := StringReplace(Result, '$(BDSVersion)', LProductVersion, [rfIgnoreCase, rfReplaceAll]);
+    Result := StringReplace(Result, '$(BDSVER)', LProductVersion, [rfIgnoreCase, rfReplaceAll]);
   end;
   // Resolve user-defined $(VarName) placeholders against environment variables.
-  if Pos('$(', LPath) > 0 then
+  if Pos('$(', Result) > 0 then
   begin
-    LPath := ExpandVariableTokens(LPath, cMaxVariableDepth);
+    Result := ExpandVariableTokens(Result, cMaxVariableDepth);
   end;
-  // Normalize path separators
-  LPath := StringReplace(LPath, '/', '\', [rfReplaceAll]);
-  LPath := CollapseSeparators(LPath);
-  // Remove trailing backslash, but keep a drive root such as C:\
-  if (Length(LPath) > 1) and (LPath[Length(LPath)] = '\') and
-     not LPath.EndsWith(':\') then
-    LPath := Copy(LPath, 1, Length(LPath) - 1);
-  Result := LPath;
+end;
+
+function TProjectScanner.ExpandMsBuildPath(const APath, AProjectName: string;
+  AEmptyProductVersion: Boolean): string;
+begin
+  Result := NormalizePathText(ExpandMsBuildVariables(APath, AProjectName, AEmptyProductVersion));
 end;
 
 function TProjectScanner.NormalizePath(const APath, AProjectName: string): string;
@@ -2223,6 +2318,33 @@ begin
   FDelphi7Root := Trim(ARoot);
 end;
 
+procedure TProjectScanner.SetBdsVersion(const AVersion: string);
+begin
+  FBdsVersionOverride := NormalizeBdsVersion(AVersion);
+end;
+
+function TProjectScanner.SelectBdsVersion(out ASource: string): string;
+var
+  LBdsPath: string;
+begin
+  if FBdsVersionOverride <> '' then
+  begin
+    ASource := 'set with --bds-version or bdsVersion';
+    Exit(FBdsVersionOverride);
+  end;
+
+  LBdsPath := Trim(GetEnvironmentVariable('BDS'));
+  if (LBdsPath <> '') and TDirectory.Exists(LBdsPath) then
+  begin
+    ASource := 'from the BDS environment variable';
+  end
+  else
+  begin
+    ASource := 'newest installed Delphi, because BDS is not set';
+  end;
+  Result := DetectBdsProductVersion;
+end;
+
 procedure TProjectScanner.SetExplicitTargetRequest(APlatformExplicit,
   AConfigurationExplicit: Boolean);
 begin
@@ -2484,13 +2606,14 @@ var
   LVersionStr: string;
   LMajor, LMinor, LRelease, LBuild: string;
   LWarning: string;
+  LBdsSource: string;
 begin
   FWarnings.Clear;
   FReportedUnresolved.Clear;
   FreeAndNil(FIdeOverrides);
   Result := TProjectInfo.Create;
   try
-    FBdsProductVersion := DetectBdsProductVersion;
+    FBdsProductVersion := SelectBdsVersion(LBdsSource);
     Result.ProjectPath := AProjectPath;
     // Resolve the project directory from an absolute path so it is never empty.
     // A project path without a directory part (e.g. "MyProj.dproj" passed on a
@@ -2620,6 +2743,24 @@ begin
       Result.ProjectSearchPaths.Free;
     Result.ProjectSearchPaths := ExtractSearchPaths(Result.ProjectDir, Result.ProjectName);
 
+    // Say which Delphi version the paths and IDE overrides come from. The
+    // Info: prefix makes the CLI print it without --verbose.
+    if FBdsProductVersion = '' then
+    begin
+      Result.ProgressNotes.Add('Info: Delphi BDS version: none found (' + LBdsSource +
+        '). $(ProductVersion) and IDE environment variable overrides are not available.');
+    end
+    else
+    begin
+      Result.ProgressNotes.Add('Info: Delphi BDS version: ' + FBdsProductVersion + ' (' + LBdsSource +
+        '). IDE environment variable overrides are read from HKCU\Software\Embarcadero\BDS\' +
+        FBdsProductVersion + '\Environment Variables. Use --bds-version to choose another version.');
+    end;
+    if (FBdsVersionOverride <> '') and (GetBdsRootDirForVersion(FBdsVersionOverride) = '') then
+    begin
+      FWarnings.Add('Delphi BDS version ' + FBdsVersionOverride + ' was requested but is not installed. ' +
+        'Library paths of that version cannot be read.');
+    end;
     Result.Toolchain := DetectToolchainInfo;
 
     if Assigned(Result.GlobalSearchPaths) then

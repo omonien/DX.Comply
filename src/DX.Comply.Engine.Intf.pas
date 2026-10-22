@@ -340,6 +340,13 @@ type
     /// </summary>
     procedure SetDelphi7Root(const ARoot: string);
     /// <summary>
+    /// Optional BDS version, for example 23.0 or 23. It selects the Delphi
+    /// install whose $(ProductVersion), library paths, and IDE environment
+    /// variable overrides are used. Empty uses the BDS environment variable,
+    /// then the newest installed Delphi.
+    /// </summary>
+    procedure SetBdsVersion(const AVersion: string);
+    /// <summary>
     /// Records whether the caller set --platform and --config-name (or the
     /// matching .dxcomply.json keys). Legacy scans warn only when a flag is
     /// True and the value is not the single Win32 / Default option set.

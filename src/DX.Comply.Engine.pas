@@ -203,6 +203,11 @@ type
     /// </summary>
     Delphi7Root: string;
     /// <summary>
+    /// Optional BDS version (for example 23.0) from --bds-version or
+    /// bdsVersion. Empty uses BDS, then the newest installed Delphi.
+    /// </summary>
+    BdsVersion: string;
+    /// <summary>
     /// When True, write an SBOM for a source release. There is no build,
     /// no MAP file, and no binary scan. Default is False (build mode).
     /// </summary>
@@ -477,6 +482,7 @@ begin
   Result.ScanTree := False;
   SetLength(Result.ScanDirs, 0);
   Result.Delphi7Root := '';
+  Result.BdsVersion := '';
   Result.LibraryMode := False;
   SetLength(Result.SourceDirs, 0);
   Result.Purl := '';
@@ -1590,6 +1596,10 @@ begin
         if LJson.GetValue('delphi7Root') <> nil then
           Result.Delphi7Root := LJson.GetValue<string>('delphi7Root');
 
+        // Delphi version whose paths and IDE overrides are used.
+        if LJson.GetValue('bdsVersion') <> nil then
+          Result.BdsVersion := LJson.GetValue<string>('bdsVersion');
+
         // Composition evidence inclusion
         if LJson.GetValue('includeCompositionEvidence') <> nil then
           Result.IncludeCompositionEvidence :=
@@ -2031,6 +2041,7 @@ begin
       DoProgress('Scanning project...', 10);
       try
         FProjectScanner.SetDelphi7Root(FConfig.Delphi7Root);
+        FProjectScanner.SetBdsVersion(FConfig.BdsVersion);
         FProjectScanner.SetExplicitTargetRequest(FConfig.PlatformExplicit,
           FConfig.ConfigurationExplicit);
         LProjectInfo := FProjectScanner.Scan(LProjectPath, FConfig.Platform,
@@ -2351,6 +2362,7 @@ begin
   LManifestJson := '';
   try
     FProjectScanner.SetDelphi7Root(FConfig.Delphi7Root);
+    FProjectScanner.SetBdsVersion(FConfig.BdsVersion);
     FProjectScanner.SetExplicitTargetRequest(FConfig.PlatformExplicit,
       FConfig.ConfigurationExplicit);
     LProjectInfo := FProjectScanner.Scan(AProjectPath, FConfig.Platform, FConfig.Configuration);
@@ -2671,6 +2683,10 @@ begin
   FConfig := MergeFileConfig(LCliConfig, LoadConfig(AConfigPath));
   if (FConfig.Delphi7Root = '') and (LCliConfig.Delphi7Root <> '') then
     FConfig.Delphi7Root := LCliConfig.Delphi7Root;
+  if LCliConfig.BdsVersion <> '' then
+  begin
+    FConfig.BdsVersion := LCliConfig.BdsVersion;
+  end;
   if LCliConfig.PlatformExplicit then
     FConfig.PlatformExplicit := True;
   if LCliConfig.ConfigurationExplicit then
