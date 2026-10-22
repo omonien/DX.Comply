@@ -1331,7 +1331,7 @@ begin
     '<DCC_UnitSearchPath>C:\DxcOnlyDir;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>', ''), []);
   try
     // The project directory is always the first entry.
-    Assert.AreEqual(2, LProjectInfo.ProjectSearchPaths.Count,
+    Assert.AreEqual(2, Integer(LProjectInfo.ProjectSearchPaths.Count),
       'The self-reference must expand to nothing: ' + JoinEntries(LProjectInfo.ProjectSearchPaths));
     Assert.IsTrue(HasEntry(LProjectInfo.ProjectSearchPaths, 'C:\DxcOnlyDir'),
       'The literal entry must be kept: ' + JoinEntries(LProjectInfo.ProjectSearchPaths));
