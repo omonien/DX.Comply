@@ -103,7 +103,7 @@ GetIt installs the IDE plugin only. It does not include `dxcomply.exe`. The comm
 
 1. Install the `DX.Comply.IDE` design-time package.
 2. **Open your project** in RAD Studio.
-3. Choose **Project > DX.Comply > Generate SBOM...** from the main menu.
+3. Choose **Project > DX.Comply - SBOM > Generate SBOM...** from the main menu.
 4. In the confirmation dialog, **select the build configuration** to use for MAP generation (the active IDE configuration is pre-selected). DX.Comply compiles the project via OTA with detailed MAP output, scans all evidence, and produces the SBOM.
 5. Done. Your `bom.json`, `bom.report.html`, and `bom.report.md` are in your project folder.
 
