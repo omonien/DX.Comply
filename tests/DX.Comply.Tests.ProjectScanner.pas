@@ -171,6 +171,37 @@ type
     procedure Scan_DprojWithEnvVarInOutputDir_ExpandsEnvVar;
 
     /// <summary>
+    /// A $(Name) that only exists as an IDE environment variable override
+    /// is expanded (issue #80).
+    /// </summary>
+    [Test]
+    procedure Scan_IdeOverrideInOutputDir_ExpandsOverride;
+
+    /// <summary>
+    /// An override whose value uses another variable is expanded too.
+    /// </summary>
+    [Test]
+    procedure Scan_NestedIdeOverride_ExpandsBothLevels;
+
+    /// <summary>
+    /// A variable that refers to itself must not loop forever.
+    /// </summary>
+    [Test]
+    procedure Scan_SelfReferencingOverride_Terminates;
+
+    /// <summary>
+    /// The process environment wins over an IDE override of the same name.
+    /// </summary>
+    [Test]
+    procedure Scan_ProcessEnvAndIdeOverride_ProcessEnvWins;
+
+    /// <summary>
+    /// An unknown variable produces one warning that names it.
+    /// </summary>
+    [Test]
+    procedure Scan_UnknownVariable_WarningNamesIt;
+
+    /// <summary>
     /// The engine package output is the BPL name plus DllSuffix, in the
     /// active config/platform output directory.
     /// </summary>
@@ -832,6 +863,153 @@ begin
     end;
   finally
     Winapi.Windows.SetEnvironmentVariable(PChar(cEnvVarName), nil);
+  end;
+end;
+
+// ---- IDE environment variable overrides (issue #80) ------------------------
+
+function OverrideDproj(const AExeOutput: string): string;
+begin
+  Result :=
+    '<?xml version="1.0" encoding="utf-8"?>' + sLineBreak +
+    '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">' + sLineBreak +
+    '  <PropertyGroup>' + sLineBreak +
+    '    <MainSource>OverrideApp.dpr</MainSource>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '  <PropertyGroup Condition="''$(Configuration)|$(Platform)''==''Release|Win32''">' + sLineBreak +
+    '    <DCC_ExeOutput>' + AExeOutput + '</DCC_ExeOutput>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '</Project>';
+end;
+
+/// <summary>
+/// Scans a temporary .dproj whose DCC_ExeOutput is AExeOutput, with
+/// AOverrides (name, value pairs) as the IDE override source. The caller frees the result.
+/// </summary>
+function ScanWithOverrides(const AExeOutput: string; const AOverrides: array of string): TProjectInfo;
+var
+  LOverrides: TDictionary<string, string>;
+  LScanner: TProjectScanner;
+  LScannerIntf: IProjectScanner;
+  LTempDir: string;
+  LTempDproj: string;
+begin
+  LOverrides := TDictionary<string, string>.Create;
+  try
+    var i := 0;
+    while i < High(AOverrides) do
+    begin
+      LOverrides.Add(UpperCase(AOverrides[i]), AOverrides[i + 1]);
+      Inc(i, 2);
+    end;
+
+    LTempDir := TPath.Combine(TPath.GetTempPath, 'DXComplyTest_IdeOverride');
+    ForceDirectories(LTempDir);
+    LTempDproj := TPath.Combine(LTempDir, 'OverrideApp.dproj');
+    try
+      TFile.WriteAllText(LTempDproj, OverrideDproj(AExeOutput), TEncoding.UTF8);
+      LScanner := TProjectScanner.Create;
+      LScannerIntf := LScanner;
+      LScanner.SetIdeOverrideLookup(
+        function(const AName: string; out AValue: string): Boolean
+        begin
+          Result := LOverrides.TryGetValue(UpperCase(AName), AValue);
+        end);
+      Result := LScannerIntf.Scan(LTempDproj, 'Win32', 'Release');
+    finally
+      if TFile.Exists(LTempDproj) then
+      begin
+        TFile.Delete(LTempDproj);
+      end;
+      if TDirectory.Exists(LTempDir) then
+      begin
+        TDirectory.Delete(LTempDir);
+      end;
+    end;
+  finally
+    LOverrides.Free;
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_IdeOverrideInOutputDir_ExpandsOverride;
+var
+  LProjectInfo: TProjectInfo;
+begin
+  // Mixed case on purpose: the IDE matches names case-insensitively.
+  LProjectInfo := ScanWithOverrides('.\$(DxComplyTest_Bin)', ['DXCOMPLYTEST_BIN', 'ide_bin']);
+  try
+    Assert.IsTrue(LProjectInfo.OutputDir.EndsWith('\ide_bin', True),
+      'OutputDir must use the IDE override but was: ' + LProjectInfo.OutputDir);
+  finally
+    LProjectInfo.Free;
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_NestedIdeOverride_ExpandsBothLevels;
+var
+  LProjectInfo: TProjectInfo;
+begin
+  LProjectInfo := ScanWithOverrides('.\$(DxcOuter)',
+    ['DxcOuter', '$(DxcInner)\bin', 'DxcInner', 'root']);
+  try
+    Assert.IsTrue(LProjectInfo.OutputDir.EndsWith('\root\bin', True),
+      'OutputDir must expand the nested override but was: ' + LProjectInfo.OutputDir);
+  finally
+    LProjectInfo.Free;
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_SelfReferencingOverride_Terminates;
+var
+  LProjectInfo: TProjectInfo;
+begin
+  LProjectInfo := ScanWithOverrides('.\$(DxcLoop)', ['DxcLoop', 'x\$(DxcLoop)']);
+  try
+    Assert.IsTrue(Pos('x\x\', LProjectInfo.OutputDir) > 0,
+      'OutputDir must contain the expanded levels but was: ' + LProjectInfo.OutputDir);
+  finally
+    LProjectInfo.Free;
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_ProcessEnvAndIdeOverride_ProcessEnvWins;
+const
+  cName = 'DXCOMPLY_TEST_PRECEDENCE';
+var
+  LProjectInfo: TProjectInfo;
+begin
+  Winapi.Windows.SetEnvironmentVariable(PChar(cName), PChar('from_process'));
+  try
+    LProjectInfo := ScanWithOverrides('.\$(' + cName + ')', [cName, 'from_ide']);
+    try
+      Assert.IsTrue(LProjectInfo.OutputDir.EndsWith('\from_process', True),
+        'The process environment must win but OutputDir was: ' + LProjectInfo.OutputDir);
+    finally
+      LProjectInfo.Free;
+    end;
+  finally
+    Winapi.Windows.SetEnvironmentVariable(PChar(cName), nil);
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_UnknownVariable_WarningNamesIt;
+var
+  LCount: Integer;
+  LProjectInfo: TProjectInfo;
+begin
+  LProjectInfo := ScanWithOverrides('.\$(DxcMissingVar)', []);
+  try
+    LCount := 0;
+    for var LWarning in LProjectInfo.Warnings do
+    begin
+      if Pos('$(DxcMissingVar)', LWarning) > 0 then
+      begin
+        Inc(LCount);
+      end;
+    end;
+    Assert.AreEqual(1, LCount, 'Exactly one warning must name the missing variable');
+  finally
+    LProjectInfo.Free;
   end;
 end;
 

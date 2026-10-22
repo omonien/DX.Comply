@@ -39,12 +39,20 @@ uses
   System.IOUtils,
   System.RegularExpressions,
   System.Generics.Collections,
+  System.Generics.Defaults,
   System.Win.Registry,
   Winapi.Windows,
   DX.Comply.Engine.Intf,
   DX.Comply.LegacyProject;
 
 type
+  /// <summary>
+  /// Looks up the value of a $(Name) variable. Returns False when the
+  /// variable is not defined. Used for the IDE environment variable overrides.
+  /// </summary>
+  TEnvironmentLookup = reference to function(const AName: string;
+    out AValue: string): Boolean;
+
   /// <summary>
   /// Implementation of IProjectScanner for scanning .dproj files.
   /// Uses regex-based parsing — no MSXML or COM dependencies.
@@ -54,6 +62,8 @@ type
     const
       cDefaultPlatform = 'Win32';
       cDefaultConfig = 'Debug';
+      /// <summary>How deep values that contain $(Name) tokens are expanded.</summary>
+      cMaxVariableDepth = 8;
       /// <summary>Valid Delphi project file extensions.</summary>
       cValidExtensions: array[0..4] of string = (
         '.dproj', '.groupproj', '.dpk', '.dpr', '.bdsproj');
@@ -72,6 +82,19 @@ type
     /// Set at the start of each scan. Empty when no install is found.
     /// </summary>
     FBdsProductVersion: string;
+    /// <summary>
+    /// IDE environment variable overrides for FBdsProductVersion, loaded once
+    /// per scan. Nil until the first unresolved $(Name) needs them.
+    /// </summary>
+    FIdeOverrides: TDictionary<string, string>;
+    /// <summary>
+    /// Replaces the registry lookup of IDE overrides. Set by tests.
+    /// </summary>
+    FIdeOverrideLookup: TEnvironmentLookup;
+    /// <summary>
+    /// Variable names already reported as unresolved in this scan.
+    /// </summary>
+    FReportedUnresolved: TDictionary<string, Boolean>;
     FPlatformExplicit: Boolean;
     FConfigurationExplicit: Boolean;
     /// <summary>
@@ -114,6 +137,17 @@ type
     /// True when UsePackages resolves to true for the active config and platform.
     /// </summary>
     function LinksWithRuntimePackages: Boolean;
+    /// <summary>
+    /// Looks up AName in the process environment first, then in the IDE
+    /// environment variable overrides. An empty value counts as not found.
+    /// </summary>
+    function TryLookupVariable(const AName: string; out AValue: string): Boolean;
+    /// <summary>
+    /// Replaces $(Name) tokens from the process environment and the IDE
+    /// overrides. Values that contain tokens themselves are expanded up to
+    /// ADepth levels. Unknown tokens stay in place and are reported once.
+    /// </summary>
+    function ExpandVariableTokens(const AInput: string; ADepth: Integer): string;
     /// <summary>
     /// Replaces known MSBuild tokens, then environment variables.
     /// When AEmptyProductVersion is true, $(ProductVersion) and its aliases
@@ -266,6 +300,11 @@ type
     procedure SetDelphi7Root(const ARoot: string);
     procedure SetExplicitTargetRequest(APlatformExplicit,
       AConfigurationExplicit: Boolean);
+    /// <summary>
+    /// Replaces the registry lookup of the IDE environment variable overrides,
+    /// for tests. Nil restores the registry lookup.
+    /// </summary>
+    procedure SetIdeOverrideLookup(const ALookup: TEnvironmentLookup);
   end;
 
 /// <summary>
@@ -274,6 +313,15 @@ type
 /// $(ProductVersion), $(BDSVersion), and $(BDSVER) expand to this value.
 /// </summary>
 function DetectBdsProductVersion: string;
+
+/// <summary>
+/// Reads the user overrides from Tools, Options, Environment Variables of the
+/// given BDS version (HKCU\Software\Embarcadero\BDS\&lt;ver&gt;\Environment
+/// Variables). The IDE applies them only to its own process, so a standalone
+/// CLI run has to read them here. Names are case-insensitive. The caller owns
+/// the result, which is empty when the key does not exist.
+/// </summary>
+function ReadIdeEnvironmentOverrides(const ABdsVersion: string): TDictionary<string, string>;
 
 /// <summary>
 /// When AProjectPath is a .dpr and a .dproj with the same base name is in
@@ -340,6 +388,46 @@ begin
     end;
   finally
     LVersionNames.Free;
+    LRegistry.Free;
+  end;
+end;
+
+function ReadIdeEnvironmentOverrides(const ABdsVersion: string): TDictionary<string, string>;
+var
+  LName: string;
+  LNames: TStringList;
+  LRegistry: TRegistry;
+begin
+  Result := TDictionary<string, string>.Create(TIStringComparer.Ordinal);
+  if Trim(ABdsVersion) = '' then
+  begin
+    Exit;
+  end;
+
+  LRegistry := TRegistry.Create(KEY_READ);
+  LNames := TStringList.Create;
+  try
+    LRegistry.RootKey := HKEY_CURRENT_USER;
+    if not LRegistry.OpenKeyReadOnly('\Software\Embarcadero\BDS\' + Trim(ABdsVersion) +
+      '\Environment Variables') then
+    begin
+      Exit;
+    end;
+
+    try
+      LRegistry.GetValueNames(LNames);
+      for LName in LNames do
+      begin
+        if LRegistry.GetDataType(LName) in [rdString, rdExpandString] then
+        begin
+          Result.AddOrSetValue(LName, LRegistry.ReadString(LName));
+        end;
+      end;
+    finally
+      LRegistry.CloseKey;
+    end;
+  finally
+    LNames.Free;
     LRegistry.Free;
   end;
 end;
@@ -836,10 +924,13 @@ begin
   inherited Create;
   FWarnings := TList<string>.Create;
   FBdsProductVersion := '';
+  FReportedUnresolved := TDictionary<string, Boolean>.Create(TIStringComparer.Ordinal);
 end;
 
 destructor TProjectScanner.Destroy;
 begin
+  FIdeOverrides.Free;
+  FReportedUnresolved.Free;
   FWarnings.Free;
   inherited;
 end;
@@ -1587,46 +1678,6 @@ var
   LPath: string;
   LProductVersion: string;
 
-  // Expands any remaining $(VarName) placeholders by consulting Windows
-  // environment variables. Delphi's "User System Overrides" propagate to the
-  // build via environment variables, so this resolves project-specific tokens
-  // such as $(DVER). See issue #27.
-  function ExpandEnvironmentTokens(const AInput: string): string;
-  var
-    LIdx, LStart, LEnd: Integer;
-    LName, LValue: string;
-  begin
-    Result := AInput;
-    LIdx := 1;
-    while LIdx < Length(Result) do
-    begin
-      LStart := PosEx('$(', Result, LIdx);
-      if LStart = 0 then
-        Break;
-      LEnd := PosEx(')', Result, LStart + 2);
-      if LEnd = 0 then
-        Break;
-      LName := Copy(Result, LStart + 2, LEnd - LStart - 2);
-      LValue := GetEnvironmentVariable(LName);
-      // Limitation: GetEnvironmentVariable returns '' both for an undefined
-      // variable AND for one that is defined but empty. We cannot
-      // distinguish the two cases without the lower-level Win32 API.
-      // Treating both as "leave the token intact" is the safer choice.
-      // Substituting an empty string would silently collapse path
-      // segments and produce invalid paths. See issue #27.
-      if LValue <> '' then
-      begin
-        Result := Copy(Result, 1, LStart - 1) + LValue +
-          Copy(Result, LEnd + 1, MaxInt);
-        // Continue searching after the substituted value
-        LIdx := LStart + Length(LValue);
-      end
-      else
-        // Unknown or empty token. Leave it intact and advance past it.
-        LIdx := LEnd + 1;
-    end;
-  end;
-
   function CollapseSeparators(const AInput: string): string;
   var
     LPrefix: string;
@@ -1674,7 +1725,9 @@ begin
   end;
   // Resolve user-defined $(VarName) placeholders against environment variables.
   if Pos('$(', LPath) > 0 then
-    LPath := ExpandEnvironmentTokens(LPath);
+  begin
+    LPath := ExpandVariableTokens(LPath, cMaxVariableDepth);
+  end;
   // Normalize path separators
   LPath := StringReplace(LPath, '/', '\', [rfReplaceAll]);
   LPath := CollapseSeparators(LPath);
@@ -1989,6 +2042,80 @@ begin
     AProjectInfo.OutputFilePath := LFileName
   else
     AProjectInfo.OutputFilePath := TPath.Combine(LDir, LFileName);
+end;
+
+function TProjectScanner.TryLookupVariable(const AName: string; out AValue: string): Boolean;
+begin
+  // Process environment first: inside the IDE and under rsvars it already
+  // holds the overrides, and an explicitly set variable should win.
+  AValue := GetEnvironmentVariable(AName);
+  if AValue <> '' then
+  begin
+    Exit(True);
+  end;
+
+  if Assigned(FIdeOverrideLookup) then
+  begin
+    Result := FIdeOverrideLookup(AName, AValue) and (AValue <> '');
+    Exit;
+  end;
+
+  if FIdeOverrides = nil then
+  begin
+    FIdeOverrides := ReadIdeEnvironmentOverrides(FBdsProductVersion);
+  end;
+  Result := FIdeOverrides.TryGetValue(AName, AValue) and (AValue <> '');
+end;
+
+function TProjectScanner.ExpandVariableTokens(const AInput: string; ADepth: Integer): string;
+var
+  LEnd: Integer;
+  LIdx: Integer;
+  LName: string;
+  LStart: Integer;
+  LValue: string;
+begin
+  Result := AInput;
+  LIdx := 1;
+  while LIdx < Length(Result) do
+  begin
+    LStart := PosEx('$(', Result, LIdx);
+    if LStart = 0 then
+      Break;
+    LEnd := PosEx(')', Result, LStart + 2);
+    if LEnd = 0 then
+      Break;
+
+    LName := Copy(Result, LStart + 2, LEnd - LStart - 2);
+    // An empty value is treated like an undefined one. Substituting '' would
+    // collapse path segments and produce a wrong path. See issue #27.
+    if TryLookupVariable(LName, LValue) then
+    begin
+      if (Pos('$(', LValue) > 0) and (ADepth > 1) then
+      begin
+        LValue := ExpandVariableTokens(LValue, ADepth - 1);
+      end;
+      Result := Copy(Result, 1, LStart - 1) + LValue + Copy(Result, LEnd + 1, MaxInt);
+      // Continue after the substituted value, so a value is never rescanned here.
+      LIdx := LStart + Length(LValue);
+    end
+    else
+    begin
+      if (LName <> '') and not FReportedUnresolved.ContainsKey(LName) then
+      begin
+        FReportedUnresolved.Add(LName, True);
+        FWarnings.Add('Variable $(' + LName + ') is not set in the environment or in the IDE ' +
+          'environment variable overrides (HKCU\Software\Embarcadero\BDS\' + FBdsProductVersion +
+          '\Environment Variables). Paths that use it cannot be resolved.');
+      end;
+      LIdx := LEnd + 1;
+    end;
+  end;
+end;
+
+procedure TProjectScanner.SetIdeOverrideLookup(const ALookup: TEnvironmentLookup);
+begin
+  FIdeOverrideLookup := ALookup;
 end;
 
 function TProjectScanner.ResolveBuildPath(const ARawPath, AProjectDir, AProjectName: string): string;
@@ -2328,6 +2455,8 @@ var
   LWarning: string;
 begin
   FWarnings.Clear;
+  FReportedUnresolved.Clear;
+  FreeAndNil(FIdeOverrides);
   Result := TProjectInfo.Create;
   try
     FBdsProductVersion := DetectBdsProductVersion;
