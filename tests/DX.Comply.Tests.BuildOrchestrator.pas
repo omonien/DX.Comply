@@ -116,6 +116,36 @@ type
     /// </summary>
     [Test]
     procedure ExecutePlan_TimeoutStopsProcess;
+
+    /// <summary>
+    /// Early ExecutePlan failures must still expose command, MAP path and working dir.
+    /// </summary>
+    [Test]
+    procedure ExecutePlan_EarlyFailure_KeepsIdentityFields;
+
+    /// <summary>
+    /// Enriched failure messages must name exception class, paths and command.
+    /// </summary>
+    [Test]
+    procedure FormatFailureMessage_IncludesExceptionAndPaths;
+
+    /// <summary>
+    /// The German Unicode/code-page message must get a short English path hint.
+    /// </summary>
+    [Test]
+    procedure AppendUnicodeHint_GermanCodePageMessage;
+
+    /// <summary>
+    /// On failure, the diagnostic log must be written next to the project without MAP contents.
+    /// </summary>
+    [Test]
+    procedure WriteDiagnosticLog_OnFailure_WritesPathsNotMapContents;
+
+    /// <summary>
+    /// EnsureDeepEvidenceBuild must return an enriched failure when CreatePlan raises.
+    /// </summary>
+    [Test]
+    procedure EnsureDeepEvidenceBuild_CreatePlanRaises_EnrichesResult;
   end;
 
 implementation
@@ -264,9 +294,11 @@ begin
   LPlan.ShouldExecute := True;
   LPlan.ScriptPath := '';
   LPlan.ProjectPath := 'C:\Repo\src\MyApp.dproj';
+  LPlan.WorkingDirectory := 'C:\Repo\src';
   LPlan.Platform := 'Win32';
   LPlan.Configuration := 'Debug';
   LPlan.ExpectedMapFilePath := 'C:\Repo\build\Win32\Debug\MyApp.map';
+  LPlan.CommandLine := 'powershell.exe -NoProfile -File "missing.ps1"';
 
   LResult := FBuildOrchestrator.ExecutePlan(LPlan);
 
@@ -274,6 +306,14 @@ begin
     'An empty ScriptPath must produce a failure result, not an exception');
   Assert.IsTrue(Pos('not found', LResult.Message) > 0,
     'The failure message must indicate the build script was not found');
+  Assert.AreEqual(LPlan.CommandLine, LResult.CommandLine,
+    'Early failure must keep CommandLine on the result');
+  Assert.AreEqual(LPlan.ExpectedMapFilePath, LResult.MapFilePath,
+    'Early failure must keep ExpectedMapFilePath on the result');
+  Assert.AreEqual(LPlan.WorkingDirectory, LResult.WorkingDirectory,
+    'Early failure must keep WorkingDirectory on the result');
+  Assert.IsTrue(Pos('C:\Repo\src\MyApp.dproj', LResult.Message) > 0,
+    'Early failure message must name the project path');
 end;
 
 procedure TBuildOrchestratorTests.CreatePlan_ProjectAtDriveRoot_DoesNotCrash;
@@ -484,6 +524,145 @@ begin
   finally
     if TDirectory.Exists(LTempDir) then
       TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+procedure TBuildOrchestratorTests.ExecutePlan_EarlyFailure_KeepsIdentityFields;
+var
+  LPlan: TDeepEvidenceBuildPlan;
+  LResult: TDeepEvidenceBuildResult;
+begin
+  LPlan := Default(TDeepEvidenceBuildPlan);
+  LPlan.Enabled := True;
+  LPlan.ShouldExecute := True;
+  LPlan.ScriptPath := 'C:\missing\DelphiBuildDPROJ.ps1';
+  LPlan.ProjectPath := 'C:\Repo\App\App.dproj';
+  LPlan.WorkingDirectory := 'C:\Repo\App';
+  LPlan.ExpectedMapFilePath := 'C:\Repo\App\Win32\Debug\App.map';
+  LPlan.CommandLine := 'powershell.exe -File "C:\missing\DelphiBuildDPROJ.ps1"';
+
+  LResult := FBuildOrchestrator.ExecutePlan(LPlan);
+
+  Assert.IsFalse(LResult.Success);
+  Assert.AreEqual(LPlan.CommandLine, LResult.CommandLine);
+  Assert.AreEqual(LPlan.ExpectedMapFilePath, LResult.MapFilePath);
+  Assert.AreEqual(LPlan.WorkingDirectory, LResult.WorkingDirectory);
+  Assert.IsTrue(Pos('Working directory: C:\Repo\App', LResult.Message) > 0,
+    'Failure message must include the working directory');
+  Assert.IsTrue(Pos('Command: powershell.exe', LResult.Message) > 0,
+    'Failure message must include the command line');
+end;
+
+procedure TBuildOrchestratorTests.FormatFailureMessage_IncludesExceptionAndPaths;
+var
+  LMessage: string;
+begin
+  LMessage := FormatDeepEvidenceFailureMessage(
+    'EEncodingError',
+    'Keine Zuordnung fuer Unicode-Zeichen in der Multibyte-Zielcodeseite vorhanden',
+    'C:\Projekte\App\App.dproj',
+    'C:\Projekte\App\Win32\Debug\App.map',
+    'C:\Projekte\App',
+    'powershell.exe -File "build.ps1"');
+
+  Assert.IsTrue(Pos('EEncodingError', LMessage) > 0,
+    'Message must include the exception class');
+  Assert.IsTrue(Pos('Keine Zuordnung fuer Unicode-Zeichen', LMessage) > 0,
+    'Message must include the exception text');
+  Assert.IsTrue(Pos('Project: C:\Projekte\App\App.dproj', LMessage) > 0,
+    'Message must include the project path');
+  Assert.IsTrue(Pos('Expected MAP: C:\Projekte\App\Win32\Debug\App.map', LMessage) > 0,
+    'Message must include the expected MAP path');
+  Assert.IsTrue(Pos('Working directory: C:\Projekte\App', LMessage) > 0,
+    'Message must include the working directory');
+  Assert.IsTrue(Pos('Command: powershell.exe -File "build.ps1"', LMessage) > 0,
+    'Message must include the command line');
+  Assert.IsTrue(Pos('non-ASCII characters in a path', LMessage) > 0,
+    'German code-page errors must get the English path hint');
+end;
+
+procedure TBuildOrchestratorTests.AppendUnicodeHint_GermanCodePageMessage;
+var
+  LMessage: string;
+begin
+  LMessage := AppendUnicodeCodePageHint(
+    'Keine Zuordnung für Unicode-Zeichen in der Multibyte-Zielcodeseite vorhanden');
+  Assert.IsTrue(Pos('Hint:', LMessage) > 0,
+    'A German Unicode/code-page message must gain an English hint');
+  Assert.IsTrue(Pos('non-ASCII characters in a path', LMessage) > 0,
+    'The hint must mention non-ASCII path characters');
+
+  LMessage := AppendUnicodeCodePageHint('plain failure');
+  Assert.AreEqual('plain failure', LMessage,
+    'Unrelated messages must stay unchanged');
+end;
+
+procedure TBuildOrchestratorTests.WriteDiagnosticLog_OnFailure_WritesPathsNotMapContents;
+var
+  LDir: string;
+  LLogPath: string;
+  LResult: TDeepEvidenceBuildResult;
+  LText: string;
+begin
+  LDir := TPath.Combine(TPath.GetTempPath, 'dx_deeplog_' + IntToStr(GetTickCount));
+  TDirectory.CreateDirectory(LDir);
+  try
+    LResult := Default(TDeepEvidenceBuildResult);
+    LResult.Success := False;
+    LResult.Executed := True;
+    LResult.ExitCode := 1;
+    LResult.Message := 'Deep-Evidence build failed with exit code 1';
+    LResult.CommandLine := 'powershell.exe -File "build.ps1"';
+    LResult.MapFilePath := TPath.Combine(LDir, 'App.map');
+    LResult.WorkingDirectory := LDir;
+    LResult.Output := 'compiler said no';
+
+    // Plant a fake MAP with a distinctive marker that must never appear in the log.
+    TFile.WriteAllText(LResult.MapFilePath, 'SECRET_MAP_CONTENTS_XYZ');
+
+    LLogPath := WriteDeepEvidenceDiagnosticLog(LDir, LResult, TPath.Combine(LDir, 'App.dproj'));
+    Assert.IsTrue(LLogPath <> '', 'A failure must write the diagnostic log');
+    Assert.IsTrue(TFile.Exists(LLogPath), 'The diagnostic log file must exist');
+    LText := TFile.ReadAllText(LLogPath);
+    Assert.IsTrue(Pos('App.dproj', LText) > 0, 'Log must name the project');
+    Assert.IsTrue(Pos('App.map', LText) > 0, 'Log must name the MAP path');
+    Assert.IsTrue(Pos('powershell.exe -File "build.ps1"', LText) > 0, 'Log must name the command');
+    Assert.IsTrue(Pos('compiler said no', LText) > 0, 'Log must include truncated build output');
+    Assert.AreEqual(0, Pos('SECRET_MAP_CONTENTS_XYZ', LText),
+      'Log must never include MAP file contents');
+  finally
+    if TDirectory.Exists(LDir) then
+      TDirectory.Delete(LDir, True);
+  end;
+end;
+
+procedure TBuildOrchestratorTests.EnsureDeepEvidenceBuild_CreatePlanRaises_EnrichesResult;
+var
+  LProjectInfo: TProjectInfo;
+  LResult: TDeepEvidenceBuildResult;
+begin
+  LProjectInfo := TProjectInfo.Create;
+  try
+    LProjectInfo.ProjectPath := 'C:\Repo\src\MyApp.dproj';
+    LProjectInfo.ProjectDir := 'C:\Repo\src';
+    LProjectInfo.Platform := 'Win64';
+    LProjectInfo.Configuration := 'Release; Remove-Item C:\';
+    LProjectInfo.MapFilePath := 'C:\Repo\missing.map';
+
+    LResult := FBuildOrchestrator.EnsureDeepEvidenceBuild(LProjectInfo, BuildOptions(debAlways));
+
+    Assert.IsFalse(LResult.Success,
+      'CreatePlan exceptions must become a failed result, not escape');
+    Assert.IsTrue(Pos('EArgumentException', LResult.Message) > 0,
+      'Failure message must include the exception class');
+    Assert.IsTrue(Pos('C:\Repo\src\MyApp.dproj', LResult.Message) > 0,
+      'Failure message must include the project path');
+    Assert.AreEqual('C:\Repo\missing.map', LResult.MapFilePath,
+      'Result must keep the expected MAP path');
+    Assert.AreEqual('C:\Repo\src', LResult.WorkingDirectory,
+      'Result must keep the working directory');
+  finally
+    LProjectInfo.Free;
   end;
 end;
 
