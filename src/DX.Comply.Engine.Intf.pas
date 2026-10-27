@@ -227,6 +227,17 @@ type
     function IsPackage: Boolean;
     /// <summary>Returns the effective suffix for MAP file names (DllSuffix for packages, empty for applications).</summary>
     function EffectiveMapSuffix: string;
+    /// <summary>
+    /// True for Android, Android32, and Android64. Those targets emit
+    /// a shared library named libProject.so.
+    /// </summary>
+    function IsAndroidPlatform: Boolean;
+    /// <summary>
+    /// MAP file name for this project. Desktop targets use ProjectName plus
+    /// the package suffix and .map. Android targets use lib, that stem, and
+    /// .so.map.
+    /// </summary>
+    function ExpectedMapFileName: string;
   end;
 
   /// <summary>
@@ -542,6 +553,7 @@ implementation
 uses
   System.IOUtils,
   System.SysUtils,
+  System.StrUtils,
   System.DateUtils;
 
 { TSbomProperty }
@@ -630,6 +642,33 @@ begin
     Result := DllSuffix
   else
     Result := '';
+end;
+
+function TProjectInfo.IsAndroidPlatform: Boolean;
+begin
+  // Android, Android32, and Android64 all emit lib<Project>.so. A prefix
+  // keeps a later Android target on the same MAP name. Win32, Win64, iOS,
+  // macOS, and Linux do not match.
+  Result := StartsText('Android', Trim(Platform));
+end;
+
+function TProjectInfo.ExpectedMapFileName: string;
+var
+  LStem: string;
+begin
+  // Same stem as the desktop MAP. Android only changes the lib prefix and
+  // the .so.map ending, because the linker keeps the .so in the file name
+  // (issue #89). TPath.ChangeExtension would turn libProject.so into
+  // libProject.map, which is not the file on disk.
+  LStem := ProjectName + EffectiveMapSuffix;
+  if IsAndroidPlatform then
+  begin
+    Result := 'lib' + LStem + '.so.map';
+  end
+  else
+  begin
+    Result := LStem + '.map';
+  end;
 end;
 
 function TargetKindScore(const AArtefactType: string): Integer;

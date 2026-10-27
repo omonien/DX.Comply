@@ -2407,11 +2407,15 @@ begin
       FConfig.ConfigurationExplicit);
     LProjectInfo := FProjectScanner.Scan(AProjectPath, FConfig.Platform, FConfig.Configuration);
 
-    // Apply MapFileDir override. Legacy projects look next to the output
-    // binary unless the caller points at another directory.
+    // Apply MapFileDir override. The directory changes; the file name stays
+    // the one this platform writes (Project.map, or libProject.so.map on
+    // Android). Legacy projects look next to the output binary unless the
+    // caller points at another directory.
     if FConfig.MapFileDir <> '' then
+    begin
       LProjectInfo.MapFilePath := TPath.Combine(FConfig.MapFileDir,
-        LProjectInfo.ProjectName + LProjectInfo.EffectiveMapSuffix + '.map');
+        LProjectInfo.ExpectedMapFileName);
+    end;
   except
     on E: Exception do
     begin
