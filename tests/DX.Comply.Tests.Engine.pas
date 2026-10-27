@@ -408,6 +408,12 @@ type
     procedure Apply_BplWithoutResource_GetsNoVersion;
     [Test]
     procedure Apply_OwnOutputBpl_GetsProductVersion;
+    /// <summary>
+    /// When no product version is set, an application EXE still on disk gets
+    /// its PE FileVersion so the report and CycloneDX stay aligned. Issue #90.
+    /// </summary>
+    [Test]
+    procedure Apply_ExeWithoutProductVersion_GetsPeVersion;
   end;
 
 implementation
@@ -2724,6 +2730,28 @@ begin
     TFile.Delete(LPath);
   end;
 end;
+procedure TBuildFileVersionTests.Apply_ExeWithoutProductVersion_GetsPeVersion;
+var
+  LList: TArtefactList;
+  LArtefact: TArtefactInfo;
+  LExe: string;
+begin
+  LExe := ParamStr(0);
+  LList := TArtefactList.Create;
+  try
+    LArtefact := MakeBuildArtefact(TPath.GetFileName(LExe), 'application', '');
+    LArtefact.FilePath := LExe;
+    LList.Add(LArtefact);
+    ApplyProductVersionToBuildFiles(LList, '');
+    Assert.AreEqual(GetFileVersionText(LExe), LList[0].Version,
+      'an EXE with no product version must take FileVersion from the PE resource');
+    Assert.IsTrue(LList[0].Version <> '', 'the test EXE must have a version resource');
+  finally
+    LList.Free;
+  end;
+end;
+
+
 
 initialization
   TDUnitX.RegisterTestFixture(TEngineTests);

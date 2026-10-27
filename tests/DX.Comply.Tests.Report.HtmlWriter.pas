@@ -66,6 +66,12 @@ type
     /// </summary>
     [Test]
     procedure Write_ExternalDll_ShowsSizeHashAndSystemLocation;
+
+    /// <summary>
+    /// EXE/DLL artefact versions appear in the Artefacts table. Issue #90.
+    /// </summary>
+    [Test]
+    procedure Write_ArtefactVersion_AppearsInArtefactsTable;
   end;
 
 implementation
@@ -121,11 +127,13 @@ begin
   FCompositionEvidence.Units.Add(LResolvedUnit);
 
   FArtefacts := TArtefactList.Create;
+  LArtefact := Default(TArtefactInfo);
   LArtefact.FilePath := 'Y:\Build\Demo.dll';
   LArtefact.RelativePath := 'build\Win32\Debug\Demo.dll';
   LArtefact.FileSize := 2048;
   LArtefact.Hash := '1234567890ABCDEF';
-  LArtefact.ArtefactType := 'dll';
+  LArtefact.ArtefactType := 'library';
+  LArtefact.Version := '2.0.0.1';
   FArtefacts.Add(LArtefact);
 
   FWarnings := TList<string>.Create;
@@ -194,6 +202,8 @@ begin
   Assert.IsTrue(Pos('37.0.57242.3601', LContent) > 0);
   Assert.AreEqual(0, Pos('Build Trace Records', LContent));
   Assert.AreEqual(0, Pos('Build Traceability', LContent));
+  Assert.IsTrue(Pos('<th>Version</th>', LContent) > 0);
+  Assert.IsTrue(Pos('>2.0.0.1<', LContent) > 0, 'artefact version must appear in the HTML table');
   Assert.IsTrue(Pos('class="table-wrap"', LContent) > 0);
   Assert.IsTrue(Pos('overflow-wrap:anywhere', LContent) > 0);
   Assert.IsTrue(Pos('One third-party unit was resolved heuristically.', LContent) > 0);
@@ -257,6 +267,29 @@ begin
   Assert.IsTrue(Pos(StringOfChar('c', 64), LContent) > 0, 'SHA-256 of a shipped DLL must be shown');
   Assert.IsTrue(Pos('System directory: C:\Windows\SysWOW64\ws2_32.dll', LContent) > 0,
     'the system directory location must be shown');
+end;
+
+procedure THtmlReportWriterTests.Write_ArtefactVersion_AppearsInArtefactsTable;
+var
+  LArtefact: TArtefactInfo;
+  LContent: string;
+  LWriter: IHumanReadableReportWriter;
+begin
+  LArtefact := Default(TArtefactInfo);
+  LArtefact.RelativePath := 'App.exe';
+  LArtefact.ArtefactType := 'application';
+  LArtefact.FileSize := 8192;
+  LArtefact.Hash := StringOfChar('d', 64);
+  LArtefact.Version := '3.1.0';
+  FArtefacts.Add(LArtefact);
+
+  LWriter := THtmlReportWriter.Create;
+  Assert.IsTrue(LWriter.Write(FOutputPath, FData, THumanReadableReportConfig.Default));
+  LContent := TFile.ReadAllText(FOutputPath, TEncoding.UTF8);
+  Assert.IsTrue(Pos('<td>3.1.0</td>', LContent) > 0,
+    'application version stored on the artefact must appear in the HTML report');
+  Assert.IsTrue(Pos('<td>2.0.0.1</td>', LContent) > 0,
+    'DLL version stored on the artefact must appear in the HTML report');
 end;
 
 initialization

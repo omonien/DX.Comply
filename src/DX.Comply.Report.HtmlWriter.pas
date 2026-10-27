@@ -53,7 +53,9 @@ var
   LArtefact: TArtefactInfo;
   LPathCell: string;
 begin
-  Lines.Add('<section><h2>Artefacts</h2><div class="table-wrap"><table><thead><tr><th>Relative Path</th><th>Type</th><th>Size</th><th>SHA-256</th></tr></thead><tbody>');
+  // Issue #90: Version is the PE FileVersion/ProductVersion (or product
+  // version) already stored on the artefact for CycloneDX consistency.
+  Lines.Add('<section><h2>Artefacts</h2><div class="table-wrap"><table><thead><tr><th>Relative Path</th><th>Type</th><th>Version</th><th>Size</th><th>SHA-256</th></tr></thead><tbody>');
   for LArtefact in AData.Artefacts do
   begin
     if LArtefact.ArtefactType = 'unit-evidence' then
@@ -65,15 +67,17 @@ begin
       LPathCell := LPathCell + '<br><small>System directory: ' +
         EscapeHtml(LArtefact.Location) + '</small>';
     if LArtefact.FileSize >= 0 then
-      Lines.Add(Format('<tr><td>%s</td><td>%s</td><td>%d</td><td><code>%s</code></td></tr>', [
+      Lines.Add(Format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%d</td><td><code>%s</code></td></tr>', [
         LPathCell,
         EscapeHtml(SafeText(LArtefact.ArtefactType)),
+        EscapeHtml(SafeText(LArtefact.Version)),
         LArtefact.FileSize,
         EscapeHtml(SafeText(LArtefact.Hash))]))
     else
-      Lines.Add(Format('<tr><td>%s</td><td>%s</td><td>n/a</td><td><code>%s</code></td></tr>', [
+      Lines.Add(Format('<tr><td>%s</td><td>%s</td><td>%s</td><td>n/a</td><td><code>%s</code></td></tr>', [
         LPathCell,
         EscapeHtml(SafeText(LArtefact.ArtefactType)),
+        EscapeHtml(SafeText(LArtefact.Version)),
         EscapeHtml(SafeText(LArtefact.Hash))]));
   end;
   Lines.Add('</tbody></table></div></section>');

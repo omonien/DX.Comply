@@ -430,11 +430,13 @@ type
 /// Build mode versions for files that have no version yet.
 /// The project's own outputs (.exe, .dcp, and the file at AOwnOutputPath,
 /// which is the .bpl of a package project) get AVersion, the product
-/// version. Any other DLL or .bpl that was found on disk, next to the
-/// program or resolved by the DLL reference scan, gets its own version from
-/// its version resource, and no version when it has none. Other files (.res, .map, ...) get no version. Unit evidence,
-/// runtime packages, requires packages and library source files are left
-/// unchanged.
+/// version. When AVersion is empty, an .exe/.dll/.bpl still on disk gets
+/// its PE FileVersion (or ProductVersion) from the version resource so the
+/// human-readable report and CycloneDX stay aligned (issue #90). Any other
+/// DLL or .bpl that was found on disk gets its own version from its version
+/// resource, and no version when it has none. Other files (.res, .map, ...)
+/// get no version. Unit evidence, runtime packages, requires packages and
+/// library source files are left unchanged.
 /// </summary>
 procedure ApplyProductVersionToBuildFiles(const AArtefacts: TArtefactList;
   const AVersion: string; const AOwnOutputPath: string = '');
@@ -583,7 +585,14 @@ begin
 
     if LOwnOutput or (LType <> 'external-reference') and
        ((LExt = '.exe') or (LExt = '.dcp')) then
-      LArtefact.Version := Trim(AVersion)
+    begin
+      LArtefact.Version := Trim(AVersion);
+      // Issue #90: when no product version was configured, still surface the
+      // PE version resource for binaries so the report and SBOM agree.
+      if (LArtefact.Version = '') and (LArtefact.FilePath <> '') and
+         ((LExt = '.exe') or (LExt = '.dll') or (LExt = '.bpl')) then
+        LArtefact.Version := GetFileVersionText(LArtefact.FilePath);
+    end
     else if (LExt = '.dll') or (LExt = '.bpl') then
       // A third-party DLL or package carries its own version, or none.
       // The project's own .dll or .bpl was handled above via AOwnOutputPath.

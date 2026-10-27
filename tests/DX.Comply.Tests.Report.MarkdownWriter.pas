@@ -51,6 +51,13 @@ type
 
     [Test]
     procedure Write_CreatesReadableMarkdownReport;
+
+    /// <summary>
+    /// EXE/DLL artefact versions (PE FileVersion or product version stored on
+    /// the artefact) appear in the Artefacts table. Issue #90.
+    /// </summary>
+    [Test]
+    procedure Write_ArtefactVersion_AppearsInArtefactsTable;
   end;
 
 implementation
@@ -63,11 +70,13 @@ uses
 
 function CreateArtefact: TArtefactInfo;
 begin
+  Result := Default(TArtefactInfo);
   Result.FilePath := 'Y:\Build\Demo.exe';
   Result.RelativePath := 'build\Win64\Release\Demo.exe';
   Result.FileSize := 1024;
   Result.Hash := 'ABCDEF0123456789';
-  Result.ArtefactType := 'exe';
+  Result.ArtefactType := 'application';
+  Result.Version := '1.2.3.4';
 end;
 
 function CreateEvidenceItem: TBuildEvidenceItem;
@@ -191,12 +200,39 @@ begin
   Assert.IsTrue(Pos('Delphi Runtime Units', LContent) > 0);
   Assert.IsTrue(Pos('Release DCUs', LContent) > 0);
   Assert.IsTrue(Pos('## Artefacts', LContent) > 0);
+  Assert.IsTrue(Pos('| Relative Path | Type | Version | Size | SHA-256 |', LContent) > 0);
+  Assert.IsTrue(Pos('1.2.3.4', LContent) > 0, 'artefact PE/product version must appear');
   Assert.IsTrue(Pos('## Unit Evidence', LContent) > 0);
   Assert.IsTrue(Pos('Demo.Main', LContent) > 0);
   Assert.IsTrue(Pos('37.0.57242.3601', LContent) > 0);
   Assert.AreEqual(0, Pos('Build Traceability', LContent));
   Assert.AreEqual(0, Pos('Build Trace Records', LContent));
   Assert.IsTrue(Pos('The MAP file was reused from a previous build.', LContent) > 0);
+end;
+
+procedure TMarkdownReportWriterTests.Write_ArtefactVersion_AppearsInArtefactsTable;
+var
+  LArtefact: TArtefactInfo;
+  LConfig: THumanReadableReportConfig;
+  LContent: string;
+  LWriter: IHumanReadableReportWriter;
+begin
+  LArtefact := Default(TArtefactInfo);
+  LArtefact.RelativePath := 'vendor.dll';
+  LArtefact.ArtefactType := 'library';
+  LArtefact.FileSize := 4096;
+  LArtefact.Hash := StringOfChar('b', 64);
+  LArtefact.Version := '10.0.19041.1';
+  FArtefacts.Add(LArtefact);
+
+  LConfig := THumanReadableReportConfig.Default;
+  LWriter := TMarkdownReportWriter.Create;
+  Assert.IsTrue(LWriter.Write(FOutputPath, FData, LConfig));
+  LContent := TFile.ReadAllText(FOutputPath, TEncoding.UTF8);
+  Assert.IsTrue(Pos('| vendor.dll | library | 10.0.19041.1 | 4096 |', LContent) > 0,
+    'DLL version from the PE/version resource must appear on the report line');
+  Assert.IsTrue(Pos('| build\Win64\Release\Demo.exe | application | 1.2.3.4 | 1024 |', LContent) > 0,
+    'application version already stored on the artefact must appear unchanged');
 end;
 
 initialization
