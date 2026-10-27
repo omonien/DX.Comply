@@ -37,7 +37,8 @@ uses
   Vcl.Graphics,
   Vcl.ExtCtrls,
   DX.Comply.Engine,
-  DX.Comply.Engine.Intf;
+  DX.Comply.Engine.Intf,
+  DX.Comply.IDE.UiText;
 
 type
   /// <summary>
@@ -265,7 +266,11 @@ begin
   Caption := 'DX.Comply - SBOM';
   ClientWidth := S(780);
   ClientHeight := S(560);
-  BorderStyle := bsDialog;
+  // Issue #87: allow resizing so long log lines stay readable.
+  BorderStyle := bsSizeable;
+  BorderIcons := [biSystemMenu, biMaximize];
+  Constraints.MinWidth := S(480);
+  Constraints.MinHeight := S(360);
   Position := poScreenCenter;
   Color := clWhite;
   Font.Name := 'Segoe UI';
@@ -453,7 +458,8 @@ begin
   FMemoLog.Parent := LLogWrapper;
   FMemoLog.Align := alClient;
   FMemoLog.ReadOnly := True;
-  FMemoLog.ScrollBars := ssVertical;
+  // Issue #87: horizontal scrollbar for long diagnostic lines.
+  FMemoLog.ScrollBars := ssBoth;
   FMemoLog.WordWrap := False;
   FMemoLog.Font.Name := 'Consolas';
   FMemoLog.Font.Size := 10;
@@ -537,7 +543,8 @@ begin
     // Issue #29: the diagnostic output lives in the log memo on this same
     // progress dialog (FMemoLog above), not in the IDE Messages window.
     // DX.Comply routes its progress messages here.
-    FLabelStep.Caption := 'Generation failed - check the log output in this dialog above.';
+    // Issue #86: the log memo is below this step label, not above it.
+    FLabelStep.Caption := scProgressDialogGenerationFailedCheckLog;
     FLabelStep.Font.Color := cColorError;
     FLabelStatus.Caption := 'Failed';
     FLabelStatus.Font.Color := cColorError;
