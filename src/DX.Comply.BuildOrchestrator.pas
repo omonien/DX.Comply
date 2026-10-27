@@ -80,6 +80,8 @@ type
     Output: string;
     CommandLine: string;
     MapFilePath: string;
+    /// <summary>Working directory used for the build process, when known.</summary>
+    WorkingDirectory: string;
   end;
 
   /// <summary>
@@ -158,6 +160,16 @@ type
     /// Timeout used for one plan. Zero selects the default.
     /// </summary>
     function ResolveBuildTimeoutMs(const APlan: TDeepEvidenceBuildPlan): UInt64;
+    /// <summary>
+    /// Copies plan identity fields onto a result and appends path context to Message.
+    /// </summary>
+    procedure ApplyPlanIdentity(var AResult: TDeepEvidenceBuildResult;
+      const APlan: TDeepEvidenceBuildPlan);
+    /// <summary>
+    /// Appends project/map/working-dir/command context and a Unicode hint when needed.
+    /// </summary>
+    function EnrichFailureMessage(const AMessage: string;
+      const APlan: TDeepEvidenceBuildPlan): string;
   public
     function CreatePlan(const AProjectInfo: TProjectInfo;
       const AOptions: TDeepEvidenceBuildOptions): TDeepEvidenceBuildPlan;
@@ -165,6 +177,31 @@ type
     function EnsureDeepEvidenceBuild(const AProjectInfo: TProjectInfo;
       const AOptions: TDeepEvidenceBuildOptions): TDeepEvidenceBuildResult;
   end;
+
+/// <summary>
+/// Builds a short path/command context string for Deep-Evidence failures.
+/// Does not include MAP file contents.
+/// </summary>
+function FormatDeepEvidencePathContext(const AProjectPath, AMapFilePath,
+  AWorkingDirectory, ACommandLine: string): string;
+
+/// <summary>
+/// Builds a Deep-Evidence failure message with exception class, message, and path context.
+/// </summary>
+function FormatDeepEvidenceFailureMessage(const AExceptionClass, AExceptionMessage,
+  AProjectPath, AMapFilePath, AWorkingDirectory, ACommandLine: string): string;
+
+/// <summary>
+/// Appends an English hint when the message looks like a Windows Unicode/code-page error.
+/// </summary>
+function AppendUnicodeCodePageHint(const AMessage: string): string;
+
+/// <summary>
+/// Writes dxcomply-deep-evidence.log next to the project on failure.
+/// Returns the log path, or empty when nothing was written. Never writes MAP contents.
+/// </summary>
+function WriteDeepEvidenceDiagnosticLog(const AProjectDirectory: string;
+  const AResult: TDeepEvidenceBuildResult; const AProjectPath: string = ''): string;
 
 implementation
 
@@ -202,6 +239,103 @@ begin
   else
     // English strings not available (e.g. stripped OS) — fall back to locale
     Result := SysErrorMessage(AErrorCode);
+end;
+
+function FormatDeepEvidencePathContext(const AProjectPath, AMapFilePath,
+  AWorkingDirectory, ACommandLine: string): string;
+begin
+  Result := '';
+  if AProjectPath <> '' then
+    Result := Result + ' Project: ' + AProjectPath + '.';
+  if AMapFilePath <> '' then
+    Result := Result + ' Expected MAP: ' + AMapFilePath + '.';
+  if AWorkingDirectory <> '' then
+    Result := Result + ' Working directory: ' + AWorkingDirectory + '.';
+  if ACommandLine <> '' then
+    Result := Result + ' Command: ' + ACommandLine + '.';
+end;
+
+function AppendUnicodeCodePageHint(const AMessage: string): string;
+var
+  LLower: string;
+begin
+  Result := AMessage;
+  LLower := LowerCase(AMessage);
+  if (Pos('unicode-zeichen', LLower) > 0) or
+    (Pos('multibyte-zielcodeseite', LLower) > 0) or
+    (Pos('no mapping for the unicode', LLower) > 0) or
+    ((Pos('unicode character', LLower) > 0) and (Pos('code page', LLower) > 0)) then
+  begin
+    if Pos('non-ascii characters in a path', LLower) = 0 then
+      Result := Result +
+        ' Hint: this often means non-ASCII characters in a path (project, output, MAP, or Delphi install).';
+  end;
+end;
+
+function FormatDeepEvidenceFailureMessage(const AExceptionClass, AExceptionMessage,
+  AProjectPath, AMapFilePath, AWorkingDirectory, ACommandLine: string): string;
+begin
+  Result := 'Deep-Evidence build failed: ' + AExceptionClass + ': ' + AExceptionMessage + '.';
+  Result := Result + FormatDeepEvidencePathContext(AProjectPath, AMapFilePath,
+    AWorkingDirectory, ACommandLine);
+  Result := AppendUnicodeCodePageHint(Result);
+end;
+
+function WriteDeepEvidenceDiagnosticLog(const AProjectDirectory: string;
+  const AResult: TDeepEvidenceBuildResult; const AProjectPath: string): string;
+const
+  cLogFileName = 'dxcomply-deep-evidence.log';
+  cMaxOutputChars = 4000;
+var
+  LDir: string;
+  LPath: string;
+  LLines: TArray<string>;
+  LOutput: string;
+  LStamp: string;
+begin
+  Result := '';
+  if AResult.Success then
+    Exit;
+
+  LDir := Trim(AProjectDirectory);
+  if LDir = '' then
+  begin
+    if AProjectPath <> '' then
+      LDir := TPath.GetDirectoryName(AProjectPath);
+  end;
+  if LDir = '' then
+    Exit;
+
+  try
+    if not TDirectory.Exists(LDir) then
+      Exit;
+
+    LPath := TPath.Combine(LDir, cLogFileName);
+    LStamp := FormatDateTime('yyyy-mm-dd"T"hh:nn:ss', Now);
+    LOutput := AResult.Output;
+    if Length(LOutput) > cMaxOutputChars then
+      LOutput := Copy(LOutput, 1, cMaxOutputChars) + sLineBreak + '...(truncated)...';
+
+    LLines := [
+      'DX.Comply Deep-Evidence diagnostic',
+      'Timestamp: ' + LStamp,
+      'Project: ' + AProjectPath,
+      'Expected MAP: ' + AResult.MapFilePath,
+      'Working directory: ' + AResult.WorkingDirectory,
+      'Command: ' + AResult.CommandLine,
+      'Success: False',
+      'Executed: ' + BoolToStr(AResult.Executed, True),
+      'ExitCode: ' + IntToStr(AResult.ExitCode),
+      'Message: ' + AResult.Message,
+      'Build output (truncated, MAP contents never included):',
+      LOutput
+    ];
+    TFile.WriteAllText(LPath, string.Join(sLineBreak, LLines), TEncoding.UTF8);
+    Result := LPath;
+  except
+    // Diagnostic logging must never mask the original failure.
+    Result := '';
+  end;
 end;
 
 { TDeepEvidenceBuildOptions }
@@ -277,13 +411,60 @@ begin
   Result.CommandLine := BuildCommandLine(Result);
 end;
 
+procedure TBuildOrchestrator.ApplyPlanIdentity(var AResult: TDeepEvidenceBuildResult;
+  const APlan: TDeepEvidenceBuildPlan);
+begin
+  AResult.CommandLine := APlan.CommandLine;
+  AResult.MapFilePath := APlan.ExpectedMapFilePath;
+  AResult.WorkingDirectory := APlan.WorkingDirectory;
+end;
+
+function TBuildOrchestrator.EnrichFailureMessage(const AMessage: string;
+  const APlan: TDeepEvidenceBuildPlan): string;
+begin
+  Result := AMessage + FormatDeepEvidencePathContext(APlan.ProjectPath,
+    APlan.ExpectedMapFilePath, APlan.WorkingDirectory, APlan.CommandLine);
+  Result := AppendUnicodeCodePageHint(Result);
+end;
+
 function TBuildOrchestrator.EnsureDeepEvidenceBuild(const AProjectInfo: TProjectInfo;
   const AOptions: TDeepEvidenceBuildOptions): TDeepEvidenceBuildResult;
 var
   LPlan: TDeepEvidenceBuildPlan;
 begin
-  LPlan := CreatePlan(AProjectInfo, AOptions);
-  Result := ExecutePlan(LPlan);
+  LPlan := Default(TDeepEvidenceBuildPlan);
+  Result := Default(TDeepEvidenceBuildResult);
+  Result.MapFilePath := AProjectInfo.MapFilePath;
+  if AProjectInfo.ProjectDir <> '' then
+    Result.WorkingDirectory := AProjectInfo.ProjectDir
+  else if AProjectInfo.ProjectPath <> '' then
+    Result.WorkingDirectory := TPath.GetDirectoryName(AProjectInfo.ProjectPath);
+
+  try
+    LPlan := CreatePlan(AProjectInfo, AOptions);
+  except
+    on E: Exception do
+    begin
+      Result.Success := False;
+      Result.Message := FormatDeepEvidenceFailureMessage(E.ClassName, E.Message,
+        AProjectInfo.ProjectPath, Result.MapFilePath, Result.WorkingDirectory, '');
+      Exit;
+    end;
+  end;
+
+  ApplyPlanIdentity(Result, LPlan);
+
+  try
+    Result := ExecutePlan(LPlan);
+  except
+    on E: Exception do
+    begin
+      Result.Success := False;
+      ApplyPlanIdentity(Result, LPlan);
+      Result.Message := FormatDeepEvidenceFailureMessage(E.ClassName, E.Message,
+        LPlan.ProjectPath, LPlan.ExpectedMapFilePath, LPlan.WorkingDirectory, LPlan.CommandLine);
+    end;
+  end;
 end;
 
 function TBuildOrchestrator.FindBuildScriptFromDirectory(const AStartDirectory: string): string;
@@ -361,8 +542,7 @@ var
 begin
   Result := Default(TDeepEvidenceBuildResult);
   Result.Success := True;
-  Result.CommandLine := APlan.CommandLine;
-  Result.MapFilePath := APlan.ExpectedMapFilePath;
+  ApplyPlanIdentity(Result, APlan);
 
   if not APlan.ShouldExecute then
   begin
@@ -373,7 +553,7 @@ begin
   if (APlan.ScriptPath = '') or not TFile.Exists(APlan.ScriptPath) then
   begin
     Result.Success := False;
-    Result.Message := 'Build script not found: ' + APlan.ScriptPath;
+    Result.Message := EnrichFailureMessage('Build script not found: ' + APlan.ScriptPath, APlan);
     Exit;
   end;
 
@@ -388,97 +568,112 @@ begin
   if not CreatePipe(LPipeRead, LPipeWrite, @LSecurityAttributes, 0) then
   begin
     Result.Success := False;
-    Result.Message := 'Failed to create output pipe: ' + GetEnglishSystemError(GetLastError);
+    Result.Message := EnrichFailureMessage(
+      'Failed to create output pipe: ' + GetEnglishSystemError(GetLastError), APlan);
     Exit;
   end;
 
   try
-    SetHandleInformation(LPipeRead, HANDLE_FLAG_INHERIT, 0);
-
-    FillChar(LStartupInfo, SizeOf(LStartupInfo), 0);
-    LStartupInfo.cb := SizeOf(LStartupInfo);
-    LStartupInfo.dwFlags := STARTF_USESTDHANDLES or STARTF_USESHOWWINDOW;
-    LStartupInfo.wShowWindow := SW_HIDE;
-    LStartupInfo.hStdOutput := LPipeWrite;
-    LStartupInfo.hStdError := LPipeWrite;
-
-    LCommandLine := APlan.CommandLine;
-    UniqueString(LCommandLine);
-    if APlan.WorkingDirectory <> '' then
-      LWorkDir := PChar(APlan.WorkingDirectory)
-    else
-      LWorkDir := nil;
-
-    if not CreateProcess(nil, PChar(LCommandLine), nil, nil, True, CREATE_NO_WINDOW,
-      nil, LWorkDir, LStartupInfo, LProcessInfo) then
-    begin
-      Result.Success := False;
-      Result.Message := 'Failed to start build process: ' + GetEnglishSystemError(GetLastError);
-      Exit;
-    end;
-    LProcessStarted := True;
-
-    CloseHandle(LPipeWrite);
-    LPipeWrite := 0;
-
-    Result.Executed := True;
-    Result.Message := ScriptExecutionNote(APlan);
-    LTimedOut := False;
-    LTimeoutMs := ResolveBuildTimeoutMs(APlan);
-    LStartTick := GetTickCount64;
-    LOutputBuilder := TStringBuilder.Create;
     try
-      SetLength(LBuffer, 4096);
-      while True do
-      begin
-        if (GetTickCount64 - LStartTick) >= LTimeoutMs then
-        begin
-          LTimedOut := True;
-          TerminateProcess(LProcessInfo.hProcess, 1);
-          WaitForSingleObject(LProcessInfo.hProcess, 5000);
-          Break;
-        end;
+      SetHandleInformation(LPipeRead, HANDLE_FLAG_INHERIT, 0);
 
-        if not DrainAvailableOutput then
-          Break;
+      FillChar(LStartupInfo, SizeOf(LStartupInfo), 0);
+      LStartupInfo.cb := SizeOf(LStartupInfo);
+      LStartupInfo.dwFlags := STARTF_USESTDHANDLES or STARTF_USESHOWWINDOW;
+      LStartupInfo.wShowWindow := SW_HIDE;
+      LStartupInfo.hStdOutput := LPipeWrite;
+      LStartupInfo.hStdError := LPipeWrite;
 
-        if WaitForSingleObject(LProcessInfo.hProcess, 200) = WAIT_OBJECT_0 then
-        begin
-          DrainAvailableOutput;
-          Break;
-        end;
-      end;
-      Result.Output := Trim(LOutputBuilder.ToString);
-    finally
-      LOutputBuilder.Free;
-    end;
+      LCommandLine := APlan.CommandLine;
+      UniqueString(LCommandLine);
+      if APlan.WorkingDirectory <> '' then
+        LWorkDir := PChar(APlan.WorkingDirectory)
+      else
+        LWorkDir := nil;
 
-    if not GetExitCodeProcess(LProcessInfo.hProcess, LExitCode) then
-      LExitCode := Cardinal(-1);
-    Result.ExitCode := Integer(LExitCode);
-
-    if LTimedOut then
-    begin
-      Result.Success := False;
-      Result.Message := 'Deep-Evidence build timed out after ' +
-        IntToStr(LTimeoutMs div 1000) + ' seconds. ' + ScriptExecutionNote(APlan);
-    end
-    else
-    begin
-      Result.Success := Result.ExitCode = 0;
-
-      if Result.Success and (APlan.ExpectedMapFilePath <> '') and
-         not TFile.Exists(APlan.ExpectedMapFilePath) then
+      if not CreateProcess(nil, PChar(LCommandLine), nil, nil, True, CREATE_NO_WINDOW,
+        nil, LWorkDir, LStartupInfo, LProcessInfo) then
       begin
         Result.Success := False;
-        Result.Message := 'Build succeeded but the expected map file was not generated: ' +
-          APlan.ExpectedMapFilePath + ' ' + ScriptExecutionNote(APlan);
+        Result.Message := EnrichFailureMessage(
+          'Failed to start build process: ' + GetEnglishSystemError(GetLastError), APlan);
+        Exit;
+      end;
+      LProcessStarted := True;
+
+      CloseHandle(LPipeWrite);
+      LPipeWrite := 0;
+
+      Result.Executed := True;
+      Result.Message := ScriptExecutionNote(APlan);
+      LTimedOut := False;
+      LTimeoutMs := ResolveBuildTimeoutMs(APlan);
+      LStartTick := GetTickCount64;
+      LOutputBuilder := TStringBuilder.Create;
+      try
+        SetLength(LBuffer, 4096);
+        while True do
+        begin
+          if (GetTickCount64 - LStartTick) >= LTimeoutMs then
+          begin
+            LTimedOut := True;
+            TerminateProcess(LProcessInfo.hProcess, 1);
+            WaitForSingleObject(LProcessInfo.hProcess, 5000);
+            Break;
+          end;
+
+          if not DrainAvailableOutput then
+            Break;
+
+          if WaitForSingleObject(LProcessInfo.hProcess, 200) = WAIT_OBJECT_0 then
+          begin
+            DrainAvailableOutput;
+            Break;
+          end;
+        end;
+        Result.Output := Trim(LOutputBuilder.ToString);
+      finally
+        LOutputBuilder.Free;
+      end;
+
+      if not GetExitCodeProcess(LProcessInfo.hProcess, LExitCode) then
+        LExitCode := Cardinal(-1);
+      Result.ExitCode := Integer(LExitCode);
+
+      if LTimedOut then
+      begin
+        Result.Success := False;
+        Result.Message := EnrichFailureMessage(
+          'Deep-Evidence build timed out after ' + IntToStr(LTimeoutMs div 1000) +
+          ' seconds. ' + ScriptExecutionNote(APlan), APlan);
       end
-      else if Result.Success then
-        Result.Message := 'Deep-Evidence build completed successfully. ' + ScriptExecutionNote(APlan)
       else
-        Result.Message := 'Deep-Evidence build failed with exit code ' +
-          IntToStr(Result.ExitCode) + '. ' + ScriptExecutionNote(APlan);
+      begin
+        Result.Success := Result.ExitCode = 0;
+
+        if Result.Success and (APlan.ExpectedMapFilePath <> '') and
+           not TFile.Exists(APlan.ExpectedMapFilePath) then
+        begin
+          Result.Success := False;
+          Result.Message := EnrichFailureMessage(
+            'Build succeeded but the expected map file was not generated: ' +
+            APlan.ExpectedMapFilePath + ' ' + ScriptExecutionNote(APlan), APlan);
+        end
+        else if Result.Success then
+          Result.Message := 'Deep-Evidence build completed successfully. ' + ScriptExecutionNote(APlan)
+        else
+          Result.Message := EnrichFailureMessage(
+            'Deep-Evidence build failed with exit code ' + IntToStr(Result.ExitCode) + '. ' +
+            ScriptExecutionNote(APlan), APlan);
+      end;
+    except
+      on E: Exception do
+      begin
+        Result.Success := False;
+        ApplyPlanIdentity(Result, APlan);
+        Result.Message := FormatDeepEvidenceFailureMessage(E.ClassName, E.Message,
+          APlan.ProjectPath, APlan.ExpectedMapFilePath, APlan.WorkingDirectory, APlan.CommandLine);
+      end;
     end;
   finally
     if LProcessStarted then

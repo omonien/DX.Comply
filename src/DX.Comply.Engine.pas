@@ -666,15 +666,46 @@ end;
 
 function TDxComplyGenerator.EnsureDeepEvidenceBuild(
   const AProjectInfo: TProjectInfo): TDeepEvidenceBuildResult;
+var
+  LPlan: TDeepEvidenceBuildPlan;
 begin
-  if Assigned(FBuildOrchestrator) then
-    Result := FBuildOrchestrator.EnsureDeepEvidenceBuild(AProjectInfo,
-      BuildDeepEvidenceOptions)
-  else
+  LPlan := Default(TDeepEvidenceBuildPlan);
+  Result := Default(TDeepEvidenceBuildResult);
+  Result.MapFilePath := AProjectInfo.MapFilePath;
+  if AProjectInfo.ProjectDir <> '' then
+    Result.WorkingDirectory := AProjectInfo.ProjectDir
+  else if AProjectInfo.ProjectPath <> '' then
+    Result.WorkingDirectory := TPath.GetDirectoryName(AProjectInfo.ProjectPath);
+
+  if not Assigned(FBuildOrchestrator) then
   begin
-    Result := Default(TDeepEvidenceBuildResult);
     Result.Success := True;
     Result.Message := 'No build orchestrator assigned.';
+    Exit;
+  end;
+
+  // Create the plan before Execute so exception handlers can name project, MAP,
+  // working directory and command without reading MAP contents (issue #89).
+  try
+    LPlan := FBuildOrchestrator.CreatePlan(AProjectInfo, BuildDeepEvidenceOptions);
+    Result.CommandLine := LPlan.CommandLine;
+    Result.MapFilePath := LPlan.ExpectedMapFilePath;
+    Result.WorkingDirectory := LPlan.WorkingDirectory;
+    Result := FBuildOrchestrator.ExecutePlan(LPlan);
+  except
+    on E: Exception do
+    begin
+      Result.Success := False;
+      if LPlan.CommandLine <> '' then
+        Result.CommandLine := LPlan.CommandLine;
+      if LPlan.ExpectedMapFilePath <> '' then
+        Result.MapFilePath := LPlan.ExpectedMapFilePath;
+      if LPlan.WorkingDirectory <> '' then
+        Result.WorkingDirectory := LPlan.WorkingDirectory;
+      Result.Message := FormatDeepEvidenceFailureMessage(E.ClassName, E.Message,
+        AProjectInfo.ProjectPath, Result.MapFilePath, Result.WorkingDirectory,
+        Result.CommandLine);
+    end;
   end;
 end;
 
@@ -2431,11 +2462,17 @@ begin
       begin
         LDeepEvidenceBuildResult := Default(TDeepEvidenceBuildResult);
         LDeepEvidenceBuildResult.Success := False;
-        LDeepEvidenceBuildResult.Message := 'Deep-Evidence build failed: ' + E.Message;
+        LDeepEvidenceBuildResult.MapFilePath := LProjectInfo.MapFilePath;
+        LDeepEvidenceBuildResult.WorkingDirectory := LProjectInfo.ProjectDir;
+        LDeepEvidenceBuildResult.Message := FormatDeepEvidenceFailureMessage(
+          E.ClassName, E.Message, LProjectInfo.ProjectPath, LProjectInfo.MapFilePath,
+          LProjectInfo.ProjectDir, '');
       end;
     end;
     if not LDeepEvidenceBuildResult.Success then
     begin
+      var LDiagLog := WriteDeepEvidenceDiagnosticLog(LProjectInfo.ProjectDir,
+        LDeepEvidenceBuildResult, LProjectInfo.ProjectPath);
       // When ContinueOnDeepEvidenceBuildFailure is set (the default), the
       // Deep-Evidence build is best-effort: the SBOM is still produced from
       // whatever MAP file is already present. Reporting the failure as
@@ -2449,9 +2486,17 @@ begin
         if LDeepEvidenceBuildResult.CommandLine <> '' then
           DoProgress('Hint: Deep-Evidence command was: ' +
             LDeepEvidenceBuildResult.CommandLine, 18);
+        if LDeepEvidenceBuildResult.WorkingDirectory <> '' then
+          DoProgress('Hint: Deep-Evidence working directory: ' +
+            LDeepEvidenceBuildResult.WorkingDirectory, 18);
+        if LDeepEvidenceBuildResult.MapFilePath <> '' then
+          DoProgress('Hint: Expected MAP file: ' +
+            LDeepEvidenceBuildResult.MapFilePath, 18);
         if LDeepEvidenceBuildResult.Output <> '' then
           DoProgress('Hint: Deep-Evidence build output: ' +
             LDeepEvidenceBuildResult.Output, 18);
+        if LDiagLog <> '' then
+          DoProgress('Hint: Deep-Evidence diagnostics written to: ' + LDiagLog, 18);
         DoProgress('Continuing SBOM generation with the existing MAP file (if any). ' +
           'See the log output above for details.', 18);
       end
@@ -2460,8 +2505,14 @@ begin
         DoProgress('Error: ' + LDeepEvidenceBuildResult.Message, -1);
         if LDeepEvidenceBuildResult.CommandLine <> '' then
           DoProgress('Command: ' + LDeepEvidenceBuildResult.CommandLine, -1);
+        if LDeepEvidenceBuildResult.WorkingDirectory <> '' then
+          DoProgress('Working directory: ' + LDeepEvidenceBuildResult.WorkingDirectory, -1);
+        if LDeepEvidenceBuildResult.MapFilePath <> '' then
+          DoProgress('Expected MAP: ' + LDeepEvidenceBuildResult.MapFilePath, -1);
         if LDeepEvidenceBuildResult.Output <> '' then
           DoProgress('Build output: ' + LDeepEvidenceBuildResult.Output, -1);
+        if LDiagLog <> '' then
+          DoProgress('Diagnostics: ' + LDiagLog, -1);
         Exit;
       end;
     end
