@@ -53,22 +53,26 @@ var
   LArtefact: TArtefactInfo;
 begin
   Lines.Add('## Artefacts');
-  Lines.Add('| Relative Path | Type | Size | SHA-256 |');
-  Lines.Add('| --- | --- | ---: | --- |');
+  // Issue #90: Version is the PE FileVersion/ProductVersion (or product
+  // version) already stored on the artefact for CycloneDX consistency.
+  Lines.Add('| Relative Path | Type | Version | Size | SHA-256 |');
+  Lines.Add('| --- | --- | --- | ---: | --- |');
   for LArtefact in AData.Artefacts do
   begin
     if LArtefact.ArtefactType = 'unit-evidence' then
       Continue;
     if LArtefact.FileSize >= 0 then
-      Lines.Add(Format('| %s | %s | %d | %s |', [
+      Lines.Add(Format('| %s | %s | %s | %d | %s |', [
         EscapeMarkdown(SafeText(SafeText(LArtefact.RelativePath, LArtefact.ComponentName), LArtefact.FilePath)),
         EscapeMarkdown(SafeText(LArtefact.ArtefactType)),
+        EscapeMarkdown(SafeText(LArtefact.Version)),
         LArtefact.FileSize,
         EscapeMarkdown(SafeText(LArtefact.Hash))]))
     else
-      Lines.Add(Format('| %s | %s | n/a | %s |', [
+      Lines.Add(Format('| %s | %s | %s | n/a | %s |', [
         EscapeMarkdown(SafeText(SafeText(LArtefact.RelativePath, LArtefact.ComponentName), LArtefact.FilePath)),
         EscapeMarkdown(SafeText(LArtefact.ArtefactType)),
+        EscapeMarkdown(SafeText(LArtefact.Version)),
         EscapeMarkdown(SafeText(LArtefact.Hash))]));
   end;
   Lines.Add('');
