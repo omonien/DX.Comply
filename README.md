@@ -401,6 +401,30 @@ The CRA requires (Annex I, Part II):
 
 ---
 
+## FAQ
+
+### Why does Generate SBOM in the IDE compile my project every time?
+
+The IDE always runs a Deep-Evidence build so the MAP file matches the sources you have open now. A stale MAP would describe an older link set. The CLI does not compile. You build with a detailed MAP yourself, then run `dxcomply`.
+
+### When should I use `--library` instead of a normal product SBOM?
+
+Use `--library` when you ship source (a component set, GetIt package, or GitHub release), not a binary of yours. It needs no compile and no MAP. It hashes the source units you point at. That is a source inventory for the release. It is not proof that a shipped DLL or BPL matches those bytes. Product apps that link the library still generate their own build-mode SBOM. See [Library mode](#library-mode) and [Library SBOM](docs/Library-SBOM.md).
+
+### We only have old precompiled DLLs (for example Delphi 2007). Source exists, but there is no MAP and no working build. What goes into the SBOM?
+
+For each app that loads those DLLs, the product SBOM still lists the DLL binaries it finds (path, size, hash, PE version when present). That is the shipped artefact. To describe composition inside a DLL, either rebuild it once with a detailed MAP and run build mode, or run `--library` on the DLL's sources. Third-party code inside those sources still needs a separate declaration (vendor SBOM, or your [component manifest](#component-manifest)).
+
+### Is a GetIt "has SBOM" flag enough for the CRA?
+
+No. The manufacturer archives a machine-readable SBOM per product version with the release. A marketplace flag alone is not the technical documentation. Prefer attaching the SBOM to the release (and keeping a hash registry if you publish many artefacts). See [What to do with your SBOM](#what-to-do-with-your-sbom).
+
+### Library SBOM vs product SBOM: which one do I keep?
+
+Keep both when both apply. The library author archives the `--library` SBOM for each source release. Each product manufacturer archives the build-mode SBOM for each shipped app version. Downstream SBOMs do not replace the manufacturer's archive duty.
+
+---
+
 ## Requirements
 
 | Mode | Requirement |
@@ -421,6 +445,7 @@ No internet connection is required. All processing is local.
 | [CI Integration](docs/CI-Integration.md) | Command-line usage, GitHub Actions examples, CI configuration |
 | [Legacy Support](docs/LegacySupport.md) | MAP files from older Delphi versions, and which project files the CLI accepts |
 | [Library SBOM](docs/Library-SBOM.md) | Build mode and library mode, and what each SBOM contains |
+| [FAQ](#faq) | Common questions on library mode, old DLLs, and CRA archive |
 | [Example SBOM (JSON)](docs/examples/ConwaysLifeFMX.cdx.json) | CycloneDX 1.6 from ConwaysLifeFMX in RADStudio13Demos, Release/Win32 with a map file |
 | [Component manifest sample](docs/samples/components.sample.json) | Optional components.json (supplier, licence, version, type, package URL) |
 
