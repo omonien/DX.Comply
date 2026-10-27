@@ -68,6 +68,7 @@ contains
   DX.Comply.IDE.Resources in 'DX.Comply.IDE.Resources.pas',
   DX.Comply.IDE.ReadmeSupport in 'DX.Comply.IDE.ReadmeSupport.pas',
   DX.Comply.IDE.BuildConfirmationDialog in 'DX.Comply.IDE.BuildConfirmationDialog.pas',
+  DX.Comply.IDE.UiText in 'DX.Comply.IDE.UiText.pas',
   DX.Comply.IDE.ProgressDialog in 'DX.Comply.IDE.ProgressDialog.pas',
   DX.Comply.IDE.SbomHeaderDialog in 'DX.Comply.IDE.SbomHeaderDialog.pas',
   DX.Comply.IDE.Settings in 'DX.Comply.IDE.Settings.pas',
