@@ -59,6 +59,15 @@ type
     function ComponentVersion(const AJson: TJSONObject; const AName: string): string;
     function ComponentHasHash(const AJson: TJSONObject; const AName: string): Boolean;
     function GenerateScope(const AProjectPath: string; const AConfig: TSbomConfig): TJSONObject;
+    /// <summary>
+    /// Temp project whose output is Debug\Win32. When APlaceVersionedDll is
+    /// true, a DLL with a version resource is copied to ADllRelativeDir.
+    /// An unrelated noise.dll is always placed under Installer\Dateien.
+    /// </summary>
+    function CreateVendorDllProject(const AFolder, ADllRelativeDir,
+      AReferencedName: string; APlaceVersionedDll: Boolean;
+      out ADllPath: string): string;
+    function GenerateVendorProject(const AProject: string): TJSONObject;
   public
     [Setup]
     procedure Setup;
@@ -212,6 +221,48 @@ type
     /// <summary>A name without extension is also tried with .dll.</summary>
     [Test]
     procedure ResolveDll_NoExtension_TriesDll;
+    /// <summary>
+    /// A DLL that exists only under Installer\Dateien is found in the project tree.
+    /// </summary>
+    [Test]
+    procedure ResolveDll_OnlyInInstaller_ReturnsProjectTree;
+    /// <summary>
+    /// Installer\Dateien wins over Installer\DateienKunde and over another project folder.
+    /// </summary>
+    [Test]
+    procedure ResolveDll_InstallerBeatsOtherCopies;
+    /// <summary>The output directory still wins over a copy under Installer.</summary>
+    [Test]
+    procedure ResolveDll_OutputDirBeforeProjectTree;
+    /// <summary>A named DLL in a non-Installer project folder is still found.</summary>
+    [Test]
+    procedure ResolveDll_OtherProjectFolder_ReturnsProjectTree;
+    /// <summary>A .bpl under Installer is found the same way as a DLL.</summary>
+    [Test]
+    procedure ResolveDll_BplInInstaller_ReturnsProjectTree;
+    /// <summary>The project walk stops at a fixed depth and does not leave the project.</summary>
+    [Test]
+    procedure ResolveDll_DepthAndProjectRoot_AreBounded;
+    /// <summary>
+    /// A DLL found only in a system directory stays a system hit when a project
+    /// directory is also supplied.
+    /// </summary>
+    [Test]
+    procedure ResolveDll_SystemDirectoryUnchangedWithProjectDir;
+    /// <summary>
+    /// A referenced DLL that lives only under Installer\Dateien gets a PE
+    /// version and hashes. An unrelated DLL in that folder is not added.
+    /// </summary>
+    [Test]
+    procedure Generate_DllOnlyInInstaller_HasVersionAndHash;
+    /// <summary>A DLL that lives only in the output directory still gets a version and hashes.</summary>
+    [Test]
+    procedure Generate_DllOnlyInOutputDir_HasVersionAndHash;
+    /// <summary>
+    /// A DLL found only in a system directory still has a location and no hash.
+    /// </summary>
+    [Test]
+    procedure Generate_SystemDll_HasLocationButNoHash;
     /// <summary>Non-Windows targets have no system directory.</summary>
     [Test]
     procedure SystemDirectories_NonWindowsPlatform_IsEmpty;
@@ -1467,6 +1518,354 @@ begin
     [], LSource);
   Assert.AreEqual(Ord(dlsOutputDirectory), Ord(LSource));
   Assert.IsTrue(LResult.EndsWith('vendor.dll', True), LResult);
+end;
+
+function TEngineTests.CreateVendorDllProject(const AFolder, ADllRelativeDir,
+  AReferencedName: string; APlaceVersionedDll: Boolean;
+  out ADllPath: string): string;
+var
+  LRoot, LOut, LSource, LNoise: string;
+begin
+  ADllPath := '';
+  LRoot := TPath.Combine(FTempDir, AFolder);
+  TDirectory.CreateDirectory(LRoot);
+  LOut := TPath.Combine(TPath.Combine(LRoot, 'Debug'), 'Win32');
+  TDirectory.CreateDirectory(LOut);
+  TFile.WriteAllText(TPath.Combine(LRoot, 'VendorApp.dpr'),
+    'program VendorApp;' + sLineBreak +
+    'procedure UseDll; external ''' + AReferencedName + ''';' + sLineBreak +
+    'begin' + sLineBreak +
+    'end.' + sLineBreak, TEncoding.UTF8);
+  TFile.WriteAllText(TPath.Combine(LRoot, 'VendorApp.dproj'),
+    '<?xml version="1.0" encoding="utf-8"?>' + sLineBreak +
+    '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">' + sLineBreak +
+    '  <PropertyGroup>' + sLineBreak +
+    '    <MainSource>VendorApp.dpr</MainSource>' + sLineBreak +
+    '    <AppType>Application</AppType>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '  <PropertyGroup Condition="''$(Base)''!=''''">' + sLineBreak +
+    '    <DCC_ExeOutput>.\Debug\Win32</DCC_ExeOutput>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '</Project>' + sLineBreak, TEncoding.UTF8);
+  TFile.WriteAllBytes(TPath.Combine(LOut, 'VendorApp.exe'), TBytes.Create($4D, $5A, $01));
+  TFile.WriteAllText(TPath.Combine(LOut, 'VendorApp.map'), 'map', TEncoding.UTF8);
+
+  LNoise := TPath.Combine(TPath.Combine(TPath.Combine(LRoot, 'Installer'), 'Dateien'),
+    'noise.dll');
+  TDirectory.CreateDirectory(TPath.GetDirectoryName(LNoise));
+  TFile.WriteAllText(LNoise, 'MZ noise', TEncoding.UTF8);
+
+  if APlaceVersionedDll then
+  begin
+    LSource := TPath.Combine(GetEnvironmentVariable('SystemRoot'),
+      'System32\kernel32.dll');
+    Assert.IsTrue(TFile.Exists(LSource),
+      'kernel32.dll is required so the fixture has a version resource');
+    ADllPath := TPath.Combine(TPath.Combine(LRoot, ADllRelativeDir), AReferencedName);
+    TDirectory.CreateDirectory(TPath.GetDirectoryName(ADllPath));
+    TFile.Copy(LSource, ADllPath, True);
+  end;
+  Result := TPath.Combine(LRoot, 'VendorApp.dproj');
+end;
+
+function TEngineTests.GenerateVendorProject(const AProject: string): TJSONObject;
+var
+  LConfig: TSbomConfig;
+  LGen: TDxComplyGenerator;
+begin
+  LConfig := ScopeConfig;
+  FProgressMessages.Clear;
+  LGen := TDxComplyGenerator.Create(LConfig);
+  try
+    LGen.OnProgress := OnProgress;
+    Assert.IsTrue(LGen.Generate(AProject, FOutputFile, sfCycloneDxJson),
+      'Generate must succeed. Progress: ' + FProgressMessages.Text);
+    Result := TJSONObject.ParseJSONValue(
+      TFile.ReadAllText(FOutputFile, TEncoding.UTF8)) as TJSONObject;
+    Assert.IsNotNull(Result, 'SBOM must be JSON');
+  finally
+    LGen.Free;
+  end;
+end;
+
+function VendorProperty(const AComponent: TJSONObject; const AName: string): string;
+var
+  LProperties: TJSONArray;
+  LProperty: TJSONObject;
+  I: Integer;
+begin
+  Result := '';
+  if not Assigned(AComponent) then
+    Exit;
+  LProperties := AComponent.GetValue('properties') as TJSONArray;
+  if not Assigned(LProperties) then
+    Exit;
+  for I := 0 to LProperties.Count - 1 do
+  begin
+    if not (LProperties.Items[I] is TJSONObject) then
+      Continue;
+    LProperty := TJSONObject(LProperties.Items[I]);
+    if SameText(LProperty.GetValue<string>('name', ''), AName) then
+      Exit(LProperty.GetValue<string>('value', ''));
+  end;
+end;
+
+procedure AssertShippedDllEvidence(const AJson: TJSONObject; const AName, AVersion,
+  ASize: string);
+var
+  LComponents: TJSONArray;
+  LComponent: TJSONObject;
+  LHashes: TJSONArray;
+  LFound: Integer;
+  I: Integer;
+begin
+  Assert.IsNotNull(AJson, 'SBOM must be JSON');
+  LComponents := AJson.GetValue('components') as TJSONArray;
+  Assert.IsNotNull(LComponents, 'SBOM must contain components');
+  LFound := 0;
+  for I := 0 to LComponents.Count - 1 do
+  begin
+    if not (LComponents.Items[I] is TJSONObject) then
+      Continue;
+    LComponent := TJSONObject(LComponents.Items[I]);
+    if not SameText(LComponent.GetValue<string>('name', ''), AName) then
+      Continue;
+    Inc(LFound);
+    LHashes := LComponent.GetValue('hashes') as TJSONArray;
+    Assert.IsNotNull(LHashes, AName + ' must include hashes');
+    Assert.IsTrue(LHashes.Count >= 2, AName + ' must include SHA-256 and SHA-512');
+    Assert.AreEqual(AVersion, LComponent.GetValue<string>('version', ''),
+      AName + ' must carry its PE version');
+    Assert.AreEqual(ASize, VendorProperty(LComponent, 'file:size'),
+      AName + ' size must match the file that was found');
+  end;
+  Assert.IsTrue(LFound > 0, AName + ' must be listed');
+end;
+
+procedure TEngineTests.ResolveDll_OnlyInInstaller_ReturnsProjectTree;
+var
+  LRoot, LOut, LExpected, LResult: string;
+  LSource: TDllLocationSource;
+begin
+  LRoot := TPath.Combine(FTempDir, 'proj');
+  LOut := TPath.Combine(TPath.Combine(LRoot, 'Debug'), 'Win32');
+  TDirectory.CreateDirectory(LOut);
+  LExpected := MakeDummyDll(TPath.Combine(TPath.Combine(LRoot, 'Installer'), 'Dateien'),
+    'vendor.dll');
+  LResult := TDxComplyGenerator.ResolveExternalDllFile('vendor.dll', LOut, LRoot,
+    [], LSource);
+  Assert.AreEqual(Ord(dlsProjectTree), Ord(LSource));
+  Assert.IsTrue(SameText(TPath.GetFullPath(LExpected), LResult), LResult);
+end;
+
+procedure TEngineTests.ResolveDll_InstallerBeatsOtherCopies;
+var
+  LRoot, LOut, LExpected, LResult: string;
+  LSource: TDllLocationSource;
+begin
+  LRoot := TPath.Combine(FTempDir, 'proj');
+  LOut := TPath.Combine(TPath.Combine(LRoot, 'Debug'), 'Win32');
+  TDirectory.CreateDirectory(LOut);
+  MakeDummyDll(TPath.Combine(LRoot, 'redist'), 'vendor.dll');
+  MakeDummyDll(TPath.Combine(TPath.Combine(LRoot, 'Installer'), 'DateienKunde'),
+    'vendor.dll');
+  LExpected := MakeDummyDll(TPath.Combine(TPath.Combine(LRoot, 'Installer'), 'Dateien'),
+    'vendor.dll');
+  LResult := TDxComplyGenerator.ResolveExternalDllFile('vendor.dll', LOut, LRoot,
+    [], LSource);
+  Assert.AreEqual(Ord(dlsProjectTree), Ord(LSource));
+  Assert.IsTrue(SameText(TPath.GetFullPath(LExpected), LResult), LResult);
+end;
+
+procedure TEngineTests.ResolveDll_OutputDirBeforeProjectTree;
+var
+  LRoot, LOut, LExpected, LResult: string;
+  LSource: TDllLocationSource;
+begin
+  LRoot := TPath.Combine(FTempDir, 'proj');
+  LOut := TPath.Combine(TPath.Combine(LRoot, 'Debug'), 'Win32');
+  LExpected := MakeDummyDll(LOut, 'vendor.dll');
+  MakeDummyDll(TPath.Combine(TPath.Combine(LRoot, 'Installer'), 'Dateien'), 'vendor.dll');
+  LResult := TDxComplyGenerator.ResolveExternalDllFile('vendor.dll', LOut, LRoot,
+    [], LSource);
+  Assert.AreEqual(Ord(dlsOutputDirectory), Ord(LSource));
+  Assert.IsTrue(SameText(TPath.GetFullPath(LExpected), LResult), LResult);
+end;
+
+procedure TEngineTests.ResolveDll_OtherProjectFolder_ReturnsProjectTree;
+var
+  LRoot, LOut, LExpected, LResult: string;
+  LSource: TDllLocationSource;
+begin
+  LRoot := TPath.Combine(FTempDir, 'proj');
+  LOut := TPath.Combine(TPath.Combine(LRoot, 'Debug'), 'Win32');
+  TDirectory.CreateDirectory(LOut);
+  LExpected := MakeDummyDll(TPath.Combine(LRoot, 'redist'), 'vendor.dll');
+  LResult := TDxComplyGenerator.ResolveExternalDllFile('vendor.dll', LOut, LRoot,
+    [], LSource);
+  Assert.AreEqual(Ord(dlsProjectTree), Ord(LSource));
+  Assert.IsTrue(SameText(TPath.GetFullPath(LExpected), LResult), LResult);
+end;
+
+procedure TEngineTests.ResolveDll_BplInInstaller_ReturnsProjectTree;
+var
+  LRoot, LOut, LExpected, LResult: string;
+  LSource: TDllLocationSource;
+begin
+  LRoot := TPath.Combine(FTempDir, 'proj');
+  LOut := TPath.Combine(TPath.Combine(LRoot, 'Debug'), 'Win32');
+  TDirectory.CreateDirectory(LOut);
+  LExpected := MakeDummyDll(TPath.Combine(TPath.Combine(LRoot, 'Installer'), 'Dateien'),
+    'vendor.bpl');
+  LResult := TDxComplyGenerator.ResolveExternalDllFile('vendor.bpl', LOut, LRoot,
+    [], LSource);
+  Assert.AreEqual(Ord(dlsProjectTree), Ord(LSource));
+  Assert.IsTrue(SameText(TPath.GetFullPath(LExpected), LResult), LResult);
+end;
+
+procedure TEngineTests.ResolveDll_DepthAndProjectRoot_AreBounded;
+var
+  LRoot, LOut, LOutside, LDeep, LResult: string;
+  LSource: TDllLocationSource;
+  I: Integer;
+begin
+  LRoot := TPath.Combine(FTempDir, 'proj');
+  LOut := TPath.Combine(TPath.Combine(LRoot, 'Debug'), 'Win32');
+  TDirectory.CreateDirectory(LOut);
+  LOutside := TPath.Combine(FTempDir, 'outside');
+  MakeDummyDll(LOutside, 'vendor.dll');
+
+  LDeep := LRoot;
+  for I := 1 to 7 do
+    LDeep := TPath.Combine(LDeep, 'd' + IntToStr(I));
+  MakeDummyDll(LDeep, 'vendor.dll');
+  LResult := TDxComplyGenerator.ResolveExternalDllFile('vendor.dll', LOut, LRoot,
+    [], LSource);
+  Assert.AreEqual(Ord(dlsNotFound), Ord(LSource),
+    'a DLL seven folders down, or outside the project, must not be used');
+  Assert.AreEqual('', LResult);
+
+  MakeDummyDll(TPath.GetDirectoryName(LDeep), 'vendor.dll');
+  LResult := TDxComplyGenerator.ResolveExternalDllFile('vendor.dll', LOut, LRoot,
+    [], LSource);
+  Assert.AreEqual(Ord(dlsProjectTree), Ord(LSource));
+  Assert.IsTrue(LResult.EndsWith(PathDelim + 'd6' + PathDelim + 'vendor.dll', True),
+    LResult);
+end;
+
+procedure TEngineTests.ResolveDll_SystemDirectoryUnchangedWithProjectDir;
+var
+  LRoot, LOut, LSys, LExpected, LResult: string;
+  LSource: TDllLocationSource;
+begin
+  LRoot := TPath.Combine(FTempDir, 'proj');
+  LOut := TPath.Combine(TPath.Combine(LRoot, 'Debug'), 'Win32');
+  TDirectory.CreateDirectory(LOut);
+  TDirectory.CreateDirectory(TPath.Combine(TPath.Combine(LRoot, 'Installer'), 'Dateien'));
+  LSys := TPath.Combine(FTempDir, 'sys');
+  LExpected := MakeDummyDll(LSys, 'vendor.dll');
+  LResult := TDxComplyGenerator.ResolveExternalDllFile('vendor.dll', LOut, LRoot,
+    [LSys], LSource);
+  Assert.AreEqual(Ord(dlsSystemDirectory), Ord(LSource));
+  Assert.IsTrue(SameText(TPath.GetFullPath(LExpected), LResult), LResult);
+end;
+
+procedure TEngineTests.Generate_DllOnlyInInstaller_HasVersionAndHash;
+var
+  LProject, LDll, LDecoy, LLocation: string;
+  LJson: TJSONObject;
+  LComponents: TJSONArray;
+  LComponent: TJSONObject;
+  I: Integer;
+begin
+  LProject := CreateVendorDllProject('installer-only',
+    TPath.Combine('Installer', 'Dateien'), 'vendor.dll', True, LDll);
+  LDecoy := TPath.Combine(TPath.GetDirectoryName(TPath.GetDirectoryName(LDll)),
+    TPath.Combine('DateienKunde', 'vendor.dll'));
+  TDirectory.CreateDirectory(TPath.GetDirectoryName(LDecoy));
+  TFile.WriteAllText(LDecoy, 'MZ other copy', TEncoding.UTF8);
+
+  LJson := GenerateVendorProject(LProject);
+  try
+    AssertShippedDllEvidence(LJson, 'vendor.dll', GetFileVersionText(LDll),
+      IntToStr(TFile.GetSize(LDll)));
+    Assert.AreEqual(NativeInt(1), CountComponents(LJson, 'vendor.dll'),
+      'The staged DLL must be listed once');
+    LComponents := LJson.GetValue('components') as TJSONArray;
+    LLocation := '';
+    for I := 0 to LComponents.Count - 1 do
+    begin
+      LComponent := LComponents.Items[I] as TJSONObject;
+      if SameText(LComponent.GetValue<string>('name', ''), 'vendor.dll') then
+        LLocation := VendorProperty(LComponent,
+          'net.developer-experts.dx-comply:locationSource');
+    end;
+    Assert.AreEqual('project-tree', LLocation,
+      'locationSource must say the DLL was found in the project tree');
+    Assert.AreEqual(NativeInt(0), CountComponents(LJson, 'noise.dll'),
+      'An unrelated DLL under Installer must not be added');
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TEngineTests.Generate_DllOnlyInOutputDir_HasVersionAndHash;
+var
+  LProject, LDll: string;
+  LJson: TJSONObject;
+begin
+  LProject := CreateVendorDllProject('output-only',
+    TPath.Combine('Debug', 'Win32'), 'vendor.dll', True, LDll);
+  LJson := GenerateVendorProject(LProject);
+  try
+    AssertShippedDllEvidence(LJson, 'vendor.dll', GetFileVersionText(LDll),
+      IntToStr(TFile.GetSize(LDll)));
+    Assert.IsTrue(Pos('"output-directory"', LJson.ToJSON) > 0,
+      'The source-scanned DLL must still report output-directory');
+    Assert.AreEqual(NativeInt(0), CountComponents(LJson, 'noise.dll'),
+      'An unrelated DLL under Installer must not be added');
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TEngineTests.Generate_SystemDll_HasLocationButNoHash;
+var
+  LProject, LDll, LLocation: string;
+  LJson: TJSONObject;
+  LComponents: TJSONArray;
+  LComponent: TJSONObject;
+  I: Integer;
+  LFound: Boolean;
+begin
+  LProject := CreateVendorDllProject('system-only', 'Installer\Dateien',
+    'kernel32.dll', False, LDll);
+  LJson := GenerateVendorProject(LProject);
+  try
+    Assert.AreEqual(NativeInt(1), CountComponents(LJson, 'kernel32.dll'));
+    Assert.IsFalse(ComponentHasHash(LJson, 'kernel32.dll'),
+      'A system DLL must not be hashed');
+    Assert.AreEqual(NativeInt(0), CountComponents(LJson, 'noise.dll'));
+    LComponents := LJson.GetValue('components') as TJSONArray;
+    LFound := False;
+    for I := 0 to LComponents.Count - 1 do
+    begin
+      LComponent := LComponents.Items[I] as TJSONObject;
+      if not SameText(LComponent.GetValue<string>('name', ''), 'kernel32.dll') then
+        Continue;
+      LFound := True;
+      Assert.AreEqual('system-directory',
+        VendorProperty(LComponent, 'net.developer-experts.dx-comply:locationSource'));
+      LLocation := VendorProperty(LComponent, 'net.developer-experts.dx-comply:location');
+      Assert.IsTrue((Pos('\System32\', LLocation) > 0) or (Pos('\SysWOW64\', LLocation) > 0),
+        LLocation);
+      Assert.AreEqual('', LComponent.GetValue<string>('version', ''),
+        'A system DLL must not take the build machine''s file version');
+    end;
+    Assert.IsTrue(LFound, 'kernel32.dll must be listed');
+  finally
+    LJson.Free;
+  end;
 end;
 
 procedure TEngineTests.SystemDirectories_NonWindowsPlatform_IsEmpty;
