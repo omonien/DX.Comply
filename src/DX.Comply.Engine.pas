@@ -258,7 +258,7 @@ type
   /// Where ResolveExternalDllFile found a DLL named in source code.
   /// </summary>
   TDllLocationSource = (dlsNotFound, dlsExplicitPath, dlsOutputDirectory,
-    dlsSystemDirectory);
+    dlsProjectTree, dlsSystemDirectory);
 
   TDxComplyGenerator = class
   private
@@ -271,6 +271,12 @@ type
     FSbomWriter: ISbomWriter;
     FConfig: TSbomConfig;
     FOnProgress: TProgressEvent;
+    /// <summary>
+    /// Lower-case file name to full path for .dll and .bpl files under the
+    /// project directory. Built once per project and output directory.
+    /// </summary>
+    FProjectBinaryIndex: TDictionary<string, string>;
+    FProjectBinaryIndexKey: string;
     procedure DoProgress(const AMessage: string; const AProgress: Integer);
     function MergeFileConfig(const ACaller, AFile: TSbomConfig): TSbomConfig;
     function CreateWriter(AFormat: TSbomFormat): ISbomWriter;
@@ -309,6 +315,39 @@ type
       const AProjectInfo: TProjectInfo;
       const ACompositionEvidence: TCompositionEvidence;
       const AArtefacts: TArtefactList);
+    /// <summary>
+    /// Adds a DLL or BPL named in the output binary's import table when that
+    /// file sits under the project tree and is not already listed. System
+    /// directories are not used. The output directory scan already lists
+    /// binaries that sit next to the program.
+    /// </summary>
+    procedure AddImportedBinariesToArtefacts(const AProjectInfo: TProjectInfo;
+      const AArtefacts: TArtefactList);
+    /// <summary>
+    /// Fills size and hashes from APath. Reuses a hash already stored for
+    /// the same path.
+    /// </summary>
+    procedure CaptureBinaryFile(var AArtefact: TArtefactInfo; const APath: string;
+      const AArtefacts: TArtefactList);
+    procedure ClearProjectBinaryIndex;
+    /// <summary>
+    /// ResolveExternalDllFile with the project-tree index cached for this
+    /// generator, so one SBOM does not walk the project once per DLL.
+    /// </summary>
+    function ResolveKnownBinary(const ADllName, AOutputDir, AProjectDir: string;
+      const ASystemDirs: TArray<string>;
+      out ASource: TDllLocationSource): string;
+    /// <summary>
+    /// Maps each .dll and .bpl file name under AProjectDir to the preferred
+    /// full path. Installer wins. The output directory and Windows system
+    /// directories are omitted. The caller frees the dictionary.
+    /// </summary>
+    class function BuildProjectBinaryIndex(const AProjectDir,
+      AOutputDir: string): TDictionary<string, string>; static;
+    class function ResolveExternalDllWithIndex(const ADllName, AOutputDir,
+      AProjectDir: string; const ASystemDirs: TArray<string>;
+      const AProjectBinaries: TDictionary<string, string>;
+      out ASource: TDllLocationSource): string; static;
     /// <summary>
     /// Lists the named project output, binaries in its directory, and any
     /// extra scan directories. ScanTree restores the old recursive walk.
@@ -351,11 +390,22 @@ type
     /// path given in code, the application output directory, then the
     /// system directories in ASystemDirs. A name without an extension is
     /// also tried with .dll, the same as LoadLibrary does. Returns the full
-    /// path, or an empty string with dlsNotFound. Public for testability.
+    /// path, or an empty string with dlsNotFound. Does not search the
+    /// project tree. Public for testability.
     /// </summary>
     class function ResolveExternalDllFile(const ADllName, AOutputDir: string;
       const ASystemDirs: TArray<string>;
-      out ASource: TDllLocationSource): string; static;
+      out ASource: TDllLocationSource): string; overload; static;
+    /// <summary>
+    /// Same search, plus a bounded walk under AProjectDir for a DLL or BPL
+    /// that ships with the program but is not in the output directory. An
+    /// Installer folder is preferred over another copy in the project.
+    /// System32 and SysWOW64 are not walked. A hit there stays
+    /// dlsSystemDirectory, with no hash. Public for testability.
+    /// </summary>
+    class function ResolveExternalDllFile(const ADllName, AOutputDir,
+      AProjectDir: string; const ASystemDirs: TArray<string>;
+      out ASource: TDllLocationSource): string; overload; static;
     /// <summary>
     /// Windows system directory that holds DLLs for the target platform:
     /// SysWOW64 for Win32 on 64-bit Windows, System32 for Win64 (Sysnative
@@ -434,8 +484,10 @@ type
 /// (or ProductVersion) so the report and CycloneDX stay aligned (issue #90).
 /// Any other .exe, .dll, or .bpl found on disk gets the version from its own
 /// version resource, and no version when it has none (issue #96). Other files
-/// (.res, .map, ...) get no version. Unit evidence, runtime packages, requires
-/// packages and library source files are left unchanged.
+/// (.res, .map, ...) get no version. Unit evidence, requires packages and
+/// library source files are left unchanged. A runtime package with no file is
+/// left unchanged. A runtime package whose BPL was found is versioned from
+/// that file.
 /// </summary>
 procedure ApplyProductVersionToBuildFiles(const AArtefacts: TArtefactList;
   const AVersion: string; const AOwnOutputPath: string = '');
@@ -443,6 +495,8 @@ procedure ApplyProductVersionToBuildFiles(const AArtefacts: TArtefactList;
 implementation
 
 uses
+  System.Types,
+  Winapi.Windows,
   DX.Comply.ComponentManifest,
   DX.Comply.CraChecks,
   DX.Comply.LegacyProject,
@@ -543,6 +597,7 @@ end;
 
 destructor TDxComplyGenerator.Destroy;
 begin
+  ClearProjectBinaryIndex;
   FProjectScanner := nil;
   FBuildEvidenceReader := nil;
   FBuildOrchestrator := nil;
@@ -570,8 +625,11 @@ begin
        (LArtefact.RelativePath = '') then
       Continue;
     LType := LArtefact.ArtefactType;
-    if (LType = 'unit-evidence') or (LType = 'runtime-package') or
-       (LType = 'framework') or (LType = 'required-package') then
+    if (LType = 'unit-evidence') or (LType = 'framework') or
+       (LType = 'required-package') then
+      Continue;
+    // Declared runtime packages have no file until one is found on disk.
+    if (LType = 'runtime-package') and (LArtefact.FilePath = '') then
       Continue;
 
     if LArtefact.FilePath <> '' then
@@ -794,9 +852,18 @@ var
   LArtefact: TArtefactInfo;
   LPackageName: string;
   LBplFileName: string;
+  LOutputDir: string;
+  LResolved: string;
+  LSystemDirs: TArray<string>;
+  LSource: TDllLocationSource;
 begin
   if not Assigned(AProjectInfo.RuntimePackages) then
     Exit;
+
+  LOutputDir := AProjectInfo.ArtefactOutputDir;
+  if LOutputDir = '' then
+    LOutputDir := AProjectInfo.OutputDir;
+  LSystemDirs := SystemDirectoriesForPlatform(AProjectInfo.Platform);
 
   for LPackageName in AProjectInfo.RuntimePackages do
   begin
@@ -819,6 +886,16 @@ begin
     LArtefact.Evidence := 'BPL';
     LArtefact.Confidence := 'Declared';
 
+    // A BPL staged under the project is the copy that ships. A file found
+    // only in a system directory is not hashed, same as an external DLL.
+    LResolved := ResolveKnownBinary(LBplFileName, LOutputDir,
+      AProjectInfo.ProjectDir, LSystemDirs, LSource);
+    if LSource in [dlsExplicitPath, dlsOutputDirectory, dlsProjectTree] then
+    begin
+      LArtefact.LocationSource := DllLocationSourceText(LSource);
+      CaptureBinaryFile(LArtefact, LResolved, AArtefacts);
+    end;
+
     AArtefacts.Add(LArtefact);
   end;
 end;
@@ -838,8 +915,6 @@ var
   LOutputDir, LResolvedPath: string;
   LSystemDirs: TArray<string>;
   LSource: TDllLocationSource;
-  LExisting: TArtefactInfo;
-  LReused: Boolean;
   I: Integer;
 begin
   LPasFiles := TList<string>.Create;
@@ -885,8 +960,9 @@ begin
     LDllNames := ScanPasFilesForDllReferences(LPasFiles.ToArray, LSearchPaths,
       LConditional);
 
-    // Issue #59: look for the file. A file next to the program, or at a full
-    // path given in code, is what ships, so it gets size and hashes. A file
+    // Issue #59: look for the file. A file next to the program, at a full
+    // path given in code, or staged under the project (Installer and other
+    // project folders) is what ships, so it gets size and hashes. A file
     // found only in a system directory is the build machine's copy, so only
     // its location is recorded.
     LOutputDir := AProjectInfo.ArtefactOutputDir;
@@ -910,35 +986,14 @@ begin
       if I < Length(LConditional) then
         LArtefact.Conditional := LConditional[I];
 
-      LResolvedPath := ResolveExternalDllFile(LDllName, LOutputDir, LSystemDirs,
-        LSource);
+      LResolvedPath := ResolveKnownBinary(LDllName, LOutputDir,
+        AProjectInfo.ProjectDir, LSystemDirs, LSource);
       case LSource of
-        dlsExplicitPath, dlsOutputDirectory:
+        dlsExplicitPath, dlsOutputDirectory, dlsProjectTree:
           begin
-            LArtefact.FilePath := LResolvedPath;
             LArtefact.LocationSource := DllLocationSourceText(LSource);
             // The output directory scan may already have hashed this file.
-            LReused := False;
-            for LExisting in AArtefacts do
-              if SameText(LExisting.FilePath, LResolvedPath) and
-                (LExisting.Hash <> '') then
-              begin
-                LArtefact.FileSize := LExisting.FileSize;
-                LArtefact.Hash := LExisting.Hash;
-                LArtefact.HashSha512 := LExisting.HashSha512;
-                LReused := True;
-                Break;
-              end;
-            if not LReused then
-              try
-                LArtefact.FileSize := TFile.GetSize(LResolvedPath);
-                LArtefact.Hash := FHashService.ComputeSha256(LResolvedPath);
-                LArtefact.HashSha512 := FHashService.ComputeSha512(LResolvedPath);
-              except
-                LArtefact.FileSize := -1;
-                LArtefact.Hash := '';
-                LArtefact.HashSha512 := '';
-              end;
+            CaptureBinaryFile(LArtefact, LResolvedPath, AArtefacts);
           end;
         dlsSystemDirectory:
           begin
@@ -962,6 +1017,8 @@ begin
       Result := 'explicit-path';
     dlsOutputDirectory:
       Result := 'output-directory';
+    dlsProjectTree:
+      Result := 'project-tree';
     dlsSystemDirectory:
       Result := 'system-directory';
   else
@@ -1003,8 +1060,294 @@ begin
   end;
 end;
 
-class function TDxComplyGenerator.ResolveExternalDllFile(const ADllName,
-  AOutputDir: string; const ASystemDirs: TArray<string>;
+function SplitShippedPath(const APath: string): TArray<string>;
+var
+  LList: TList<string>;
+  LNormalized, LPart: string;
+  LParts: TArray<string>;
+begin
+  LList := TList<string>.Create;
+  try
+    LNormalized := StringReplace(APath, '/', '\', [rfReplaceAll]);
+    LParts := LNormalized.Split(['\']);
+    for LPart in LParts do
+      if LPart <> '' then
+        LList.Add(LPart);
+    Result := LList.ToArray;
+  finally
+    LList.Free;
+  end;
+end;
+
+function PathHasInstallerSegment(const APath: string): Boolean;
+var
+  LPart: string;
+begin
+  Result := False;
+  for LPart in SplitShippedPath(APath) do
+    if SameText(LPart, 'Installer') then
+      Exit(True);
+end;
+
+function ShippedPathDepth(const APath: string): Integer;
+begin
+  // One segment is the file name. The rest are directories.
+  Result := Length(SplitShippedPath(APath));
+  if Result > 0 then
+    Dec(Result);
+end;
+
+function CompareShippedPaths(const ALeft, ARight: string): Integer;
+var
+  LLeft, LRight: TArray<string>;
+  I, LCount: Integer;
+begin
+  LLeft := SplitShippedPath(ALeft);
+  LRight := SplitShippedPath(ARight);
+  LCount := Length(LLeft);
+  if Length(LRight) < LCount then
+    LCount := Length(LRight);
+  for I := 0 to LCount - 1 do
+  begin
+    Result := CompareText(LLeft[I], LRight[I]);
+    if Result <> 0 then
+      Exit;
+  end;
+  Result := Length(LLeft) - Length(LRight);
+end;
+
+function PreferShippedBinary(const ACandidate, ACurrent: string): Boolean;
+var
+  LCandidateInstaller, LCurrentInstaller: Boolean;
+begin
+  // Installer is the staged layout. Dateien sorts before DateienKunde
+  // because the comparison is by path segment, not by the '\' character.
+  LCandidateInstaller := PathHasInstallerSegment(ACandidate);
+  LCurrentInstaller := PathHasInstallerSegment(ACurrent);
+  if LCandidateInstaller <> LCurrentInstaller then
+    Exit(LCandidateInstaller);
+  if ShippedPathDepth(ACandidate) <> ShippedPathDepth(ACurrent) then
+    Exit(ShippedPathDepth(ACandidate) < ShippedPathDepth(ACurrent));
+  Result := CompareShippedPaths(ACandidate, ACurrent) < 0;
+end;
+
+function IsWindowsSystemPath(const APath: string): Boolean;
+
+  function MatchesSystemDir(const AFull, AWindows, AName: string): Boolean;
+  var
+    LSystem: string;
+  begin
+    LSystem := ExcludeTrailingPathDelimiter(TPath.Combine(AWindows, AName));
+    Result := SameText(AFull, LSystem) or AFull.StartsWith(LSystem + '\', True);
+  end;
+
+var
+  LWindows, LFull: string;
+begin
+  Result := False;
+  if Trim(APath) = '' then
+    Exit;
+  LWindows := GetEnvironmentVariable('SystemRoot');
+  if LWindows = '' then
+    LWindows := GetEnvironmentVariable('windir');
+  if LWindows = '' then
+    Exit;
+  try
+    LFull := ExcludeTrailingPathDelimiter(TPath.GetFullPath(APath));
+  except
+    on E: EInOutArgumentException do
+      Exit;
+  end;
+  Result := MatchesSystemDir(LFull, LWindows, 'System32') or
+    MatchesSystemDir(LFull, LWindows, 'SysWOW64') or
+    MatchesSystemDir(LFull, LWindows, 'Sysnative');
+end;
+
+function IsReparsePoint(const APath: string): Boolean;
+var
+  LAttrs: DWORD;
+begin
+  // A junction can point outside the project. Do not follow it.
+  LAttrs := Winapi.Windows.GetFileAttributes(PChar(APath));
+  Result := (LAttrs <> INVALID_FILE_ATTRIBUTES) and
+    ((LAttrs and FILE_ATTRIBUTE_REPARSE_POINT) <> 0);
+end;
+
+function IsIgnoredProjectDir(const AName: string): Boolean;
+begin
+  Result := SameText(AName, '.git') or SameText(AName, '.svn') or
+    SameText(AName, '.hg') or SameText(AName, '__history') or
+    SameText(AName, '__recovery') or SameText(AName, '__astcache') or
+    SameText(AName, 'node_modules') or SameText(AName, '.vs') or
+    SameText(AName, '.idea');
+end;
+
+class function TDxComplyGenerator.BuildProjectBinaryIndex(const AProjectDir,
+  AOutputDir: string): TDictionary<string, string>;
+const
+  cMaxProjectBinaryDepth = 6;
+  cMaxProjectBinaryDirs = 500;
+  cMaxInstallerDirs = 200;
+var
+  LRoot, LSkipOutput: string;
+  LVisited, LInstallerVisited: Integer;
+  LIndex: TDictionary<string, string>;
+
+  function SameDir(const ALeft, ARight: string): Boolean;
+  begin
+    Result := (ALeft <> '') and (ARight <> '') and
+      SameText(ExcludeTrailingPathDelimiter(ALeft),
+        ExcludeTrailingPathDelimiter(ARight));
+  end;
+
+  function SafeDirectories(const ADir: string): TStringDynArray;
+  begin
+    try
+      Result := TDirectory.GetDirectories(ADir);
+    except
+      on E: Exception do
+        SetLength(Result, 0);
+    end;
+  end;
+
+  procedure SortProjectDirs(var ADirs: TStringDynArray);
+  var
+    I, J: Integer;
+    LSwap: string;
+
+    function Rank(const APath: string): Integer;
+    begin
+      if SameText(TPath.GetFileName(APath), 'Installer') then
+        Result := 0
+      else
+        Result := 1;
+    end;
+
+  begin
+    for I := 0 to High(ADirs) - 1 do
+      for J := I + 1 to High(ADirs) do
+        if (Rank(ADirs[J]) < Rank(ADirs[I])) or
+           ((Rank(ADirs[J]) = Rank(ADirs[I])) and
+            (CompareText(ADirs[J], ADirs[I]) < 0)) then
+        begin
+          LSwap := ADirs[I];
+          ADirs[I] := ADirs[J];
+          ADirs[J] := LSwap;
+        end;
+  end;
+
+  procedure ConsiderMatches(const ADir: string);
+  const
+    cMasks: array[0..1] of string = ('*.dll', '*.bpl');
+  var
+    LMask, LFile, LFull, LKey, LExisting: string;
+    LFiles: TStringDynArray;
+  begin
+    for LMask in cMasks do
+    begin
+      try
+        LFiles := TDirectory.GetFiles(ADir, LMask);
+      except
+        on E: Exception do
+          SetLength(LFiles, 0);
+      end;
+      for LFile in LFiles do
+      begin
+        try
+          LFull := TPath.GetFullPath(LFile);
+        except
+          on E: EInOutArgumentException do
+            Continue;
+        end;
+        if IsWindowsSystemPath(LFull) then
+          Continue;
+        LKey := LowerCase(TPath.GetFileName(LFull));
+        if LKey = '' then
+          Continue;
+        if (not LIndex.TryGetValue(LKey, LExisting)) or
+           PreferShippedBinary(LFull, LExisting) then
+          LIndex.AddOrSetValue(LKey, LFull);
+      end;
+    end;
+  end;
+
+  procedure Walk(const ADir: string; ADepth: Integer);
+  var
+    LSubs: TStringDynArray;
+    LSub: string;
+    LInstaller: Boolean;
+  begin
+    if (ADepth > cMaxProjectBinaryDepth) or IsWindowsSystemPath(ADir) or
+       SameDir(ADir, LSkipOutput) or not TDirectory.Exists(ADir) then
+      Exit;
+    LInstaller := PathHasInstallerSegment(ADir);
+    if LInstaller then
+    begin
+      if LInstallerVisited >= cMaxInstallerDirs then
+        Exit;
+      Inc(LInstallerVisited);
+    end
+    else
+    begin
+      if LVisited >= cMaxProjectBinaryDirs then
+        Exit;
+      Inc(LVisited);
+    end;
+
+    ConsiderMatches(ADir);
+    if ADepth = cMaxProjectBinaryDepth then
+      Exit;
+
+    LSubs := SafeDirectories(ADir);
+    SortProjectDirs(LSubs);
+    for LSub in LSubs do
+    begin
+      if IsIgnoredProjectDir(TPath.GetFileName(LSub)) then
+        Continue;
+      if IsReparsePoint(LSub) then
+        Continue;
+      Walk(LSub, ADepth + 1);
+    end;
+  end;
+
+begin
+  LIndex := TDictionary<string, string>.Create;
+  Result := LIndex;
+  LVisited := 0;
+  LInstallerVisited := 0;
+  LSkipOutput := '';
+  if Trim(AProjectDir) = '' then
+    Exit;
+  try
+    LRoot := ExcludeTrailingPathDelimiter(TPath.GetFullPath(AProjectDir));
+  except
+    on E: EInOutArgumentException do
+      Exit;
+  end;
+  if IsWindowsSystemPath(LRoot) or not TDirectory.Exists(LRoot) then
+    Exit;
+
+  // The output directory is searched on its own, and only at the top level.
+  // Skipping it here keeps a nested copy inside that directory out of the
+  // project-tree result. When the output directory is the project root,
+  // subfolders such as Installer still have to be walked.
+  if Trim(AOutputDir) <> '' then
+    try
+      LSkipOutput := ExcludeTrailingPathDelimiter(TPath.GetFullPath(AOutputDir));
+      if SameDir(LSkipOutput, LRoot) then
+        LSkipOutput := '';
+    except
+      on E: EInOutArgumentException do
+        LSkipOutput := '';
+    end;
+
+  Walk(LRoot, 0);
+end;
+
+class function TDxComplyGenerator.ResolveExternalDllWithIndex(
+  const ADllName, AOutputDir, AProjectDir: string;
+  const ASystemDirs: TArray<string>;
+  const AProjectBinaries: TDictionary<string, string>;
   out ASource: TDllLocationSource): string;
 var
   LCandidates: TArray<string>;
@@ -1032,7 +1375,8 @@ begin
       end;
     // Not there: look for the file name in the places below.
     if TPath.GetExtension(LName) = '' then
-      LCandidates := [TPath.GetFileName(LName), TPath.GetFileName(LName) + '.dll']
+      LCandidates := [TPath.GetFileName(LName),
+        TPath.GetFileName(LName) + '.dll']
     else
       LCandidates := [TPath.GetFileName(LName)];
   end;
@@ -1049,8 +1393,33 @@ begin
       end;
     end;
 
-  // 3. Windows system directory for the target bitness. Only a plain file
-  // name is looked up there.
+  // 3. Known file under the project tree. Installer is preferred. This does
+  // not add unrelated binaries; the caller already has the file name.
+  if (AProjectDir <> '') and not IsWindowsSystemPath(AProjectDir) then
+    for LCandidate in LCandidates do
+    begin
+      if ((Pos('\', LCandidate) > 0) or (Pos('/', LCandidate) > 0)) and
+         not TPath.IsPathRooted(LCandidate) then
+      begin
+        LPath := TPath.Combine(AProjectDir, LCandidate);
+        if TFile.Exists(LPath) and not IsWindowsSystemPath(LPath) then
+        begin
+          ASource := dlsProjectTree;
+          Exit(TPath.GetFullPath(LPath));
+        end;
+      end;
+      if (AProjectBinaries <> nil) and
+         AProjectBinaries.TryGetValue(LowerCase(TPath.GetFileName(LCandidate)),
+           LPath) and (LPath <> '') and TFile.Exists(LPath) and
+         not IsWindowsSystemPath(LPath) then
+      begin
+        ASource := dlsProjectTree;
+        Exit(LPath);
+      end;
+    end;
+
+  // 4. Windows system directory for the target bitness. Only a plain file
+  // name is looked up there, and only its location is recorded by the caller.
   for LDir in ASystemDirs do
     for LCandidate in LCandidates do
     begin
@@ -1066,6 +1435,154 @@ begin
         Exit;
       end;
     end;
+end;
+
+class function TDxComplyGenerator.ResolveExternalDllFile(const ADllName,
+  AOutputDir: string; const ASystemDirs: TArray<string>;
+  out ASource: TDllLocationSource): string;
+begin
+  Result := ResolveExternalDllWithIndex(ADllName, AOutputDir, '', ASystemDirs,
+    nil, ASource);
+end;
+
+class function TDxComplyGenerator.ResolveExternalDllFile(const ADllName,
+  AOutputDir, AProjectDir: string; const ASystemDirs: TArray<string>;
+  out ASource: TDllLocationSource): string;
+var
+  LIndex: TDictionary<string, string>;
+begin
+  LIndex := BuildProjectBinaryIndex(AProjectDir, AOutputDir);
+  try
+    Result := ResolveExternalDllWithIndex(ADllName, AOutputDir, AProjectDir,
+      ASystemDirs, LIndex, ASource);
+  finally
+    LIndex.Free;
+  end;
+end;
+
+procedure TDxComplyGenerator.ClearProjectBinaryIndex;
+begin
+  FreeAndNil(FProjectBinaryIndex);
+  FProjectBinaryIndexKey := '';
+end;
+
+function TDxComplyGenerator.ResolveKnownBinary(const ADllName, AOutputDir,
+  AProjectDir: string; const ASystemDirs: TArray<string>;
+  out ASource: TDllLocationSource): string;
+var
+  LKey: string;
+  LFresh: TDictionary<string, string>;
+begin
+  LKey := LowerCase(AProjectDir) + '|' + LowerCase(AOutputDir);
+  if not SameText(FProjectBinaryIndexKey, LKey) then
+  begin
+    LFresh := BuildProjectBinaryIndex(AProjectDir, AOutputDir);
+    FProjectBinaryIndex.Free;
+    FProjectBinaryIndex := LFresh;
+    FProjectBinaryIndexKey := LKey;
+  end;
+  Result := ResolveExternalDllWithIndex(ADllName, AOutputDir, AProjectDir,
+    ASystemDirs, FProjectBinaryIndex, ASource);
+end;
+
+procedure TDxComplyGenerator.CaptureBinaryFile(var AArtefact: TArtefactInfo;
+  const APath: string; const AArtefacts: TArtefactList);
+var
+  LExisting: TArtefactInfo;
+begin
+  AArtefact.FilePath := APath;
+  if Assigned(AArtefacts) then
+    for LExisting in AArtefacts do
+      if SameText(LExisting.FilePath, APath) and (LExisting.Hash <> '') then
+      begin
+        AArtefact.FileSize := LExisting.FileSize;
+        AArtefact.Hash := LExisting.Hash;
+        AArtefact.HashSha512 := LExisting.HashSha512;
+        Exit;
+      end;
+  try
+    AArtefact.FileSize := TFile.GetSize(APath);
+    if Assigned(FHashService) then
+    begin
+      AArtefact.Hash := FHashService.ComputeSha256(APath);
+      AArtefact.HashSha512 := FHashService.ComputeSha512(APath);
+    end
+    else
+    begin
+      AArtefact.Hash := '';
+      AArtefact.HashSha512 := '';
+    end;
+  except
+    on E: Exception do
+    begin
+      AArtefact.FileSize := -1;
+      AArtefact.Hash := '';
+      AArtefact.HashSha512 := '';
+    end;
+  end;
+end;
+
+procedure TDxComplyGenerator.AddImportedBinariesToArtefacts(
+  const AProjectInfo: TProjectInfo; const AArtefacts: TArtefactList);
+var
+  LNames: TArray<string>;
+  LName, LExt, LOutputDir, LResolved: string;
+  LSystemDirs: TArray<string>;
+  LSource: TDllLocationSource;
+  LArtefact: TArtefactInfo;
+
+  function ListsFile(const AFileName: string): Boolean;
+  var
+    LListed: TArtefactInfo;
+    LCurrent: string;
+  begin
+    Result := False;
+    for LListed in AArtefacts do
+    begin
+      if LListed.FilePath <> '' then
+        LCurrent := TPath.GetFileName(LListed.FilePath)
+      else
+        LCurrent := TPath.GetFileName(LListed.RelativePath);
+      if SameText(LCurrent, TPath.GetFileName(AFileName)) then
+        Exit(True);
+    end;
+  end;
+
+begin
+  if not Assigned(AArtefacts) or (AProjectInfo.OutputFilePath = '') then
+    Exit;
+  if not TryReadPeImportNames(AProjectInfo.OutputFilePath, LNames) then
+    Exit;
+
+  LOutputDir := AProjectInfo.ArtefactOutputDir;
+  if LOutputDir = '' then
+    LOutputDir := AProjectInfo.OutputDir;
+  LSystemDirs := SystemDirectoriesForPlatform(AProjectInfo.Platform);
+
+  for LName in LNames do
+  begin
+    LExt := LowerCase(TPath.GetExtension(LName));
+    if (LExt <> '.dll') and (LExt <> '.bpl') then
+      Continue;
+    if ListsFile(LName) then
+      Continue;
+    LResolved := ResolveKnownBinary(LName, LOutputDir, AProjectInfo.ProjectDir,
+      LSystemDirs, LSource);
+    // The output directory is already scanned. A system DLL stays out.
+    if LSource <> dlsProjectTree then
+      Continue;
+
+    LArtefact := Default(TArtefactInfo);
+    LArtefact.RelativePath := TPath.GetFileName(LName);
+    LArtefact.FileSize := -1;
+    LArtefact.LocationSource := DllLocationSourceText(LSource);
+    if LExt = '.bpl' then
+      LArtefact.ArtefactType := 'package'
+    else
+      LArtefact.ArtefactType := 'library';
+    CaptureBinaryFile(LArtefact, LResolved, AArtefacts);
+    AArtefacts.Add(LArtefact);
+  end;
 end;
 
 class function TDxComplyGenerator.ScanPasFilesForDllReferences(
@@ -2578,7 +3095,9 @@ begin
 
       DoProgress('Collecting dependencies...', 60);
       AddRuntimePackagesToArtefacts(LProjectInfo, LArtefacts);
-      AddExternalDllReferencesToArtefacts(LProjectInfo, LCompositionEvidence, LArtefacts);
+      AddExternalDllReferencesToArtefacts(LProjectInfo, LCompositionEvidence,
+        LArtefacts);
+      AddImportedBinariesToArtefacts(LProjectInfo, LArtefacts);
 
       DoProgress('Generating SBOM...', 70);
 
@@ -2670,6 +3189,7 @@ begin
       LArtefacts.Free;
     end;
   finally
+    ClearProjectBinaryIndex;
     LReportedWarnings.Free;
     LCompositionEvidence.Free;
     LBuildEvidence.Free;
