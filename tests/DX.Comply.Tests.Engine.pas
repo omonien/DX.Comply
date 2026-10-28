@@ -56,6 +56,7 @@ type
     function CreateScopeProject(const AFolder: string; AWithOutputDir: Boolean): string;
     function ScopeConfig: TSbomConfig;
     function CountComponents(const AJson: TJSONObject; const AName: string): NativeInt;
+    function ComponentVersion(const AJson: TJSONObject; const AName: string): string;
     function ComponentHasHash(const AJson: TJSONObject; const AName: string): Boolean;
     function GenerateScope(const AProjectPath: string; const AConfig: TSbomConfig): TJSONObject;
   public
@@ -374,6 +375,14 @@ type
     [Test]
     procedure GenerateFromConfig_ScanTree_RestoresRecursiveWalk;
 
+    /// <summary>
+    /// A third-party EXE beside the project output keeps its own version
+    /// resource, or n/a when it has none. The project version stays on the
+    /// primary EXE. Issue #96.
+    /// </summary>
+    [Test]
+    procedure Generate_NeighborExe_UsesOwnVersionOrNa;
+
   end;
 
   /// <summary>Build mode file components carry the product version.</summary>
@@ -414,6 +423,30 @@ type
     /// </summary>
     [Test]
     procedure Apply_ExeWithoutProductVersion_GetsPeVersion;
+    /// <summary>
+    /// The primary build EXE keeps the project version when that file has no
+    /// PE version resource. Issue #96.
+    /// </summary>
+    [Test]
+    procedure Apply_PrimaryExe_KeepsProjectVersion;
+    /// <summary>
+    /// The primary build EXE keeps the project version when its PE version
+    /// resource says something else. Issue #96.
+    /// </summary>
+    [Test]
+    procedure Apply_PrimaryExeWithVersion_KeepsProjectVersion;
+    /// <summary>
+    /// An EXE beside the primary output, with no version resource, gets no
+    /// version. The report shows that as n/a. Issue #96.
+    /// </summary>
+    [Test]
+    procedure Apply_NeighborExeWithoutVersion_GetsNoVersion;
+    /// <summary>
+    /// An EXE beside the primary output keeps the FileVersion from its own
+    /// version resource. Issue #96.
+    /// </summary>
+    [Test]
+    procedure Apply_NeighborExeWithVersion_KeepsOwnVersion;
   end;
 
 implementation
@@ -2076,6 +2109,28 @@ begin
   end;
 end;
 
+function TEngineTests.ComponentVersion(const AJson: TJSONObject;
+  const AName: string): string;
+begin
+  Result := '';
+  if not Assigned(AJson) then
+    Exit;
+  var LComponents := AJson.GetValue('components') as TJSONArray;
+  if not Assigned(LComponents) then
+    Exit;
+  for var i := 0 to LComponents.Count - 1 do
+  begin
+    if not (LComponents.Items[i] is TJSONObject) then
+      Continue;
+    var LComponent := TJSONObject(LComponents.Items[i]);
+    if not SameText(LComponent.GetValue<string>('name', ''), AName) then
+      Continue;
+    if LComponent.GetValue('version') = nil then
+      Exit('');
+    Exit(LComponent.GetValue<string>('version'));
+  end;
+end;
+
 function TEngineTests.ComponentHasHash(const AJson: TJSONObject;
   const AName: string): Boolean;
 var
@@ -2443,6 +2498,77 @@ begin
   end;
 end;
 
+function VersionFixture(const AFileName: string): string;
+begin
+  Result := TPath.Combine(RepoRoot, 'tests' + PathDelim + 'fixtures' +
+    PathDelim + 'binaries' + PathDelim + AFileName);
+end;
+
+procedure TEngineTests.Generate_NeighborExe_UsesOwnVersionOrNa;
+const
+  cProjectVersion = '26.12.0.0';
+  cVendorVersion = '9.8.7.6';
+begin
+  var LNoVersion := VersionFixture('FakeNoVersion.exe');
+  var LWithVersion := VersionFixture('FakeWithVersion.exe');
+  Assert.IsTrue(TFile.Exists(LNoVersion), LNoVersion);
+  Assert.IsTrue(TFile.Exists(LWithVersion), LWithVersion);
+
+  var LProject := CreateScopeProject('neighbor-exe', True);
+  var LOutput := TPath.Combine(TPath.GetDirectoryName(LProject), 'output');
+  // The primary output and the neighbor without a version resource are the
+  // same bytes. Only the file the .dproj builds may take the project version.
+  TFile.Copy(LNoVersion, TPath.Combine(LOutput, 'MyApp.exe'), True);
+  TFile.Copy(LNoVersion, TPath.Combine(LOutput, 'ThirdParty.exe'), True);
+  TFile.Copy(LWithVersion, TPath.Combine(LOutput, 'Vendor.exe'), True);
+  TFile.Copy(LNoVersion, TPath.Combine(LOutput, 'plugin.dll'), True);
+
+  var LProjectText := TFile.ReadAllText(LProject, TEncoding.UTF8);
+  LProjectText := StringReplace(LProjectText, '<AppType>Application</AppType>',
+    '<AppType>Application</AppType>' + sLineBreak +
+    '    <VerInfo_MajorVer>26</VerInfo_MajorVer>' + sLineBreak +
+    '    <VerInfo_MinorVer>12</VerInfo_MinorVer>' + sLineBreak +
+    '    <VerInfo_Release>0</VerInfo_Release>' + sLineBreak +
+    '    <VerInfo_Build>0</VerInfo_Build>', []);
+  Assert.IsTrue(Pos('VerInfo_MajorVer', LProjectText) > 0,
+    'the fixture project must carry a project version');
+  TFile.WriteAllText(LProject, LProjectText, TEncoding.UTF8);
+
+  var LConfig := ScopeConfig;
+  LConfig.HumanReadableReport.Enabled := True;
+  LConfig.HumanReadableReport.Format := hrfMarkdown;
+  LConfig.HumanReadableReport.OutputBasePath :=
+    TPath.Combine(FTempDir, 'neighbor-exe.report');
+  var LJson := GenerateScope(LProject, LConfig);
+  try
+    var LMetadata := LJson.GetValue('metadata') as TJSONObject;
+    var LRoot := LMetadata.GetValue('component') as TJSONObject;
+    Assert.AreEqual(cProjectVersion, LRoot.GetValue<string>('version'),
+      'the SBOM root version is the project version');
+    Assert.AreEqual(cProjectVersion, ComponentVersion(LJson, 'MyApp.exe'),
+      'the primary EXE keeps the project version');
+    Assert.AreEqual('', ComponentVersion(LJson, 'ThirdParty.exe'),
+      'a neighboring EXE without version info has no version');
+    Assert.AreEqual(cVendorVersion, ComponentVersion(LJson, 'Vendor.exe'),
+      'a neighboring EXE keeps its own FileVersion');
+    Assert.AreEqual('', ComponentVersion(LJson, 'plugin.dll'),
+      'a DLL without version info has no version');
+  finally
+    LJson.Free;
+  end;
+
+  var LReportText := TFile.ReadAllText(
+    TPath.Combine(FTempDir, 'neighbor-exe.report.md'), TEncoding.UTF8);
+  Assert.IsTrue(Pos('| MyApp.exe | application | ' + cProjectVersion + ' |',
+    LReportText) > 0, 'the report shows the project version on the primary EXE');
+  Assert.IsTrue(Pos('| ThirdParty.exe | application | n/a |', LReportText) > 0,
+    'the report shows n/a for a neighboring EXE without version info');
+  Assert.IsTrue(Pos('| Vendor.exe | application | ' + cVendorVersion + ' |',
+    LReportText) > 0, 'the report shows the neighboring EXE''s own version');
+  Assert.IsTrue(Pos('| plugin.dll | library | n/a |', LReportText) > 0,
+    'the report shows n/a for a DLL without version info');
+end;
+
 { TBuildFileVersionTests }
 
 function MakeBuildArtefact(const APath, AType, AVersion: string): TArtefactInfo;
@@ -2466,9 +2592,10 @@ begin
     LList.Add(MakeBuildArtefact('MyPkg.dcp', 'dcu-package', ''));
     LList.Add(MakeBuildArtefact('data.res', 'resource', ''));
     LList.Add(MakeBuildArtefact('readme.txt', 'unknown', ''));
-    // MyPkg.bpl is the project's own output here.
+    // MyPkg.bpl is the project's own output. App.exe only sits beside it.
     ApplyProductVersionToBuildFiles(LList, ' 2.1.0 ', 'C:\Build\MyPkg.bpl');
-    Assert.AreEqual('2.1.0', LList[0].Version);
+    Assert.AreEqual('', LList[0].Version,
+      'a neighboring EXE does not inherit the project version');
     Assert.AreEqual('2.1.0', LList[1].Version);
     Assert.AreEqual('2.1.0', LList[2].Version);
     Assert.AreEqual('', LList[3].Version, 'a resource is not a product output');
@@ -2751,7 +2878,74 @@ begin
   end;
 end;
 
+procedure TBuildFileVersionTests.Apply_PrimaryExe_KeepsProjectVersion;
+begin
+  var LPath := VersionFixture('FakeNoVersion.exe');
+  Assert.AreEqual('', GetFileVersionText(LPath),
+    'FakeNoVersion.exe must not carry a version resource');
+  var LList := TArtefactList.Create;
+  try
+    var LArtefact := MakeBuildArtefact('MyApp.exe', 'application', '');
+    LArtefact.FilePath := LPath;
+    LList.Add(LArtefact);
+    ApplyProductVersionToBuildFiles(LList, '26.12.0.0', LPath);
+    Assert.AreEqual('26.12.0.0', LList[0].Version,
+      'the primary EXE keeps the project version when it has no PE version');
+  finally
+    LList.Free;
+  end;
+end;
 
+procedure TBuildFileVersionTests.Apply_PrimaryExeWithVersion_KeepsProjectVersion;
+begin
+  var LPath := VersionFixture('FakeWithVersion.exe');
+  Assert.AreEqual('9.8.7.6', GetFileVersionText(LPath),
+    'FakeWithVersion.exe FileVersion is 9.8.7.6');
+  var LList := TArtefactList.Create;
+  try
+    var LArtefact := MakeBuildArtefact('MyApp.exe', 'application', '');
+    LArtefact.FilePath := LPath;
+    LList.Add(LArtefact);
+    ApplyProductVersionToBuildFiles(LList, '26.12.0.0', LPath);
+    Assert.AreEqual('26.12.0.0', LList[0].Version,
+      'the primary EXE keeps the project version when the PE version differs');
+  finally
+    LList.Free;
+  end;
+end;
+
+procedure TBuildFileVersionTests.Apply_NeighborExeWithoutVersion_GetsNoVersion;
+begin
+  var LPath := VersionFixture('FakeNoVersion.exe');
+  var LList := TArtefactList.Create;
+  try
+    var LArtefact := MakeBuildArtefact('ThirdParty.exe', 'application', '');
+    LArtefact.FilePath := LPath;
+    LList.Add(LArtefact);
+    ApplyProductVersionToBuildFiles(LList, '26.12.0.0', 'C:\Build\MyApp.exe');
+    Assert.AreEqual('', LList[0].Version,
+      'a neighboring EXE without version info has no version');
+  finally
+    LList.Free;
+  end;
+end;
+
+procedure TBuildFileVersionTests.Apply_NeighborExeWithVersion_KeepsOwnVersion;
+begin
+  var LPath := VersionFixture('FakeWithVersion.exe');
+  var LList := TArtefactList.Create;
+  try
+    var LArtefact := MakeBuildArtefact('Vendor.exe', 'application', '');
+    LArtefact.FilePath := LPath;
+    LList.Add(LArtefact);
+    ApplyProductVersionToBuildFiles(LList, '26.12.0.0', 'C:\Build\MyApp.exe');
+    Assert.AreEqual('9.8.7.6', LList[0].Version,
+      'a neighboring EXE keeps its own FileVersion');
+    Assert.AreNotEqual('26.12.0.0', LList[0].Version);
+  finally
+    LList.Free;
+  end;
+end;
 
 initialization
   TDUnitX.RegisterTestFixture(TEngineTests);

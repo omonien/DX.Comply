@@ -40,7 +40,7 @@ function GetModuleVersionString(AModule: HMODULE; const AName: string): string;
 /// Version of the file at APath from its version resource: the FileVersion
 /// string, else the ProductVersion string, else the fixed file version.
 /// Returns an empty string when the file is missing or has no version
-/// resource. Used for third-party DLLs listed in a build SBOM.
+/// resource. Used for third-party binaries listed in a build SBOM.
 /// </summary>
 function GetFileVersionText(const APath: string): string;
 
