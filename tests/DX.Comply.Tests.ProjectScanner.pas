@@ -106,6 +106,36 @@ type
     [Test]
     procedure Scan_EngineDproj_InfersMapFilePath;
 
+    /// <summary>
+    /// Android MAP names are libProject.so.map. Win32 and Win64 stay
+    /// Project.map. Regression for issue #89.
+    /// </summary>
+    [Test]
+    procedure ExpectedMapFileName_Android_UsesLibSoMap;
+
+    /// <summary>
+    /// Desktop, iOS, macOS, and Linux MAP names stay Project.map, with the
+    /// package suffix. Regression for issue #89.
+    /// </summary>
+    [Test]
+    procedure ExpectedMapFileName_Desktop_Unchanged;
+
+    /// <summary>
+    /// An Android application scan expects libProject.so.map and does not
+    /// accept a desktop Project.map in that directory. Win32 stays
+    /// Project.map. Regression for issue #89.
+    /// </summary>
+    [Test]
+    procedure Scan_AndroidApp_MapPath_LibSoName_DesktopUnchanged;
+
+    /// <summary>
+    /// An Android package scan expects libProject plus DllSuffix plus
+    /// .so.map. The Win64 name stays Project plus DllSuffix plus .map.
+    /// Regression for issue #89.
+    /// </summary>
+    [Test]
+    procedure Scan_AndroidPackage_MapPath_KeepsSuffix;
+
     /// <summary>ProjectDir must be the src directory containing the dproj.</summary>
     [Test]
     procedure Scan_EngineDproj_ProjectDirIsValid;
@@ -383,6 +413,8 @@ uses
   System.Generics.Collections,
   DX.Comply.Tests.Paths;
 
+function MakeTempDir: string; forward;
+
 { TProjectScannerTests }
 
 procedure TProjectScannerTests.Setup;
@@ -569,6 +601,299 @@ begin
       'MapFilePath must be inferred from OutputDir, ProjectName and DllSuffix');
   finally
     LProjectInfo.Free;
+  end;
+end;
+
+procedure TProjectScannerTests.ExpectedMapFileName_Android_UsesLibSoMap;
+var
+  LProjectInfo: TProjectInfo;
+begin
+  LProjectInfo := TProjectInfo.Create;
+  try
+    LProjectInfo.ProjectName := 'CustomernameApp';
+    LProjectInfo.MainSourcePath := 'C:\App\CustomernameApp.dpr';
+
+    LProjectInfo.Platform := 'Android64';
+    Assert.IsTrue(LProjectInfo.IsAndroidPlatform,
+      'Android64 must be an Android target');
+    Assert.AreEqual('libCustomernameApp.so.map', LProjectInfo.ExpectedMapFileName,
+      'Android64 application MAP is lib<Project>.so.map');
+
+    LProjectInfo.Platform := 'Android32';
+    Assert.AreEqual('libCustomernameApp.so.map', LProjectInfo.ExpectedMapFileName,
+      'Android32 uses the same shared-library MAP name');
+
+    LProjectInfo.Platform := 'Android';
+    Assert.AreEqual('libCustomernameApp.so.map', LProjectInfo.ExpectedMapFileName,
+      'The legacy Android platform name uses the same MAP name');
+
+    LProjectInfo.Platform := 'android64';
+    Assert.AreEqual('libCustomernameApp.so.map', LProjectInfo.ExpectedMapFileName,
+      'Platform matching is case-insensitive');
+
+    LProjectInfo.ProjectName := 'Cipher';
+    LProjectInfo.MainSourcePath := 'C:\Pkg\Cipher.dpk';
+    LProjectInfo.DllSuffix := '_FMX';
+    LProjectInfo.Platform := 'Android64';
+    Assert.AreEqual('libCipher_FMX.so.map', LProjectInfo.ExpectedMapFileName,
+      'Android package MAP keeps DllSuffix inside lib<Name>.so.map');
+
+    LProjectInfo.ProjectName := 'Cipher_FMX';
+    LProjectInfo.DllSuffix := '';
+    Assert.AreEqual('libCipher_FMX.so.map', LProjectInfo.ExpectedMapFileName,
+      'A package whose name already includes the suffix uses that name');
+  finally
+    LProjectInfo.Free;
+  end;
+end;
+
+procedure TProjectScannerTests.ExpectedMapFileName_Desktop_Unchanged;
+var
+  LProjectInfo: TProjectInfo;
+begin
+  LProjectInfo := TProjectInfo.Create;
+  try
+    LProjectInfo.ProjectName := 'CustomernameApp';
+    LProjectInfo.MainSourcePath := 'C:\App\CustomernameApp.dpr';
+
+    LProjectInfo.Platform := 'Win32';
+    Assert.IsFalse(LProjectInfo.IsAndroidPlatform, 'Win32 is not Android');
+    Assert.AreEqual('CustomernameApp.map', LProjectInfo.ExpectedMapFileName,
+      'Win32 MAP stays <Project>.map');
+
+    LProjectInfo.Platform := 'Win64';
+    Assert.AreEqual('CustomernameApp.map', LProjectInfo.ExpectedMapFileName,
+      'Win64 MAP stays <Project>.map');
+
+    LProjectInfo.Platform := 'Win64x';
+    Assert.AreEqual('CustomernameApp.map', LProjectInfo.ExpectedMapFileName,
+      'Win64x MAP stays <Project>.map');
+
+    LProjectInfo.Platform := '';
+    Assert.AreEqual('CustomernameApp.map', LProjectInfo.ExpectedMapFileName,
+      'An empty platform keeps the desktop MAP name');
+
+    LProjectInfo.ProjectName := 'Cipher';
+    LProjectInfo.MainSourcePath := 'C:\Pkg\Cipher.dpk';
+    LProjectInfo.DllSuffix := '_FMX';
+    LProjectInfo.Platform := 'Win64';
+    Assert.AreEqual('Cipher_FMX.map', LProjectInfo.ExpectedMapFileName,
+      'Desktop package MAP still appends DllSuffix');
+
+    LProjectInfo.Platform := 'iOSDevice64';
+    Assert.IsFalse(LProjectInfo.IsAndroidPlatform, 'iOS is not Android');
+    Assert.AreEqual('Cipher_FMX.map', LProjectInfo.ExpectedMapFileName,
+      'iOS keeps the desktop MAP name');
+
+    LProjectInfo.Platform := 'Linux64';
+    Assert.AreEqual('Cipher_FMX.map', LProjectInfo.ExpectedMapFileName,
+      'Linux keeps the desktop MAP name');
+
+    LProjectInfo.Platform := 'OSXARM64';
+    Assert.AreEqual('Cipher_FMX.map', LProjectInfo.ExpectedMapFileName,
+      'macOS keeps the desktop MAP name');
+  finally
+    LProjectInfo.Free;
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_AndroidApp_MapPath_LibSoName_DesktopUnchanged;
+const
+  cDproj =
+    '<?xml version="1.0" encoding="utf-8"?>' + sLineBreak +
+    '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">' + sLineBreak +
+    '  <PropertyGroup>' + sLineBreak +
+    '    <MainSource>CustomernameApp.dpr</MainSource>' + sLineBreak +
+    '    <AppType>Application</AppType>' + sLineBreak +
+    '    <DCC_ExeOutput>.\out\$(Platform)\$(Config)</DCC_ExeOutput>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '</Project>';
+var
+  LAndroidMap: string;
+  LAndroidOut: string;
+  LDproj: string;
+  LProjectInfo: TProjectInfo;
+  LScanner: IProjectScanner;
+  LTempDir: string;
+  LWinMap: string;
+  LWinOut: string;
+begin
+  LTempDir := MakeTempDir;
+  try
+    LDproj := TPath.Combine(LTempDir, 'CustomernameApp.dproj');
+    TFile.WriteAllText(LDproj, cDproj, TEncoding.UTF8);
+    LScanner := TProjectScanner.Create;
+
+    LProjectInfo := LScanner.Scan(LDproj, 'Android64', 'Release');
+    try
+      LAndroidOut := LProjectInfo.OutputDir;
+      LAndroidMap := TPath.Combine(LAndroidOut, 'libCustomernameApp.so.map');
+      Assert.IsTrue(Pos('Android64', LAndroidOut) > 0,
+        'Android output directory must contain the platform: ' + LAndroidOut);
+      Assert.AreEqual(LAndroidMap, LProjectInfo.MapFilePath,
+        'Android MAP path must be lib<Project>.so.map in the output directory');
+    finally
+      LProjectInfo.Free;
+    end;
+
+    LProjectInfo := LScanner.Scan(LDproj, 'Win32', 'Release');
+    try
+      LWinOut := LProjectInfo.OutputDir;
+      LWinMap := TPath.Combine(LWinOut, 'CustomernameApp.map');
+      Assert.IsTrue(Pos('Win32', LWinOut) > 0,
+        'Win32 output directory must contain the platform: ' + LWinOut);
+      Assert.AreEqual(LWinMap, LProjectInfo.MapFilePath,
+        'Win32 MAP path must stay <Project>.map');
+    finally
+      LProjectInfo.Free;
+    end;
+
+    LProjectInfo := LScanner.Scan(LDproj, 'Win64', 'Release');
+    try
+      Assert.AreEqual(
+        TPath.Combine(LProjectInfo.OutputDir, 'CustomernameApp.map'),
+        LProjectInfo.MapFilePath,
+        'Win64 MAP path must stay <Project>.map');
+    finally
+      LProjectInfo.Free;
+    end;
+
+    Assert.AreNotEqual(LAndroidOut, LWinOut,
+      'Android and Win32 must not share one output directory in this fixture');
+
+    // A desktop-named MAP in the Android output must not be selected, and an
+    // Android-named MAP in the Win32 output must not replace Project.map.
+    ForceDirectories(LAndroidOut);
+    ForceDirectories(LWinOut);
+    TFile.WriteAllText(TPath.Combine(LAndroidOut, 'CustomernameApp.map'),
+      'desktop', TEncoding.UTF8);
+    TFile.WriteAllText(TPath.Combine(LWinOut, 'libCustomernameApp.so.map'),
+      'android', TEncoding.UTF8);
+
+    LProjectInfo := LScanner.Scan(LDproj, 'Android64', 'Release');
+    try
+      Assert.AreEqual(LAndroidMap, LProjectInfo.MapFilePath,
+        'Android must ignore CustomernameApp.map');
+      Assert.IsFalse(TFile.Exists(LProjectInfo.MapFilePath),
+        'The expected Android MAP is not the desktop file that is on disk');
+    finally
+      LProjectInfo.Free;
+    end;
+
+    LProjectInfo := LScanner.Scan(LDproj, 'Win32', 'Release');
+    try
+      Assert.AreEqual(LWinMap, LProjectInfo.MapFilePath,
+        'Win32 must ignore libCustomernameApp.so.map');
+      Assert.IsFalse(TFile.Exists(LProjectInfo.MapFilePath),
+        'The expected Win32 MAP is not the Android file that is on disk');
+    finally
+      LProjectInfo.Free;
+    end;
+
+    TFile.WriteAllText(LAndroidMap, 'map', TEncoding.UTF8);
+    LProjectInfo := LScanner.Scan(LDproj, 'Android64', 'Release');
+    try
+      Assert.AreEqual(LAndroidMap, LProjectInfo.MapFilePath,
+        'Android scan must find the existing lib<Project>.so.map');
+      Assert.IsTrue(TFile.Exists(LProjectInfo.MapFilePath),
+        'The resolved Android MAP path must exist');
+    finally
+      LProjectInfo.Free;
+    end;
+  finally
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_AndroidPackage_MapPath_KeepsSuffix;
+const
+  cDproj =
+    '<?xml version="1.0" encoding="utf-8"?>' + sLineBreak +
+    '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">' + sLineBreak +
+    '  <PropertyGroup>' + sLineBreak +
+    '    <MainSource>Cipher.dpk</MainSource>' + sLineBreak +
+    '    <AppType>Package</AppType>' + sLineBreak +
+    '    <DllSuffix>_FMX</DllSuffix>' + sLineBreak +
+    '    <DCC_ExeOutput>.\out\$(Platform)\$(Config)</DCC_ExeOutput>' + sLineBreak +
+    '    <DCC_BplOutput>.\bpl\$(Platform)\$(Config)</DCC_BplOutput>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '</Project>';
+var
+  LAndroidMap: string;
+  LBplDir: string;
+  LDproj: string;
+  LProjectInfo: TProjectInfo;
+  LScanner: IProjectScanner;
+  LTempDir: string;
+begin
+  LTempDir := MakeTempDir;
+  try
+    TFile.WriteAllText(TPath.Combine(LTempDir, 'Cipher.dpk'),
+      'package Cipher;' + sLineBreak + sLineBreak + 'end.' + sLineBreak,
+      TEncoding.UTF8);
+    LDproj := TPath.Combine(LTempDir, 'Cipher.dproj');
+    TFile.WriteAllText(LDproj, cDproj, TEncoding.UTF8);
+    LScanner := TProjectScanner.Create;
+
+    LProjectInfo := LScanner.Scan(LDproj, 'Android64', 'Release');
+    try
+      Assert.IsTrue(LProjectInfo.IsPackage, 'Cipher.dpk must be a package');
+      Assert.AreEqual('_FMX', LProjectInfo.EffectiveMapSuffix,
+        'The package MAP suffix must be DllSuffix');
+      Assert.AreEqual(
+        TPath.Combine(LProjectInfo.OutputDir, 'libCipher_FMX.so.map'),
+        LProjectInfo.MapFilePath,
+        'Android package MAP must be lib<Project><DllSuffix>.so.map');
+    finally
+      LProjectInfo.Free;
+    end;
+
+    LProjectInfo := LScanner.Scan(LDproj, 'Win64', 'Release');
+    try
+      Assert.AreEqual(
+        TPath.Combine(LProjectInfo.OutputDir, 'Cipher_FMX.map'),
+        LProjectInfo.MapFilePath,
+        'Win64 package MAP must stay <Project><DllSuffix>.map');
+    finally
+      LProjectInfo.Free;
+    end;
+
+    LProjectInfo := LScanner.Scan(LDproj, 'Win32', 'Debug');
+    try
+      Assert.AreEqual(
+        TPath.Combine(LProjectInfo.OutputDir, 'Cipher_FMX.map'),
+        LProjectInfo.MapFilePath,
+        'Win32 package MAP must stay <Project><DllSuffix>.map');
+    finally
+      LProjectInfo.Free;
+    end;
+
+    // The real file sits in the BPL directory. A desktop-named MAP in the
+    // exe directory must not hide it.
+    LProjectInfo := LScanner.Scan(LDproj, 'Android64', 'Release');
+    try
+      LBplDir := LProjectInfo.BplOutputDir;
+      ForceDirectories(LBplDir);
+      ForceDirectories(LProjectInfo.OutputDir);
+      TFile.WriteAllText(TPath.Combine(LProjectInfo.OutputDir, 'Cipher_FMX.map'),
+        'desktop', TEncoding.UTF8);
+      LAndroidMap := TPath.Combine(LBplDir, 'libCipher_FMX.so.map');
+      TFile.WriteAllText(LAndroidMap, 'map', TEncoding.UTF8);
+    finally
+      LProjectInfo.Free;
+    end;
+
+    LProjectInfo := LScanner.Scan(LDproj, 'Android64', 'Release');
+    try
+      Assert.AreEqual(LAndroidMap, LProjectInfo.MapFilePath,
+        'Android package scan must find lib<Project><DllSuffix>.so.map in the BPL directory');
+    finally
+      LProjectInfo.Free;
+    end;
+  finally
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir, True);
   end;
 end;
 

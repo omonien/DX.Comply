@@ -2276,7 +2276,7 @@ begin
   if AProjectInfo.ProjectName = '' then
     Exit;
 
-  LMapFileName := AProjectInfo.ProjectName + AProjectInfo.EffectiveMapSuffix + '.map';
+  LMapFileName := AProjectInfo.ExpectedMapFileName;
 
   // Build candidate directories in priority order:
   // 1. Configured output directory (from .dproj)
