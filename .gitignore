@@ -8,6 +8,7 @@
 *.dcp
 *.bpl
 *.exe
+!tests/fixtures/binaries/*.exe
 *.dll
 *.res
 !src/DX.Comply.IDE.Splash.res

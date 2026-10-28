@@ -428,15 +428,14 @@ type
 
 /// <summary>
 /// Build mode versions for files that have no version yet.
-/// The project's own outputs (.exe, .dcp, and the file at AOwnOutputPath,
-/// which is the .bpl of a package project) get AVersion, the product
-/// version. When AVersion is empty, an .exe/.dll/.bpl still on disk gets
-/// its PE FileVersion (or ProductVersion) from the version resource so the
-/// human-readable report and CycloneDX stay aligned (issue #90). Any other
-/// DLL or .bpl that was found on disk gets its own version from its version
-/// resource, and no version when it has none. Other files (.res, .map, ...)
-/// get no version. Unit evidence, runtime packages, requires packages and
-/// library source files are left unchanged.
+/// The file at AOwnOutputPath (the executable, DLL, or package the project
+/// builds) and a .dcp get AVersion, the product version. When AVersion is
+/// empty, that .exe, .dll, or .bpl still on disk gets its PE FileVersion
+/// (or ProductVersion) so the report and CycloneDX stay aligned (issue #90).
+/// Any other .exe, .dll, or .bpl found on disk gets the version from its own
+/// version resource, and no version when it has none (issue #96). Other files
+/// (.res, .map, ...) get no version. Unit evidence, runtime packages, requires
+/// packages and library source files are left unchanged.
 /// </summary>
 procedure ApplyProductVersionToBuildFiles(const AArtefacts: TArtefactList;
   const AVersion: string; const AOwnOutputPath: string = '');
@@ -583,20 +582,27 @@ begin
     LOwnOutput := (AOwnOutputPath <> '') and (LArtefact.FilePath <> '') and
       SameText(ExpandFileName(LArtefact.FilePath), ExpandFileName(AOwnOutputPath));
 
-    if LOwnOutput or (LType <> 'external-reference') and
-       ((LExt = '.exe') or (LExt = '.dcp')) then
+    // Only the binary this project builds, plus a .dcp, carries the product
+    // version. Another .exe in the same directory is a third-party file
+    // (issue #96), same as a DLL or .bpl that the project did not build.
+    if LOwnOutput or ((LType <> 'external-reference') and (LExt = '.dcp')) then
     begin
       LArtefact.Version := Trim(AVersion);
       // Issue #90: when no product version was configured, still surface the
-      // PE version resource for binaries so the report and SBOM agree.
+      // PE version resource for the project's own binary so the report and
+      // CycloneDX stay aligned.
       if (LArtefact.Version = '') and (LArtefact.FilePath <> '') and
          ((LExt = '.exe') or (LExt = '.dll') or (LExt = '.bpl')) then
+      begin
         LArtefact.Version := GetFileVersionText(LArtefact.FilePath);
+      end;
     end
-    else if (LExt = '.dll') or (LExt = '.bpl') then
-      // A third-party DLL or package carries its own version, or none.
-      // The project's own .dll or .bpl was handled above via AOwnOutputPath.
-      LArtefact.Version := GetFileVersionText(LArtefact.FilePath)
+    else if (LExt = '.exe') or (LExt = '.dll') or (LExt = '.bpl') then
+    begin
+      // A third-party EXE, DLL, or package carries its own version, or none.
+      // The project's own output was handled above via AOwnOutputPath.
+      LArtefact.Version := GetFileVersionText(LArtefact.FilePath);
+    end
     else
       Continue;
     AArtefacts[I] := LArtefact;
