@@ -35,6 +35,13 @@ type
     procedure ReadUnitNames_DetailedMap_ExtractsUniqueUnitNames;
 
     /// <summary>
+    /// An ARM/LLVM linker map is not the classic Delphi map. Unit names must
+    /// not be guessed from object-file or symbol lines. Issue #100.
+    /// </summary>
+    [Test]
+    procedure ReadUnitNames_LlvmMap_ReturnsNoUnits;
+
+    /// <summary>
     /// The reader must extract unit names from segment entries (M=UnitName).
     /// </summary>
     [Test]
@@ -112,6 +119,30 @@ begin
   var LKernel100ns := Int64(LKernel.dwHighDateTime) shl 32 or LKernel.dwLowDateTime;
   var LUser100ns := Int64(LUser.dwHighDateTime) shl 32 or LUser.dwLowDateTime;
   Result := (LKernel100ns + LUser100ns) div 10000;
+end;
+
+procedure TMapFileReaderTests.ReadUnitNames_LlvmMap_ReturnsNoUnits;
+var
+  LMapFilePath: string;
+  LUnitNames: TArray<string>;
+begin
+  LMapFilePath := TPath.GetTempFileName;
+  try
+    TFile.WriteAllText(LMapFilePath,
+      'Archive member included to satisfy reference by file (symbol)' + sLineBreak +
+      'Linker script and memory map' + sLineBreak +
+      '.text           0x0000000000010000' + sLineBreak +
+      ' .text.Unit1    0x0000000000010000       Unit1.o' + sLineBreak +
+      '                0x0000000000010000       System.SysUtils.Initialize' + sLineBreak +
+      'libAndroidApp.so.map' + sLineBreak,
+      TEncoding.UTF8);
+    LUnitNames := TMapFileReader.ReadUnitNames(LMapFilePath);
+    Assert.AreEqual(NativeInt(0), NativeInt(Length(LUnitNames)),
+      'An LLVM map must not yield guessed unit names');
+  finally
+    if TFile.Exists(LMapFilePath) then
+      TFile.Delete(LMapFilePath);
+  end;
 end;
 
 procedure TMapFileReaderTests.ReadUnitNames_DetailedMap_ExtractsUniqueUnitNames;

@@ -203,9 +203,10 @@ type
     function ResolveOutputDirectory(const ARawPath, AProjectDir, AProjectName,
       ALabel: string; const ANotes: TList<string>): string;
     /// <summary>
-    /// Returns .exe, .dll, or .bpl for the project output the .dproj names.
+    /// Returns application, library, or package from AppType or the main
+    /// source. The platform decides the file name.
     /// </summary>
-    function DetectOutputExtension(const AMainSourcePath: string): string;
+    function DetectOutputKind(const AMainSourcePath: string): TPrimaryOutputKind;
     /// <summary>
     /// Reads DllSuffix for the active configuration. Returns False when the
     /// value still contains an unresolved $(...) token.
@@ -2061,26 +2062,22 @@ begin
   end;
 end;
 
-function TProjectScanner.DetectOutputExtension(const AMainSourcePath: string): string;
-var
-  LAppType: string;
-  LKeyword: string;
-  LMatch: TMatch;
-  LText: string;
+function TProjectScanner.DetectOutputKind(const AMainSourcePath: string): TPrimaryOutputKind;
 begin
-  LAppType := Trim(GetPropertyValue('AppType', ''));
+  var LAppType := Trim(GetPropertyValue('AppType', ''));
   if SameText(LAppType, 'Library') then
-    Exit('.dll');
+    Exit(pokLibrary);
   if SameText(LAppType, 'Package') then
-    Exit('.bpl');
+    Exit(pokPackage);
   if SameText(LAppType, 'Application') or SameText(LAppType, 'Console') then
-    Exit('.exe');
+    Exit(pokApplication);
 
   if SameText(TPath.GetExtension(AMainSourcePath), '.dpk') then
-    Exit('.bpl');
+    Exit(pokPackage);
 
   if (AMainSourcePath <> '') and TFile.Exists(AMainSourcePath) then
   begin
+    var LText := '';
     try
       LText := TFile.ReadAllText(AMainSourcePath);
     except
@@ -2089,20 +2086,20 @@ begin
     // The first program/library/package keyword decides the output when the
     // .dproj does not say AppType. A leading comment or blank line is skipped
     // because ^ matches each line.
-    LMatch := TRegEx.Match(LText, '^\s*(program|library|package)\b',
+    var LMatch := TRegEx.Match(LText, '^\s*(program|library|package)\b',
       [roIgnoreCase, roMultiLine]);
     if LMatch.Success then
     begin
-      LKeyword := LowerCase(LMatch.Groups[1].Value);
+      var LKeyword := LowerCase(LMatch.Groups[1].Value);
       if LKeyword = 'library' then
-        Exit('.dll');
+        Exit(pokLibrary);
       if LKeyword = 'package' then
-        Exit('.bpl');
-      Exit('.exe');
+        Exit(pokPackage);
+      Exit(pokApplication);
     end;
   end;
 
-  Result := '.exe';
+  Result := pokApplication;
 end;
 
 function TProjectScanner.TryResolveDllSuffix(const AProjectName: string;
@@ -2127,42 +2124,37 @@ begin
 end;
 
 procedure TProjectScanner.ResolveOutputFile(var AProjectInfo: TProjectInfo);
-var
-  LDir: string;
-  LExt: string;
-  LFileName: string;
-  LSuffix: string;
-  LSuffixResolved: Boolean;
 begin
   AProjectInfo.OutputFilePath := '';
-  LExt := DetectOutputExtension(AProjectInfo.MainSourcePath);
+  var LKind := DetectOutputKind(AProjectInfo.MainSourcePath);
+  AProjectInfo.OutputKind := LKind;
 
-  // Packages are written to the BPL output. Exe and dll use the exe output.
-  // OutputDir prefers DCC_ExeOutput, so a package whose BPL folder differs
-  // from that path must not be scanned from the exe folder (issue #38).
-  LDir := '';
-  if SameText(LExt, '.bpl') then
+  // Packages are written to the BPL output on every platform. Applications
+  // and libraries use the exe output. OutputDir prefers DCC_ExeOutput, so a
+  // package whose BPL folder differs must not be scanned from the exe folder
+  // (issue #38). The file name itself is platform-specific (issue #99).
+  var LDir := '';
+  if LKind = pokPackage then
     LDir := AProjectInfo.BplOutputDir;
   if LDir = '' then
     LDir := AProjectInfo.OutputDir;
   AProjectInfo.ArtefactOutputDir := LDir;
 
-  // DllSuffix is appended to dll and bpl names only. An application keeps
-  // ProjectName.exe even when the .dproj still carries a suffix.
-  LSuffix := '';
-  if SameText(LExt, '.exe') then
-    LSuffixResolved := True
-  else
+  // DllSuffix applies to libraries and packages. An application keeps its
+  // own name even when the .dproj still carries a suffix.
+  var LSuffix := '';
+  var LSuffixResolved := True;
+  if LKind <> pokApplication then
     LSuffixResolved := TryResolveDllSuffix(AProjectInfo.ProjectName, LSuffix);
   if not LSuffixResolved then
     Exit;
   if AProjectInfo.ProjectName = '' then
     Exit;
 
-  if SameText(LExt, '.exe') then
-    LFileName := AProjectInfo.ProjectName + LExt
-  else
-    LFileName := AProjectInfo.ProjectName + LSuffix + LExt;
+  var LFileName := PrimaryOutputFileName(AProjectInfo.Platform,
+    AProjectInfo.ProjectName, LSuffix, LKind);
+  if LFileName = '' then
+    Exit;
 
   if LDir = '' then
     AProjectInfo.OutputFilePath := LFileName
@@ -2538,6 +2530,13 @@ begin
 
   if AProjectInfo.OutputDir = '' then
     AProjectInfo.OutputDir := AProjectInfo.ArtefactOutputDir;
+
+  if SameText(LExt, '.dll') then
+    AProjectInfo.OutputKind := pokLibrary
+  else if SameText(LExt, '.bpl') then
+    AProjectInfo.OutputKind := pokPackage
+  else
+    AProjectInfo.OutputKind := pokApplication;
 
   if AProjectInfo.ProjectName <> '' then
   begin

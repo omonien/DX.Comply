@@ -2456,8 +2456,14 @@ begin
         end;
         if FFileScanner.CollectFile(LOutputFile,
           TPath.GetFileName(LOutputFile),
-          FConfig.IncludePatterns, FConfig.ExcludePatterns, LArtefact) then
+          FConfig.IncludePatterns, FConfig.ExcludePatterns, LArtefact, True) then
+        begin
+          // .so is both an Android application and a Linux library. The
+          // project kind, not the extension, decides the artefact type.
+          if AProjectInfo.OutputKind <> pokUnknown then
+            LArtefact.ArtefactType := PrimaryOutputArtefactType(AProjectInfo.OutputKind);
           Result.Add(LArtefact);
+        end;
         RememberPatternWarnings(LWarnings);
       end;
 
@@ -3059,8 +3065,23 @@ begin
 
     DoProgress('Preparing build evidence...', 20);
     LBuildEvidence := ReadBuildEvidence(LProjectInfo);
-    DoProgress(Format('Collected %d build evidence item(s)',
+    DoProgress(Format('Collected %d build evidence item(s):',
       [LBuildEvidence.EvidenceItems.Count]), 25);
+    // Unit rows from a detailed map can number in the thousands. They are
+    // counted here. The lines below name the other evidence items so the
+    // log is not only a total (issue #100).
+    var LMapUnitCount := 0;
+    for var LEvidenceItem in LBuildEvidence.EvidenceItems do
+    begin
+      if Trim(LEvidenceItem.UnitName) <> '' then
+      begin
+        Inc(LMapUnitCount);
+        Continue;
+      end;
+      DoProgress('  ' + BuildEvidenceItemLogLine(LEvidenceItem), 25);
+    end;
+    if LMapUnitCount > 0 then
+      DoProgress(Format('  Unit from map file: %d unit(s)', [LMapUnitCount]), 25);
     ReportWarnings(LBuildEvidence.Warnings, LReportedWarnings, 26);
 
     DoProgress('Resolving composition evidence...', 28);

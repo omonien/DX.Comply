@@ -80,6 +80,38 @@ type
     /// </summary>
     [Test]
     procedure Read_ProjectInfo_NonDetailedMapFile_AddsGuidanceWarning;
+
+    /// <summary>
+    /// An Android map with no classic unit sections must not tell the user to
+    /// set Map file to Detailed. The ARM format is not guessed. Issue #100.
+    /// </summary>
+    [Test]
+    procedure Read_ProjectInfo_AndroidMap_UsesArmHintAndDoesNotGuess;
+
+    /// <summary>
+    /// Classic unit sections in an Android map are still read.
+    /// </summary>
+    [Test]
+    procedure Read_ProjectInfo_AndroidMap_ClassicUnitsAreRead;
+
+    /// <summary>
+    /// A Linux map with no classic unit sections names the unknown format
+    /// and does not invent a Project Options path.
+    /// </summary>
+    [Test]
+    procedure Read_ProjectInfo_LinuxMap_UnknownFormatDoesNotGuess;
+
+    /// <summary>
+    /// A missing Android map names Map file ARM, not the Windows Detailed path.
+    /// </summary>
+    [Test]
+    procedure Read_ProjectInfo_MissingAndroidMap_UsesArmHint;
+
+    /// <summary>
+    /// The progress log line names the evidence item, not only a count.
+    /// </summary>
+    [Test]
+    procedure BuildEvidenceItemLogLine_NamesWhatWasFound;
   end;
 
 implementation
@@ -228,7 +260,7 @@ begin
         for LEvidenceItem in LBuildEvidence.EvidenceItems do
         begin
           if (LEvidenceItem.SourceKind = besMapFile) and
-             (LEvidenceItem.DisplayName = 'Detailed map file') then
+             (LEvidenceItem.DisplayName = 'Map file') then
             LHasDetailedMapItem := True;
 
           if (LEvidenceItem.SourceKind = besMapFile) and
@@ -432,6 +464,8 @@ begin
 
         Assert.IsTrue(LHasGuidanceWarning,
           'A non-detailed MAP file must produce an actionable warning with DCC_MapFile=3 guidance (regression #15)');
+        Assert.IsTrue(Pos('Map file > Detailed', LBuildEvidence.Warnings[0]) > 0,
+          'Win32 guidance must keep the Detailed map path');
       finally
         LBuildEvidence.Free;
       end;
@@ -442,6 +476,184 @@ begin
     if TFile.Exists(LMapFilePath) then
       TFile.Delete(LMapFilePath);
   end;
+end;
+
+procedure TBuildEvidenceReaderTests.Read_ProjectInfo_AndroidMap_UsesArmHintAndDoesNotGuess;
+var
+  LBuildEvidence: TBuildEvidence;
+  LMapFilePath: string;
+  LProjectInfo: TProjectInfo;
+  LWarning: string;
+begin
+  // Neither a classic segment map nor an LLVM linker map has the unit
+  // sections the reader understands. The warning must not invent units.
+  LMapFilePath := TPath.GetTempFileName;
+  try
+    TFile.WriteAllText(LMapFilePath,
+      'Linker script and memory map' + sLineBreak +
+      '.text           0x0000000000010000' + sLineBreak +
+      ' .text.Unit1    0x0000000000010000       Unit1.o' + sLineBreak +
+      '                0x0000000000010000       Unit1.Initialize' + sLineBreak,
+      TEncoding.UTF8);
+
+    LProjectInfo := TProjectInfo.Create;
+    try
+      LProjectInfo.ProjectPath := 'C:\Softwareprojekte\AndroidApp\Source\AndroidApp.dproj';
+      LProjectInfo.Platform := 'Android64';
+      LProjectInfo.Configuration := 'Release';
+      LProjectInfo.MapFilePath := LMapFilePath;
+
+      LBuildEvidence := FReader.Read(LProjectInfo);
+      try
+        Assert.AreEqual(NativeInt(1), NativeInt(LBuildEvidence.Warnings.Count),
+          'An unreadable Android map must produce one warning');
+        LWarning := LBuildEvidence.Warnings[0];
+        Assert.IsTrue(Pos('Map file ARM', LWarning) > 0, LWarning);
+        Assert.IsTrue(Pos('> On', LWarning) > 0, LWarning);
+        Assert.IsTrue(Pos('did not guess', LWarning) > 0, LWarning);
+        Assert.IsTrue(Pos('DCC_MapFile=3', LWarning) = 0, LWarning);
+        Assert.IsTrue(Pos('Map file > Detailed', LWarning) = 0, LWarning);
+        Assert.IsTrue(Pos('Unit1', LWarning) = 0,
+          'The warning must not treat an LLVM symbol as a unit');
+      finally
+        LBuildEvidence.Free;
+      end;
+    finally
+      LProjectInfo.Free;
+    end;
+  finally
+    if TFile.Exists(LMapFilePath) then
+      TFile.Delete(LMapFilePath);
+  end;
+end;
+
+procedure TBuildEvidenceReaderTests.Read_ProjectInfo_AndroidMap_ClassicUnitsAreRead;
+var
+  LBuildEvidence: TBuildEvidence;
+  LEvidenceItem: TBuildEvidenceItem;
+  LHasUnit: Boolean;
+  LMapFilePath: string;
+  LProjectInfo: TProjectInfo;
+  LWarning: string;
+begin
+  LMapFilePath := TPath.GetTempFileName;
+  try
+    TFile.WriteAllText(LMapFilePath,
+      'Line numbers for Androidapi.Jni(Androidapi.Jni.pas) segment .text' + sLineBreak +
+      '  10 0001:00000000' + sLineBreak,
+      TEncoding.UTF8);
+
+    LProjectInfo := TProjectInfo.Create;
+    try
+      LProjectInfo.Platform := 'Android32';
+      LProjectInfo.MapFilePath := LMapFilePath;
+      LBuildEvidence := FReader.Read(LProjectInfo);
+      try
+        LHasUnit := False;
+        for LEvidenceItem in LBuildEvidence.EvidenceItems do
+          if SameText(LEvidenceItem.UnitName, 'Androidapi.Jni') then
+            LHasUnit := True;
+        Assert.IsTrue(LHasUnit,
+          'Classic unit sections in an Android map must still be read');
+        for LWarning in LBuildEvidence.Warnings do
+          Assert.IsTrue(Pos('did not guess', LWarning) = 0,
+            'A map that yielded units must not warn that the format is unknown: ' + LWarning);
+      finally
+        LBuildEvidence.Free;
+      end;
+    finally
+      LProjectInfo.Free;
+    end;
+  finally
+    if TFile.Exists(LMapFilePath) then
+      TFile.Delete(LMapFilePath);
+  end;
+end;
+
+procedure TBuildEvidenceReaderTests.Read_ProjectInfo_LinuxMap_UnknownFormatDoesNotGuess;
+var
+  LBuildEvidence: TBuildEvidence;
+  LMapFilePath: string;
+  LProjectInfo: TProjectInfo;
+  LWarning: string;
+begin
+  LMapFilePath := TPath.GetTempFileName;
+  try
+    TFile.WriteAllText(LMapFilePath,
+      ' Start         Length     Name                   Class' + sLineBreak +
+      '  0001:00000000 000067FCH .text                  CODE' + sLineBreak,
+      TEncoding.UTF8);
+
+    LProjectInfo := TProjectInfo.Create;
+    try
+      LProjectInfo.Platform := 'Linux64';
+      LProjectInfo.MapFilePath := LMapFilePath;
+      LBuildEvidence := FReader.Read(LProjectInfo);
+      try
+        Assert.AreEqual(NativeInt(1), NativeInt(LBuildEvidence.Warnings.Count));
+        LWarning := LBuildEvidence.Warnings[0];
+        Assert.IsTrue(Pos('Linux map format', LWarning) > 0, LWarning);
+        Assert.IsTrue(Pos('did not guess', LWarning) > 0, LWarning);
+        Assert.IsTrue(Pos('Map file > Detailed', LWarning) = 0, LWarning);
+        Assert.IsTrue(Pos('Map file ARM', LWarning) = 0, LWarning);
+        Assert.IsTrue(Pos('DCC_MapFile=3', LWarning) = 0, LWarning);
+      finally
+        LBuildEvidence.Free;
+      end;
+    finally
+      LProjectInfo.Free;
+    end;
+  finally
+    if TFile.Exists(LMapFilePath) then
+      TFile.Delete(LMapFilePath);
+  end;
+end;
+
+procedure TBuildEvidenceReaderTests.Read_ProjectInfo_MissingAndroidMap_UsesArmHint;
+var
+  LBuildEvidence: TBuildEvidence;
+  LMapFilePath: string;
+  LProjectInfo: TProjectInfo;
+  LWarning: string;
+begin
+  LMapFilePath := TPath.Combine(TPath.GetTempPath, TPath.GetRandomFileName + '.map');
+  LProjectInfo := TProjectInfo.Create;
+  try
+    LProjectInfo.Platform := 'Android64';
+    LProjectInfo.MapFilePath := LMapFilePath;
+    LBuildEvidence := FReader.Read(LProjectInfo);
+    try
+      Assert.IsTrue(LBuildEvidence.Warnings.Count >= 1);
+      LWarning := LBuildEvidence.Warnings[0];
+      Assert.IsTrue(Pos('Map file ARM', LWarning) > 0, LWarning);
+      Assert.IsTrue(Pos('Map file > Detailed', LWarning) = 0, LWarning);
+    finally
+      LBuildEvidence.Free;
+    end;
+  finally
+    LProjectInfo.Free;
+  end;
+end;
+
+procedure TBuildEvidenceReaderTests.BuildEvidenceItemLogLine_NamesWhatWasFound;
+var
+  LItem: TBuildEvidenceItem;
+begin
+  LItem := Default(TBuildEvidenceItem);
+  LItem.DisplayName := 'Expected map file';
+  LItem.FilePath := 'C:\Softwareprojekte\AndroidApp\Source\Android64\Release\libAndroidApp.so.map';
+  LItem.Detail := 'MapFilePath';
+  Assert.AreEqual(
+    'Expected map file - C:\Softwareprojekte\AndroidApp\Source\Android64\Release\libAndroidApp.so.map [MapFilePath]',
+    BuildEvidenceItemLogLine(LItem));
+
+  LItem := Default(TBuildEvidenceItem);
+  LItem.DisplayName := 'Unit from map file';
+  LItem.UnitName := 'System.SysUtils';
+  LItem.FilePath := 'C:\Build\App.map';
+  LItem.Detail := 'LineNumbersSection';
+  Assert.IsTrue(Pos('System.SysUtils', BuildEvidenceItemLogLine(LItem)) > 0);
+  Assert.IsTrue(Pos('App.map', BuildEvidenceItemLogLine(LItem)) > 0);
 end;
 
 initialization

@@ -108,6 +108,13 @@ type
     [Test]
     procedure Generate_ValidProject_FiresProgress100;
 
+    /// <summary>
+    /// The progress log names each build evidence item. A count alone hides
+    /// what was found. Issue #100.
+    /// </summary>
+    [Test]
+    procedure Generate_ListsBuildEvidenceItems;
+
     /// <summary>The generated file must contain valid CycloneDX JSON.</summary>
     [Test]
     procedure Generate_OutputFileContainsValidJson;
@@ -646,6 +653,28 @@ begin
     LGen.Generate(FEngineDprojPath, FOutputFile);
     Assert.IsTrue(FProgressValues.Contains(100),
       'A successful Generate must fire a progress event with value 100');
+  finally
+    LGen.Free;
+  end;
+end;
+
+procedure TEngineTests.Generate_ListsBuildEvidenceItems;
+var
+  LGen: TDxComplyGenerator;
+  LText: string;
+begin
+  LGen := TDxComplyGenerator.Create;
+  try
+    LGen.OnProgress := OnProgress;
+    Assert.IsTrue(LGen.Generate(FEngineDprojPath, FOutputFile),
+      'Generate must succeed so the evidence log is produced');
+    LText := FProgressMessages.Text;
+    Assert.IsTrue(Pos('build evidence item(s):', LText) > 0,
+      'The log must keep the evidence count: ' + LText);
+    Assert.IsTrue(Pos('Project metadata', LText) > 0,
+      'The log must name the project metadata evidence item: ' + LText);
+    Assert.IsTrue(Pos('Expected map file', LText) > 0,
+      'The log must name the expected map file: ' + LText);
   finally
     LGen.Free;
   end;

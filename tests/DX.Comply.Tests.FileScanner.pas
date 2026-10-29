@@ -168,6 +168,14 @@ type
     [Test]
     procedure CollectFile_ExcludePattern_RejectsFile;
 
+    /// <summary>
+    /// The named project output is collected when it is libProject.so or has
+    /// no extension. A default directory scan still ignores those files.
+    /// Issue #99.
+    /// </summary>
+    [Test]
+    procedure CollectFile_KnownProjectOutput_AcceptsPlatformBinary;
+
     // ---- GetArtefactType -----------------------------------------------------
 
     [Test]
@@ -675,6 +683,49 @@ begin
       'A missing file has no size');
     Assert.AreEqual('', LArtefact.Hash,
       'A missing file must not receive a hash');
+  finally
+    LScanner.Free;
+  end;
+end;
+
+procedure TFileScannerTests.CollectFile_KnownProjectOutput_AcceptsPlatformBinary;
+var
+  LArtefact: TArtefactInfo;
+  LResult: TArtefactList;
+  LScanner: TFileScanner;
+  LSoPath: string;
+begin
+  LSoPath := TPath.Combine(FTempDir, 'libAndroidApp.so');
+  TFile.WriteAllBytes(LSoPath, TBytes.Create($7F, $45, $4C, $46));
+  TFile.WriteAllBytes(TPath.Combine(FTempDir, 'LinuxApp'), TBytes.Create($7F, $45, $4C, $46));
+
+  LScanner := TFileScanner.Create;
+  try
+    LResult := LScanner.Scan(FTempDir, [], []);
+    try
+      Assert.IsFalse(ContainsFile(LResult, 'libAndroidApp.so'),
+        'A default directory scan must not pick up every .so');
+      Assert.IsFalse(ContainsFile(LResult, 'LinuxApp'),
+        'A default directory scan must not pick up extensionless files');
+    finally
+      LResult.Free;
+    end;
+
+    Assert.IsFalse(LScanner.CollectFile(LSoPath, 'libAndroidApp.so', [], [], LArtefact),
+      'Without the known-output flag, .so is outside the default extensions');
+    Assert.IsTrue(LScanner.CollectFile(LSoPath, 'libAndroidApp.so', [], [], LArtefact, True),
+      'The named Android output must be collected');
+    Assert.AreEqual('library', LArtefact.ArtefactType,
+      '.so is a library until the engine applies the project kind');
+    Assert.IsTrue(LScanner.CollectFile(TPath.Combine(FTempDir, 'LinuxApp'),
+      'LinuxApp', [], [], LArtefact, True),
+      'The named extensionless Linux output must be collected');
+    Assert.IsFalse(LScanner.CollectFile(LSoPath, 'libAndroidApp.so', ['*.exe'], [],
+      LArtefact, True),
+      'An explicit include list still filters the named output');
+    Assert.IsFalse(LScanner.CollectFile(LSoPath, 'libAndroidApp.so', [], ['*.so'],
+      LArtefact, True),
+      'An exclude list still rejects the named output');
   finally
     LScanner.Free;
   end;

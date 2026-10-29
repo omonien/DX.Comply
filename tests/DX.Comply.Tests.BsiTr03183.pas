@@ -211,6 +211,11 @@ begin
   Assert.AreEqual('TestApp.exe', BsiComponentFileName(LExe.RelativePath));
   Assert.AreEqual('notes.tar.gz', BsiComponentFileName(LZip.RelativePath));
   Assert.AreEqual('executable', BsiExecutableValue(LExe));
+  Assert.AreEqual('executable', BsiExecutableValue(
+    MakeArtefact('libAndroidApp.so', 'unknown', '', '', 1)),
+    'An Android shared library is an executable artefact');
+  Assert.AreEqual('executable', BsiExecutableValue(
+    MakeArtefact('libDemo.dylib', 'file', '', '', 1)));
   Assert.AreEqual('non-executable', BsiExecutableValue(LUnit));
   Assert.AreEqual('executable', BsiExecutableValue(LDll));
   Assert.AreEqual('archive', BsiArchiveValue(BsiComponentFileName(LZip.RelativePath)));

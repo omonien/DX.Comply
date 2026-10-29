@@ -136,6 +136,21 @@ type
   end;
 
   /// <summary>
+  /// Kind of binary a Delphi project builds. The file name also depends on
+  /// the target platform.
+  /// </summary>
+  TPrimaryOutputKind = (
+    /// <summary>The scanner could not tell application, library, or package.</summary>
+    pokUnknown,
+    /// <summary>program or console application.</summary>
+    pokApplication,
+    /// <summary>library project.</summary>
+    pokLibrary,
+    /// <summary>package project.</summary>
+    pokPackage
+  );
+
+  /// <summary>
   /// Project metadata extracted from .dproj file.
   /// </summary>
   TProjectInfo = record
@@ -162,11 +177,18 @@ type
     /// </summary>
     ArtefactOutputDir: string;
     /// <summary>
-    /// Full path of the exe, dll, or bpl the .dproj names for the active
-    /// configuration and platform, including DllSuffix. Empty when that name
-    /// cannot be resolved.
+    /// Full path of the binary the project builds for the active
+    /// configuration and platform. Windows is .exe, .dll, or .bpl.
+    /// Android is lib&lt;Project&gt;.so. Linux and macOS applications have
+    /// no extension. DllSuffix is included for libraries and packages.
+    /// Empty when that name cannot be resolved.
     /// </summary>
     OutputFilePath: string;
+    /// <summary>
+    /// Application, library, or package. Combined with Platform to build
+    /// OutputFilePath. pokUnknown when the scanner could not tell.
+    /// </summary>
+    OutputKind: TPrimaryOutputKind;
     /// <summary>Output directory for generated package binaries (.bpl).</summary>
     BplOutputDir: string;
     /// <summary>Output directory for generated package metadata (.dcp).</summary>
@@ -396,11 +418,14 @@ type
     /// Builds an artefact for one file when it passes include/exclude.
     /// A missing file is still returned so the named project output can be
     /// listed before it has been built. Hash and size are set only when the
-    /// file exists.
+    /// file exists. AKnownProjectOutput accepts a platform binary whose
+    /// extension is not .exe, .dll, .bpl, or .dcp, such as libProject.so or
+    /// an extensionless Linux executable, when no include patterns are set.
+    /// Exclude patterns and an explicit include list still apply.
     /// </summary>
     function CollectFile(const AFilePath, ARelativePath: string;
       const AIncludePatterns, AExcludePatterns: TArray<string>;
-      out AArtefact: TArtefactInfo): Boolean;
+      out AArtefact: TArtefactInfo; AKnownProjectOutput: Boolean = False): Boolean;
     /// <summary>
     /// Determines the artefact type based on file extension.
     /// </summary>
@@ -529,7 +554,7 @@ function IsBsiArchiveFileName(const AFileName: string): Boolean;
 
 /// <summary>
 /// True for an application, library, package, or runtime package, and for a
-/// file whose name ends in .exe, .dll, or .bpl.
+/// file whose name ends in .exe, .dll, .bpl, .so, or .dylib.
 /// </summary>
 function IsBsiExecutableArtefact(const AArtefact: TArtefactInfo): Boolean;
 
@@ -547,6 +572,25 @@ function BsiStructuredValue(const AFileName: string): string;
 /// the artefact has no file name.
 /// </summary>
 function BsiPropertyComment(const AArtefact: TArtefactInfo): string;
+
+/// <summary>
+/// File name Delphi writes for this platform and project kind.
+/// Android applications, libraries, and packages are lib&lt;Name&gt;.so.
+/// Linux and macOS applications have no extension. Linux libraries are
+/// lib&lt;Name&gt;.so and Linux packages are bpl&lt;Name&gt;.so. macOS
+/// libraries are lib&lt;Name&gt;.dylib and macOS packages are
+/// bpl&lt;Name&gt;.dylib. iOS device libraries and packages are static
+/// lib&lt;Name&gt;.a. Windows stays .exe, .dll, and .bpl.
+/// ADllSuffix is applied to libraries and packages only.
+/// </summary>
+function PrimaryOutputFileName(const APlatform, AProjectName, ADllSuffix: string;
+  AKind: TPrimaryOutputKind): string;
+
+/// <summary>
+/// Artefact type of the binary this project builds: application, library,
+/// or package.
+/// </summary>
+function PrimaryOutputArtefactType(AKind: TPrimaryOutputKind): string;
 
 implementation
 
@@ -828,6 +872,109 @@ begin
     LName.EndsWith('.tar.gz') or LName.EndsWith('.tar.bz2');
 end;
 
+function PlatformOutputFamily(const APlatform: string): string;
+begin
+  // Families follow the file names in RAD Studio's output tables:
+  // Android lib*.so, Linux ELF / lib*.so / bpl*.so, macOS Mach-O /
+  // lib*.dylib / bpl*.dylib, iOS device static lib*.a. Anything else,
+  // including Win32, Win64, and Win64x, keeps the Windows names.
+  var LPlatform := Trim(APlatform);
+  if StartsText('Android', LPlatform) then
+    Exit('Android');
+  if StartsText('Linux', LPlatform) then
+    Exit('Linux');
+  if StartsText('OSX', LPlatform) or StartsText('macOS', LPlatform) then
+    Exit('macOS');
+  // iOSSimARM64 links like the device. The old iOSSimulator target follows
+  // the macOS dynamic-library names.
+  if StartsText('iOSDevice', LPlatform) or SameText(LPlatform, 'iOSSimARM64') then
+    Exit('iOSDevice');
+  if StartsText('iOS', LPlatform) then
+    Exit('iOSSimulator');
+  Result := 'Windows';
+end;
+
+function PrimaryOutputFileName(const APlatform, AProjectName, ADllSuffix: string;
+  AKind: TPrimaryOutputKind): string;
+begin
+  Result := '';
+  var LName := Trim(AProjectName);
+  if LName = '' then
+    Exit;
+
+  var LKind := AKind;
+  if LKind = pokUnknown then
+    LKind := pokApplication;
+
+  // Applications do not take DllSuffix. A library or package does.
+  var LSuffix := '';
+  if LKind <> pokApplication then
+    LSuffix := ADllSuffix;
+
+  var LFamily := PlatformOutputFamily(APlatform);
+  if LFamily = 'Android' then
+  begin
+    // Applications are shared libraries too. Packages are named the same
+    // way as the Android map stem lib<Name>.so (issue #89).
+    Result := 'lib' + LName + LSuffix + '.so';
+  end
+  else if LFamily = 'Linux' then
+  begin
+    if LKind = pokPackage then
+      Result := 'bpl' + LName + LSuffix + '.so'
+    else if LKind = pokLibrary then
+      Result := 'lib' + LName + LSuffix + '.so'
+    else
+      Result := LName;
+  end
+  else if LFamily = 'macOS' then
+  begin
+    if LKind = pokPackage then
+      Result := 'bpl' + LName + LSuffix + '.dylib'
+    else if LKind = pokLibrary then
+      Result := 'lib' + LName + LSuffix + '.dylib'
+    else
+      Result := LName;
+  end
+  else if LFamily = 'iOSSimulator' then
+  begin
+    // The 32-bit simulator used the macOS dynamic-library layout.
+    if LKind = pokPackage then
+      Result := 'bpl' + LName + LSuffix + '.dylib'
+    else if LKind = pokLibrary then
+      Result := 'lib' + LName + LSuffix + '.dylib'
+    else
+      Result := LName;
+  end
+  else if LFamily = 'iOSDevice' then
+  begin
+    // Device targets have no shared libraries. The executable is a Mach-O
+    // file with no extension. Libraries and packages are static archives.
+    if LKind = pokApplication then
+      Result := LName
+    else
+      Result := 'lib' + LName + LSuffix + '.a';
+  end
+  else if LKind = pokPackage then
+    Result := LName + LSuffix + '.bpl'
+  else if LKind = pokLibrary then
+    Result := LName + LSuffix + '.dll'
+  else
+    Result := LName + '.exe';
+end;
+
+function PrimaryOutputArtefactType(AKind: TPrimaryOutputKind): string;
+begin
+  case AKind of
+    pokLibrary:
+      Result := 'library';
+    pokPackage:
+      Result := 'package';
+  else
+    Result := 'application';
+  end;
+end;
+
 function IsBsiExecutableArtefact(const AArtefact: TArtefactInfo): Boolean;
 var
   LExt: string;
@@ -838,7 +985,10 @@ begin
      SameText(AArtefact.ArtefactType, 'runtime-package') then
     Exit(True);
   LExt := LowerCase(TPath.GetExtension(BsiComponentFileName(AArtefact.RelativePath)));
-  Result := (LExt = '.exe') or (LExt = '.dll') or (LExt = '.bpl');
+  // .so and .dylib are the non-Windows shared libraries. An extensionless
+  // ELF or Mach-O executable is recognised by its artefact type above.
+  Result := (LExt = '.exe') or (LExt = '.dll') or (LExt = '.bpl') or
+    (LExt = '.so') or (LExt = '.dylib');
 end;
 
 function BsiExecutableValue(const AArtefact: TArtefactInfo): string;
