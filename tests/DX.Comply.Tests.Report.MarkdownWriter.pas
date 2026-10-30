@@ -270,7 +270,6 @@ begin
   Assert.AreEqual(0, Pos('Licence', LContent));
 end;
 
-
 initialization
   TDUnitX.RegisterTestFixture(TMarkdownReportWriterTests);
 
