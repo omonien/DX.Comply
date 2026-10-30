@@ -244,9 +244,6 @@ begin
     'application version already stored on the artefact must appear unchanged');
 end;
 
-initialization
-  TDUnitX.RegisterTestFixture(TMarkdownReportWriterTests);
-
 procedure TMarkdownReportWriterTests.Write_SbomHeaderData_AppearsInProjectOverview;
 begin
   FData.Metadata.SbomCreator := 'sbom@example.com';
@@ -272,5 +269,9 @@ begin
   Assert.AreEqual(0, Pos('Supplier', LContent));
   Assert.AreEqual(0, Pos('Licence', LContent));
 end;
+
+
+initialization
+  TDUnitX.RegisterTestFixture(TMarkdownReportWriterTests);
 
 end.
