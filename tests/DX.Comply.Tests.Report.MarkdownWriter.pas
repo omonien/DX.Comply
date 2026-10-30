@@ -58,6 +58,15 @@ type
     /// </summary>
     [Test]
     procedure Write_ArtefactVersion_AppearsInArtefactsTable;
+
+    /// <summary>
+    /// SBOM header data (creator, supplier, supplier URL, licence, product)
+    /// appears in Project Overview when set, and is omitted when empty.
+    /// </summary>
+    [Test]
+    procedure Write_SbomHeaderData_AppearsInProjectOverview;
+    [Test]
+    procedure Write_EmptySbomHeaderData_IsOmitted;
   end;
 
 implementation
@@ -237,5 +246,31 @@ end;
 
 initialization
   TDUnitX.RegisterTestFixture(TMarkdownReportWriterTests);
+
+procedure TMarkdownReportWriterTests.Write_SbomHeaderData_AppearsInProjectOverview;
+begin
+  FData.Metadata.SbomCreator := 'sbom@example.com';
+  FData.Metadata.Supplier := 'Example & Co GmbH';
+  FData.Metadata.SupplierUrl := 'https://example.com';
+  FData.Metadata.Licence := 'Proprietary';
+  var LWriter: IHumanReadableReportWriter := TMarkdownReportWriter.Create;
+  Assert.IsTrue(LWriter.Write(FOutputPath, FData, THumanReadableReportConfig.Default));
+  var LContent := TFile.ReadAllText(FOutputPath, TEncoding.UTF8);
+  Assert.IsTrue(Pos('| SBOM Creator | sbom@example.com |', LContent) > 0);
+  Assert.IsTrue(Pos('| Supplier | Example & Co GmbH |', LContent) > 0);
+  Assert.IsTrue(Pos('| Supplier URL | [https://example.com](https://example.com) |', LContent) > 0);
+  Assert.IsTrue(Pos('| Licence | Proprietary |', LContent) > 0);
+  Assert.IsTrue(Pos('| Product |', LContent) > 0);
+end;
+
+procedure TMarkdownReportWriterTests.Write_EmptySbomHeaderData_IsOmitted;
+begin
+  var LWriter: IHumanReadableReportWriter := TMarkdownReportWriter.Create;
+  Assert.IsTrue(LWriter.Write(FOutputPath, FData, THumanReadableReportConfig.Default));
+  var LContent := TFile.ReadAllText(FOutputPath, TEncoding.UTF8);
+  Assert.AreEqual(0, Pos('SBOM Creator', LContent));
+  Assert.AreEqual(0, Pos('Supplier', LContent));
+  Assert.AreEqual(0, Pos('Licence', LContent));
+end;
 
 end.
