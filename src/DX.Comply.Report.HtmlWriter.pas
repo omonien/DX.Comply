@@ -280,7 +280,20 @@ begin
     Lines.Add('<section><h2>Project Overview</h2><div class="table-wrap"><table><tbody>');
     if SameText(AData.Metadata.ComponentType, 'library') then
       Lines.Add('<tr><th>Mode</th><td>library</td></tr>');
+    if Trim(AData.Metadata.ProductName) <> '' then
+      Lines.Add('<tr><th>Product</th><td>' + EscapeHtml(AData.Metadata.ProductName) + '</td></tr>');
     Lines.Add('<tr><th>Version</th><td>' + EscapeHtml(SafeText(AData.Metadata.ProductVersion, SafeText(AData.ProjectInfo.Version))) + '</td></tr>');
+    if Trim(AData.Metadata.SbomCreator) <> '' then
+      Lines.Add('<tr><th>SBOM Creator</th><td>' + EscapeHtml(AData.Metadata.SbomCreator) + '</td></tr>');
+    if Trim(AData.Metadata.Supplier) <> '' then
+      Lines.Add('<tr><th>Supplier</th><td>' + EscapeHtml(AData.Metadata.Supplier) + '</td></tr>');
+    if Trim(AData.Metadata.SupplierUrl) <> '' then
+    begin
+      var LSupplierUrl := EscapeHtml(Trim(AData.Metadata.SupplierUrl));
+      Lines.Add('<tr><th>Supplier URL</th><td><a href="' + LSupplierUrl + '">' + LSupplierUrl + '</a></td></tr>');
+    end;
+    if Trim(AData.Metadata.Licence) <> '' then
+      Lines.Add('<tr><th>Licence</th><td>' + EscapeHtml(AData.Metadata.Licence) + '</td></tr>');
     Lines.Add('<tr><th>Platform</th><td>' + EscapeHtml(SafeText(AData.ProjectInfo.Platform)) + '</td></tr>');
     Lines.Add('<tr><th>Configuration</th><td>' + EscapeHtml(SafeText(AData.ProjectInfo.Configuration)) + '</td></tr>');
     Lines.Add('<tr><th>Delphi Runtime Units</th><td>' + EscapeHtml(DelphiRuntimeUnitsText(AData.ProjectInfo)) + '</td></tr>');

@@ -72,6 +72,15 @@ type
     /// </summary>
     [Test]
     procedure Write_ArtefactVersion_AppearsInArtefactsTable;
+
+    /// <summary>
+    /// SBOM header data (creator, supplier, supplier URL, licence, product)
+    /// appears in Project Overview when set, and is omitted when empty.
+    /// </summary>
+    [Test]
+    procedure Write_SbomHeaderData_AppearsInProjectOverview;
+    [Test]
+    procedure Write_EmptySbomHeaderData_IsOmitted;
   end;
 
 implementation
@@ -290,6 +299,32 @@ begin
     'application version stored on the artefact must appear in the HTML report');
   Assert.IsTrue(Pos('<td>2.0.0.1</td>', LContent) > 0,
     'DLL version stored on the artefact must appear in the HTML report');
+end;
+
+procedure THtmlReportWriterTests.Write_SbomHeaderData_AppearsInProjectOverview;
+begin
+  FData.Metadata.SbomCreator := 'sbom@example.com';
+  FData.Metadata.Supplier := 'Example & Co GmbH';
+  FData.Metadata.SupplierUrl := 'https://example.com';
+  FData.Metadata.Licence := 'Proprietary';
+  var LWriter: IHumanReadableReportWriter := THtmlReportWriter.Create;
+  Assert.IsTrue(LWriter.Write(FOutputPath, FData, THumanReadableReportConfig.Default));
+  var LContent := TFile.ReadAllText(FOutputPath, TEncoding.UTF8);
+  Assert.IsTrue(Pos('<th>SBOM Creator</th><td>sbom@example.com</td>', LContent) > 0);
+  Assert.IsTrue(Pos('<th>Supplier</th><td>Example &amp; Co GmbH</td>', LContent) > 0);
+  Assert.IsTrue(Pos('<a href="https://example.com">https://example.com</a>', LContent) > 0);
+  Assert.IsTrue(Pos('<th>Licence</th><td>Proprietary</td>', LContent) > 0);
+  Assert.IsTrue(Pos('<th>Product</th><td>Demo</td>', LContent) > 0);
+end;
+
+procedure THtmlReportWriterTests.Write_EmptySbomHeaderData_IsOmitted;
+begin
+  var LWriter: IHumanReadableReportWriter := THtmlReportWriter.Create;
+  Assert.IsTrue(LWriter.Write(FOutputPath, FData, THumanReadableReportConfig.Default));
+  var LContent := TFile.ReadAllText(FOutputPath, TEncoding.UTF8);
+  Assert.AreEqual(0, Pos('SBOM Creator', LContent));
+  Assert.AreEqual(0, Pos('Supplier', LContent));
+  Assert.AreEqual(0, Pos('Licence', LContent));
 end;
 
 initialization

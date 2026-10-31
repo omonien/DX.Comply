@@ -235,7 +235,20 @@ begin
     if SameText(AData.Metadata.ComponentType, 'library') then
       AddKeyValue(Lines, 'Mode', 'library');
     AddKeyValue(Lines, 'Project', SafeText(AData.ProjectInfo.ProjectName));
+    if Trim(AData.Metadata.ProductName) <> '' then
+      AddKeyValue(Lines, 'Product', AData.Metadata.ProductName);
     AddKeyValue(Lines, 'Version', SafeText(AData.Metadata.ProductVersion, SafeText(AData.ProjectInfo.Version)));
+    if Trim(AData.Metadata.SbomCreator) <> '' then
+      AddKeyValue(Lines, 'SBOM Creator', AData.Metadata.SbomCreator);
+    if Trim(AData.Metadata.Supplier) <> '' then
+      AddKeyValue(Lines, 'Supplier', AData.Metadata.Supplier);
+    if Trim(AData.Metadata.SupplierUrl) <> '' then
+    begin
+      var LSupplierUrl := EscapeMarkdown(Trim(AData.Metadata.SupplierUrl));
+      Lines.Add(Format('| Supplier URL | [%s](%s) |', [LSupplierUrl, LSupplierUrl]));
+    end;
+    if Trim(AData.Metadata.Licence) <> '' then
+      AddKeyValue(Lines, 'Licence', AData.Metadata.Licence);
     AddKeyValue(Lines, 'Platform', SafeText(AData.ProjectInfo.Platform));
     AddKeyValue(Lines, 'Configuration', SafeText(AData.ProjectInfo.Configuration));
     AddKeyValue(Lines, 'Delphi Runtime Units', DelphiRuntimeUnitsText(AData.ProjectInfo));
