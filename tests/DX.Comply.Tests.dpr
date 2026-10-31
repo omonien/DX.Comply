@@ -74,6 +74,8 @@ begin
     // Other fixtures register themselves via the initialization section
     // and the [TestFixture] attribute — picked up through LRunner.UseRTTI.
 
+    // Parse DUnitX options (--exitbehavior, --xmlfile, --run)
+    TDUnitX.CheckCommandLine;
     LRunner := TDUnitX.CreateRunner;
     LRunner.UseRTTI := True;
     LLogger := TDUnitXConsoleLogger.Create(True);
