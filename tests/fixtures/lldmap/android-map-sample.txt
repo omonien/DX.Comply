@@ -1,0 +1,81 @@
+             VMA              LMA     Size Align Out     In      Symbol
+             238              238       98     4 .note.android.ident
+             238              238       98     4         C:\\Users\\Public\\Documents\\Embarcadero\\Studio\\37.0\\CatalogRepository\\AndroidSDK-37.0.60952.8797\\ndk\\27.1.12297006\\toolchains\\llvm\\prebuilt\\windows-x86_64\\sysroot\\usr\\lib\\aarch64-linux-android\\24\\crtbegin_so.o:(.note.android.ident)
+             238              238       98     1                 note_android_ident
+             238              238        0     1                 $d.0
+             244              244        0     1                 note_name
+             24c              24c        0     1                 note_data
+             250              250        0     1                 ndk_version
+             290              290        0     1                 ndk_build_number
+             2d0              2d0        0     1                 note_end
+             2d0              2d0       24     4 .note.gnu.build-id
+             2d0              2d0       24     4         <internal>:(.note.gnu.build-id)
+          dbeef8           dbeef8    cf3ec     4 .gcc_except_table
+          dbeef8           dbeef8       38     4         c:\\program files (x86)\\embarcadero\\studio\\37.0\\lib\\Android64\\Release\\SysInit.o:(.gcc_except_table)
+          dbeef8           dbeef8        0     1                 $d.333
+          dbeef8           dbeef8        0     1                 GCC_except_table331
+          dbef30           dbef30     16f8     4         c:\\program files (x86)\\embarcadero\\studio\\37.0\\lib\\Android64\\Release\\System.o:(.gcc_except_table)
+          dbef30           dbef30        0     1                 $d.28
+          dbef30           dbef30        0     1                 GCC_except_table26
+          dbef74           dbef74        0     1                 GCC_except_table41
+          dbef94           dbef94        0     1                 GCC_except_table48
+          dbefb4           dbefb4        0     1                 GCC_except_table49
+          e8e2f0           e8e2f0    dc896    16 .rodata
+          e8e2f0           e8e2f0      3c0     8         <internal>:(.rodata.cst8)
+          e8e6b0           e8e6b0        8     8         c:\\program files (x86)\\embarcadero\\studio\\37.0\\lib\\Android64\\Release\\System.o:(.rodata._ZN6System12RTLD_DEFAULTE)
+          e8e6b0           e8e6b0        8     1                 System::RTLD_DEFAULT
+          e8e6b8           e8e6b8        d     1         c:\\program files (x86)\\embarcadero\\studio\\37.0\\lib\\Android64\\Release\\System.o:(.rodata.__unnamed_4)
+          e8e6b8           e8e6b8        0     1                 $d.1840
+          e8e6b8           e8e6b8        d     1                 __unnamed_4
+          e8e6d0           e8e6d0       22    16         c:\\program files (x86)\\embarcadero\\studio\\37.0\\lib\\Android64\\Release\\System.o:(.rodata.__unnamed_5)
+          e8e6d0           e8e6d0        0     1                 $d.1841
+          e8e6d0           e8e6d0       22     1                 __unnamed_5
+          e8e700           e8e700       11    16         c:\\program files (x86)\\embarcadero\\studio\\37.0\\lib\\Android64\\Release\\System.o:(.rodata.__unnamed_6)
+          e8e700           e8e700        0     1                 $d.1842
+          e8e700           e8e700       11     1                 __unnamed_6
+          e8e720           e8e720       26    16         c:\\program files (x86)\\embarcadero\\studio\\37.0\\lib\\Android64\\Release\\System.o:(.rodata.__unnamed_7)
+          e8e720           e8e720        0     1                 $d.1843
+         184e348          184e348        4     4         .\\..\\..\\Compiled\\DCU_IDE37.0_Android64__Demos\\Cipher_FMX.o:(.text._ZN10Cipher_fmx12FinalizationEv)
+         184e348          184e348        0     1                 $x.1
+         184e348          184e348        4     1                 Cipher_fmx::Finalization()
+         184e34c          184e34c       e0     4         .\\..\\..\\Compiled\\DCU_IDE37.0_Android64__Demos\\Cipher_FMX.o:(.text._NativeMain)
+         184e34c          184e34c        0     1                 $x.2
+         184e34c          184e34c       e0     1                 _NativeMain
+         184e42c          184e42c       c8     4         c:\\program files (x86)\\embarcadero\\studio\\37.0\\lib\\Android64\\Release/libunwind.a(UnwindLevel1.o):(.text._Unwind_RaiseException)
+         184e42c          184e42c        0     1                 $x.0
+         184e42c          184e42c       c8     1                 _Unwind_RaiseException
+         184e4f4          184e4f4      198     4         c:\\program files (x86)\\embarcadero\\studio\\37.0\\lib\\Android64\\Release/libunwind.a(UnwindLevel1.o):(.text.unwind_phase1)
+         184e4f4          184e4f4        0     1                 $x.1
+         184e4f4          184e4f4      198     1                 unwind_phase1
+         184e68c          184e68c      208     4         c:\\program files (x86)\\embarcadero\\studio\\37.0\\lib\\Android64\\Release/libunwind.a(UnwindLevel1.o):(.text.unwind_phase2)
+         184e68c          184e68c        0     1                 $x.2
+         184e68c          184e68c      208     1                 unwind_phase2
+          f56250           f56250       20    16         <internal>:(.rodata.cst16)
+          f56270           f56270       16     1         c:\\program files (x86)\\embarcadero\\studio\\37.0\\lib\\Android64\\Release/libpcre.a(pcre_compile.o):(.rodata.pcre_compile2)
+          f56270           f56270        0     1                 $d.5
+          f56286           f56286       a2     1         c:\\program files (x86)\\embarcadero\\studio\\37.0\\lib\\Android64\\Release/libpcre.a(pcre_compile.o):(.rodata.find_fixedlength)
+          f56286           f56286        0     1                 $d.8
+          f56328           f56328        f     1         c:\\program files (x86)\\embarcadero\\studio\\37.0\\lib\\Android64\\Release/libpcre.a(pcre_compile.o):(.rodata.is_anchored)
+          f56328           f56328        0     1                 $d.10
+          f56337           f56337       c3     1         c:\\program files (x86)\\embarcadero\\studio\\37.0\\lib\\Android64\\Release/libpcre.a(pcre_compile.o):(.rodata.could_be_empty_branch)
+               0                0      1cd     1 .comment
+               0                0      1cd     1         <internal>:(.comment)
+               0                0   2dd03a     1 .debug_info
+               0                0      48a     1         c:\\program files (x86)\\embarcadero\\studio\\37.0\\lib\\Android64\\Release\\SysInit.o:(.debug_info)
+               0                0        0     1                 $d.482
+             48a              48a     8bff     1         c:\\program files (x86)\\embarcadero\\studio\\37.0\\lib\\Android64\\Release\\System.o:(.debug_info)
+         17f1f9c          17f1f9c       ac     4         D:\\Projekte\\DECGitMaster\\Compiled\\DCU_IDE37.0_Android64__Demos\\DECCipherBase.o:(.text._ZN13Deccipherbase10TDECCipherD0Ev)
+         17f1f9c          17f1f9c        0     1                 $x.1
+         17f1f9c          17f1f9c       ac     1                 Deccipherbase::TDECCipher::~TDECCipher()
+         17f2048          17f2048      344     4         D:\\Projekte\\DECGitMaster\\Compiled\\DCU_IDE37.0_Android64__Demos\\DECCipherBase.o:(.text._ZN13Deccipherbase10TDECCipherC3Ev)
+         17f2048          17f2048        0     1                 $x.2
+         17f2048          17f2048      344     1                 Deccipherbase::TDECCipher::TDECCipher()
+         17f238c          17f238c       38     4         D:\\Projekte\\DECGitMaster\\Compiled\\DCU_IDE37.0_Android64__Demos\\DECCipherBase.o:(.text._ZN13Deccipherbase10TDECCipher11SecureEraseEv)
+         17f238c          17f238c        0     1                 $x.4
+         17f238c          17f238c       38     1                 Deccipherbase::TDECCipher::SecureErase()
+         17f23c4          17f23c4       b0     4         D:\\Projekte\\DECGitMaster\\Compiled\\DCU_IDE37.0_Android64__Demos\\DECCipherBase.o:(.text._ZN13Deccipherbase10TDECCipher7ContextEv)
+         17f23c4          17f23c4        0     1                 $x.5
+         17f23c4          17f23c4       b0     1                 Deccipherbase::TDECCipher::Context()
+         17f2474          17f2474       dc     4         D:\\Projekte\\DECGitMaster\\Compiled\\DCU_IDE37.0_Android64__Demos\\DECCipherBase.o:(.text._ZN13Deccipherbase10TDECCipher4DoneEv)
+         17f2474          17f2474        0     1                 $x.6
+         17f2474          17f2474       dc     1                 Deccipherbase::TDECCipher::Done()

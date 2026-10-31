@@ -25,6 +25,7 @@ uses
   DX.Comply.Engine.Intf,
   DX.Comply.BuildEvidence.Intf,
   DX.Comply.LegacyProject,
+  DX.Comply.MapFile.LldReader,
   DX.Comply.MapFile.Reader;
 
 type
@@ -110,7 +111,10 @@ end;
 
 function MapFileArmEnableHint: string;
 begin
-  Result := 'Enable the map with Project Options > Linker > Map file ARM > On, then rebuild.';
+  // ARM targets have no Off / Segments / Publics / Detailed list. "On" writes
+  // the LLVM linker map that TLldMapReader reads.
+  Result := 'Enable the map with Project Options > Linker > Map file ARM > On, then rebuild. ' +
+    'ARM targets have no "Detailed" map setting; On is the only map option there.';
 end;
 
 function ClassicDetailedMapHint: string;
@@ -131,8 +135,9 @@ begin
   if PlatformUsesMapFileArm(AProjectInfo.Platform) then
     Exit('MAP file found but contains no unit information DX.Comply can read: ' +
       AProjectInfo.MapFilePath + '. ' +
-      'DX.Comply does not know how to read units from the ARM/LLVM map format ' +
-      'and did not guess any. ' + MapFileArmEnableHint);
+      'It is neither an LLVM linker map (header "VMA LMA Size Align Out In Symbol") ' +
+      'nor a map with classic unit sections, and DX.Comply did not guess any units. ' +
+      MapFileArmEnableHint);
 
   if StartsText('Linux', Trim(AProjectInfo.Platform)) then
     Exit('MAP file found but contains no unit information DX.Comply can read: ' +
@@ -596,11 +601,30 @@ begin
         AddEvidenceItem(Result, besMapFile, 'Unit from map file',
           AProjectInfo.MapFilePath, '', LMapUnitName, 'LineNumbersSection');
 
-      // No classic unit sections. Windows and macOS are told to switch the
-      // map to Detailed. Android, iOS device, and Linux are not: their map
-      // layout is not parsed, and a guessed pattern would invent units.
+      // No classic unit sections. An ARM/LLVM linker map (Android, iOS, Linux,
+      // macOS ARM) is recognised by its header and read by TLldMapReader.
+      // Any other layout is not guessed: Windows and macOS are told to switch
+      // the map to Detailed, the ARM and Linux messages say what was found.
       if Length(LMapUnitNames) = 0 then
-        Result.Warnings.Add(MapFileNoUnitsWarning(AProjectInfo));
+      begin
+        var LLldContents := TLldMapReader.Read(AProjectInfo.MapFilePath);
+        if LLldContents.IsLldMap then
+        begin
+          for var LLldUnitName in LLldContents.UnitNames do
+            AddEvidenceItem(Result, besMapFile, 'Unit from map file',
+              AProjectInfo.MapFilePath, '', LLldUnitName, 'LldInputSection');
+          for var LNativeComponent in LLldContents.NativeComponents do
+            AddEvidenceItem(Result, besMapFile, 'Native component from map file',
+              AProjectInfo.MapFilePath, LNativeComponent, '', 'LldArchiveMember');
+          if Length(LLldContents.UnitNames) = 0 then
+            Result.Warnings.Add('LLVM linker map found but it lists no Delphi unit objects: ' +
+              AProjectInfo.MapFilePath + '.');
+        end
+        else
+        begin
+          Result.Warnings.Add(MapFileNoUnitsWarning(AProjectInfo));
+        end;
+      end;
     end;
 
     if not TFile.Exists(AProjectInfo.MapFilePath) then

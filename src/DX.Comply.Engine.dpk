@@ -42,6 +42,7 @@ contains
   DX.Comply.BuildOrchestrator in 'DX.Comply.BuildOrchestrator.pas',
   DX.Comply.BuildEvidence.Reader in 'DX.Comply.BuildEvidence.Reader.pas',
   DX.Comply.MapFile.Reader in 'DX.Comply.MapFile.Reader.pas',
+  DX.Comply.MapFile.LldReader in 'DX.Comply.MapFile.LldReader.pas',
   DX.Comply.UsesClauseParser in 'DX.Comply.UsesClauseParser.pas',
   DX.Comply.DependencyGraph in 'DX.Comply.DependencyGraph.pas',
   DX.Comply.UnitResolver in 'DX.Comply.UnitResolver.pas',

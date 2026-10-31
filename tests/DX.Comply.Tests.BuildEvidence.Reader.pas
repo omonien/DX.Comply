@@ -95,6 +95,13 @@ type
     procedure Read_ProjectInfo_AndroidMap_ClassicUnitsAreRead;
 
     /// <summary>
+    /// An ARM/LLVM linker map yields its unit objects as map units and its
+    /// archive members as native components, with no unknown-format warning.
+    /// </summary>
+    [Test]
+    procedure Read_ProjectInfo_AndroidLldMap_ReadsUnitsAndNativeComponents;
+
+    /// <summary>
     /// A Linux map with no classic unit sections names the unknown format
     /// and does not invent a Project Options path.
     /// </summary>
@@ -510,6 +517,7 @@ begin
         LWarning := LBuildEvidence.Warnings[0];
         Assert.IsTrue(Pos('Map file ARM', LWarning) > 0, LWarning);
         Assert.IsTrue(Pos('> On', LWarning) > 0, LWarning);
+        Assert.IsTrue(Pos('no "Detailed" map setting', LWarning) > 0, LWarning);
         Assert.IsTrue(Pos('did not guess', LWarning) > 0, LWarning);
         Assert.IsTrue(Pos('DCC_MapFile=3', LWarning) = 0, LWarning);
         Assert.IsTrue(Pos('Map file > Detailed', LWarning) = 0, LWarning);
@@ -558,6 +566,55 @@ begin
         for LWarning in LBuildEvidence.Warnings do
           Assert.IsTrue(Pos('did not guess', LWarning) = 0,
             'A map that yielded units must not warn that the format is unknown: ' + LWarning);
+      finally
+        LBuildEvidence.Free;
+      end;
+    finally
+      LProjectInfo.Free;
+    end;
+  finally
+    if TFile.Exists(LMapFilePath) then
+      TFile.Delete(LMapFilePath);
+  end;
+end;
+
+procedure TBuildEvidenceReaderTests.Read_ProjectInfo_AndroidLldMap_ReadsUnitsAndNativeComponents;
+begin
+  var LMapFilePath := TPath.GetTempFileName;
+  try
+    TFile.WriteAllText(LMapFilePath,
+      '             VMA              LMA     Size Align Out     In      Symbol' + sLineBreak +
+      '             2d0              2d0       24     4         <internal>:(.note.gnu.build-id)' + sLineBreak +
+      '          dbeef8           dbeef8       38     4         c:\\lib\\Android64\\Release\\SysInit.o:' +
+      '(.gcc_except_table)' + sLineBreak +
+      '         184e348          184e348        4     4         .\\Compiled\\Cipher_FMX.o:(.text._NativeMain)' +
+      sLineBreak +
+      '         184e348          184e348        4     1                 Cipher_fmx::Finalization()' + sLineBreak +
+      '         184e42c          184e42c       c8     4         c:\\lib\\Android64\\Release/libunwind.a' +
+      '(UnwindLevel1.o):(.text._Unwind_RaiseException)' + sLineBreak +
+      '          dbef30           dbef30     16f8     4         c:\\lib\\Android64\\Release\\SysInit.o:' +
+      '(.text)' + sLineBreak,
+      TEncoding.UTF8);
+
+    var LProjectInfo := TProjectInfo.Create;
+    try
+      LProjectInfo.Platform := 'Android64';
+      LProjectInfo.MapFilePath := LMapFilePath;
+      var LBuildEvidence := FReader.Read(LProjectInfo);
+      try
+        var LUnits := '';
+        var LNative := '';
+        for var LEvidenceItem in LBuildEvidence.EvidenceItems do
+        begin
+          if LEvidenceItem.UnitName <> '' then
+            LUnits := LUnits + LEvidenceItem.UnitName + ',';
+          if LEvidenceItem.DisplayName = 'Native component from map file' then
+            LNative := LNative + LEvidenceItem.PackageName + ',';
+        end;
+        Assert.AreEqual('SysInit,Cipher_FMX,', LUnits);
+        Assert.AreEqual('libunwind.a,', LNative);
+        Assert.AreEqual(NativeInt(0), NativeInt(LBuildEvidence.Warnings.Count),
+          'A readable LLVM map must not warn about an unknown format');
       finally
         LBuildEvidence.Free;
       end;

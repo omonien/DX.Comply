@@ -1,4 +1,4 @@
-﻿/// <summary>
+/// <summary>
 /// DX.Comply.Tests
 /// DUnitX console test runner for DX.Comply.
 /// </summary>
@@ -32,6 +32,7 @@ uses
   DX.Comply.Tests.HashService in 'DX.Comply.Tests.HashService.pas',
   DX.Comply.Tests.FileScanner in 'DX.Comply.Tests.FileScanner.pas',
   DX.Comply.Tests.MapFile.Reader in 'DX.Comply.Tests.MapFile.Reader.pas',
+  DX.Comply.Tests.MapFile.LldReader in 'DX.Comply.Tests.MapFile.LldReader.pas',
   DX.Comply.Tests.ProjectScanner in 'DX.Comply.Tests.ProjectScanner.pas',
   DX.Comply.Tests.LegacyProject in 'DX.Comply.Tests.LegacyProject.pas',
   DX.Comply.Tests.UnitResolver in 'DX.Comply.Tests.UnitResolver.pas',
@@ -73,6 +74,8 @@ begin
     // Other fixtures register themselves via the initialization section
     // and the [TestFixture] attribute — picked up through LRunner.UseRTTI.
 
+    // Parse DUnitX options (--exitbehavior, --xmlfile, --run)
+    TDUnitX.CheckCommandLine;
     LRunner := TDUnitX.CreateRunner;
     LRunner.UseRTTI := True;
     LLogger := TDUnitXConsoleLogger.Create(True);
@@ -86,8 +89,12 @@ begin
       ExitCode := EXIT_ERRORS;
 
     {$IFNDEF CI}
-    System.Write('Done. Press <Enter> key to quit.');
-    System.Readln;
+    // Only pause when asked to; automated runners pass --exitbehavior:Continue
+    if TDUnitX.Options.ExitBehavior = TDUnitXExitBehavior.Pause then
+    begin
+      System.Write('Done. Press <Enter> key to quit.');
+      System.Readln;
+    end;
     {$ENDIF}
   except
     on E: Exception do
