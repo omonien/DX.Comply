@@ -100,6 +100,7 @@
         <DCCReference Include="DX.Comply.BuildOrchestrator.pas"/>
         <DCCReference Include="DX.Comply.BuildEvidence.Reader.pas"/>
         <DCCReference Include="DX.Comply.MapFile.Reader.pas"/>
+        <DCCReference Include="DX.Comply.MapFile.LldReader.pas"/>
         <DCCReference Include="DX.Comply.UsesClauseParser.pas"/>
         <DCCReference Include="DX.Comply.DependencyGraph.pas"/>
         <DCCReference Include="DX.Comply.UnitResolver.pas"/>
