@@ -84,12 +84,98 @@ type
     function Read(const AProjectInfo: TProjectInfo): TBuildEvidence;
   end;
 
+/// <summary>
+/// One log line for a build evidence item: display name, unit or package,
+/// path, and detail. Unit rows are included. The engine summarises those.
+/// </summary>
+function BuildEvidenceItemLogLine(const AItem: TBuildEvidenceItem): string;
+
 implementation
 
 uses
   System.Classes,
   System.StrUtils,
   System.SysUtils;
+
+function PlatformUsesMapFileArm(const APlatform: string): Boolean;
+begin
+  // Android and the iOS device linker expose "Map file ARM" (Off / On).
+  // iOSSimARM64 uses that linker. The Windows "Map file > Detailed" list
+  // is not on those pages.
+  var LPlatform := Trim(APlatform);
+  Result := StartsText('Android', LPlatform) or
+    StartsText('iOSDevice', LPlatform) or
+    SameText(LPlatform, 'iOSSimARM64');
+end;
+
+function MapFileArmEnableHint: string;
+begin
+  Result := 'Enable the map with Project Options > Linker > Map file ARM > On, then rebuild.';
+end;
+
+function ClassicDetailedMapHint: string;
+begin
+  Result :=
+    'Enable detailed MAP output (Project Options > Linker > Map file > Detailed)' +
+    ' or set DCC_MapFile=3 in the .dproj, then rebuild for full composition evidence.';
+end;
+
+function MapFileNoUnitsWarning(const AProjectInfo: TProjectInfo): string;
+begin
+  if AProjectInfo.IsLegacyProject then
+    Exit('MAP file found but contains no unit information: ' +
+      AProjectInfo.MapFilePath + '. ' +
+      'In Delphi 7 open Project Options, Linker, and set Map file to Detailed, ' +
+      'or add -GD to the .cfg, then rebuild.');
+
+  if PlatformUsesMapFileArm(AProjectInfo.Platform) then
+    Exit('MAP file found but contains no unit information DX.Comply can read: ' +
+      AProjectInfo.MapFilePath + '. ' +
+      'DX.Comply does not know how to read units from the ARM/LLVM map format ' +
+      'and did not guess any. ' + MapFileArmEnableHint);
+
+  if StartsText('Linux', Trim(AProjectInfo.Platform)) then
+    Exit('MAP file found but contains no unit information DX.Comply can read: ' +
+      AProjectInfo.MapFilePath + '. ' +
+      'DX.Comply does not know how to read units from the Linux map format ' +
+      'and did not guess any.');
+
+  Result := 'MAP file found but contains no unit information: ' +
+    AProjectInfo.MapFilePath + '. ' + ClassicDetailedMapHint;
+end;
+
+function MapFileMissingWarning(const AProjectInfo: TProjectInfo): string;
+begin
+  if AProjectInfo.IsLegacyProject then
+    Exit(LegacyMapFileMissingMessage(AProjectInfo.MapFilePath));
+
+  if PlatformUsesMapFileArm(AProjectInfo.Platform) then
+    Exit('No MAP file found: ' + AProjectInfo.MapFilePath + '. ' + MapFileArmEnableHint);
+
+  if StartsText('Linux', Trim(AProjectInfo.Platform)) then
+    Exit('No MAP file found: ' + AProjectInfo.MapFilePath + '. ' +
+      'DX.Comply does not know which IDE option writes a Linux map file.');
+
+  Result := 'No detailed MAP file found: ' + AProjectInfo.MapFilePath;
+end;
+
+function BuildEvidenceItemLogLine(const AItem: TBuildEvidenceItem): string;
+begin
+  Result := Trim(AItem.DisplayName);
+  if Result = '' then
+    Result := 'Build evidence';
+
+  if Trim(AItem.UnitName) <> '' then
+    Result := Result + ': ' + Trim(AItem.UnitName)
+  else if Trim(AItem.PackageName) <> '' then
+    Result := Result + ': ' + Trim(AItem.PackageName);
+
+  if Trim(AItem.FilePath) <> '' then
+    Result := Result + ' - ' + Trim(AItem.FilePath);
+
+  if Trim(AItem.Detail) <> '' then
+    Result := Result + ' [' + Trim(AItem.Detail) + ']';
+end;
 
 procedure TBuildEvidenceReader.AddEvidenceItem(var ABuildEvidence: TBuildEvidence;
   ASourceKind: TBuildEvidenceSourceKind; const ADisplayName, AFilePath,
@@ -502,7 +588,7 @@ begin
 
     if TFile.Exists(AProjectInfo.MapFilePath) then
     begin
-      AddEvidenceItem(Result, besMapFile, 'Detailed map file',
+      AddEvidenceItem(Result, besMapFile, 'Map file',
         AProjectInfo.MapFilePath, '', '', 'MapFile');
 
       LMapUnitNames := TMapFileReader.ReadUnitNames(AProjectInfo.MapFilePath);
@@ -510,32 +596,16 @@ begin
         AddEvidenceItem(Result, besMapFile, 'Unit from map file',
           AProjectInfo.MapFilePath, '', LMapUnitName, 'LineNumbersSection');
 
-      // MAP file exists but yields no unit entries — it is a segment-only or
-      // public-symbols MAP, not the detailed format DX.Comply requires.
-      // Emit an actionable warning so the user knows exactly what to change.
+      // No classic unit sections. Windows and macOS are told to switch the
+      // map to Detailed. Android, iOS device, and Linux are not: their map
+      // layout is not parsed, and a guessed pattern would invent units.
       if Length(LMapUnitNames) = 0 then
-      begin
-        if AProjectInfo.IsLegacyProject then
-          Result.Warnings.Add(
-            'MAP file found but contains no unit information: ' +
-            AProjectInfo.MapFilePath + '. ' +
-            'In Delphi 7 open Project Options, Linker, and set Map file to Detailed, ' +
-            'or add -GD to the .cfg, then rebuild.')
-        else
-          Result.Warnings.Add(
-            'MAP file found but contains no unit information: ' +
-            AProjectInfo.MapFilePath + '. ' +
-            'Enable detailed MAP output (Project Options > Linker > Map file > Detailed)' +
-            ' or set DCC_MapFile=3 in the .dproj, then rebuild for full composition evidence.');
-      end;
+        Result.Warnings.Add(MapFileNoUnitsWarning(AProjectInfo));
     end;
 
     if not TFile.Exists(AProjectInfo.MapFilePath) then
     begin
-      if AProjectInfo.IsLegacyProject then
-        Result.Warnings.Add(LegacyMapFileMissingMessage(AProjectInfo.MapFilePath))
-      else
-        Result.Warnings.Add('No detailed MAP file found: ' + AProjectInfo.MapFilePath);
+      Result.Warnings.Add(MapFileMissingWarning(AProjectInfo));
 
       LRsmFilePath := ChangeFileExt(AProjectInfo.MapFilePath, '.rsm');
       if TFile.Exists(LRsmFilePath) then

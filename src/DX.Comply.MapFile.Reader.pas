@@ -1,4 +1,4 @@
-/// <summary>
+﻿/// <summary>
 /// DX.Comply.MapFile.Reader
 /// Reads unit membership evidence from a detailed Delphi map file.
 /// </summary>
@@ -7,6 +7,9 @@
 /// The first implementation slice focuses on the most reliable signal in a
 /// detailed Delphi map file: "Line numbers for <Unit>(<File>) ..." sections.
 /// These entries prove that code from a unit participated in the linked result.
+/// An ARM or LLVM map (libProject.so.map and the Linux linker map) is not
+/// parsed here. When those sections are absent the caller reports that the
+/// format is unknown. No other pattern is guessed.
 /// </remarks>
 ///
 /// <copyright>

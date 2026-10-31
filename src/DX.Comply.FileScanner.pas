@@ -88,7 +88,7 @@ type
       const AIncludePatterns, AExcludePatterns: TArray<string>): TArtefactList;
     function CollectFile(const AFilePath, ARelativePath: string;
       const AIncludePatterns, AExcludePatterns: TArray<string>;
-      out AArtefact: TArtefactInfo): Boolean;
+      out AArtefact: TArtefactInfo; AKnownProjectOutput: Boolean = False): Boolean;
     function GetArtefactType(const AFilePath: string): string;
     /// <summary>
     /// Warnings from include/exclude patterns that could not be compiled
@@ -530,7 +530,7 @@ end;
 
 function TFileScanner.CollectFile(const AFilePath, ARelativePath: string;
   const AIncludePatterns, AExcludePatterns: TArray<string>;
-  out AArtefact: TArtefactInfo): Boolean;
+  out AArtefact: TArtefactInfo; AKnownProjectOutput: Boolean): Boolean;
 begin
   Result := False;
   AArtefact := Default(TArtefactInfo);
@@ -540,8 +540,12 @@ begin
     Exit;
   if IsExcluded(ARelativePath) then
     Exit;
-  if not IsIncluded(ARelativePath) then
-    Exit;
+  // The named project output is not limited to .exe, .dll, .bpl, and .dcp.
+  // Android writes lib<Project>.so, and Linux and macOS applications have
+  // no extension. An explicit include list still applies.
+  if not (AKnownProjectOutput and (Length(FIncludePatterns) = 0)) then
+    if not IsIncluded(ARelativePath) then
+      Exit;
 
   AArtefact.FilePath := AFilePath;
   AArtefact.RelativePath := ARelativePath;
@@ -577,7 +581,7 @@ begin
   LExt := LowerCase(TPath.GetExtension(AFilePath));
   if LExt = '.exe' then
     Result := 'application'
-  else if LExt = '.dll' then
+  else if (LExt = '.dll') or (LExt = '.so') or (LExt = '.dylib') or (LExt = '.a') then
     Result := 'library'
   else if LExt = '.bpl' then
     Result := 'package'

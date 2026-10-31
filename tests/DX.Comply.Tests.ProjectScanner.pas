@@ -121,6 +121,21 @@ type
     procedure ExpectedMapFileName_Desktop_Unchanged;
 
     /// <summary>
+    /// The built file name follows the platform. Android is libProject.so.
+    /// Regression for issue #99.
+    /// </summary>
+    [Test]
+    procedure PrimaryOutputFileName_FollowsPlatform;
+
+    /// <summary>
+    /// A scanned Android application names libProject.so, not Project.exe.
+    /// Linux, macOS, and iOS device applications have no extension.
+    /// Packages stay in the BPL directory. Regression for issue #99.
+    /// </summary>
+    [Test]
+    procedure Scan_PlatformOutputFile_UsesPlatformName;
+
+    /// <summary>
     /// An Android application scan expects libProject.so.map and does not
     /// accept a desktop Project.map in that directory. Win32 stays
     /// Project.map. Regression for issue #89.
@@ -694,6 +709,219 @@ begin
       'macOS keeps the desktop MAP name');
   finally
     LProjectInfo.Free;
+  end;
+end;
+
+procedure TProjectScannerTests.PrimaryOutputFileName_FollowsPlatform;
+begin
+  Assert.AreEqual('AndroidApp.exe',
+    PrimaryOutputFileName('Win32', 'AndroidApp', '290', pokApplication),
+    'Win32 applications stay Project.exe and ignore DllSuffix');
+  Assert.AreEqual('AndroidApp.exe',
+    PrimaryOutputFileName('Win64', 'AndroidApp', '', pokApplication));
+  Assert.AreEqual('AndroidApp.exe',
+    PrimaryOutputFileName('Win64x', 'AndroidApp', '', pokApplication),
+    'Win64x keeps the Windows executable name');
+  Assert.AreEqual('AndroidApp.exe',
+    PrimaryOutputFileName('', 'AndroidApp', '', pokApplication),
+    'An empty platform keeps the Windows executable name');
+  Assert.AreEqual('Demo_sfx.dll',
+    PrimaryOutputFileName('Win64', 'Demo', '_sfx', pokLibrary));
+  Assert.AreEqual('Demo290.bpl',
+    PrimaryOutputFileName('Win32', 'Demo', '290', pokPackage));
+
+  Assert.AreEqual('libAndroidApp.so',
+    PrimaryOutputFileName('Android64', 'AndroidApp', '', pokApplication),
+    'Android64 applications are libProject.so');
+  Assert.AreEqual('libAndroidApp.so',
+    PrimaryOutputFileName('Android32', 'AndroidApp', '290', pokApplication),
+    'Android32 applications ignore DllSuffix');
+  Assert.AreEqual('libAndroidApp.so',
+    PrimaryOutputFileName('android64', 'AndroidApp', '', pokApplication),
+    'Android platform matching is case-insensitive');
+  Assert.AreEqual('libAndroidApp.so',
+    PrimaryOutputFileName('Android', 'AndroidApp', '', pokApplication));
+  Assert.AreEqual('libDemo_sfx.so',
+    PrimaryOutputFileName('Android64', 'Demo', '_sfx', pokLibrary));
+  Assert.AreEqual('libDemo290.so',
+    PrimaryOutputFileName('Android64', 'Demo', '290', pokPackage),
+    'Android packages use the lib prefix and .so, with DllSuffix');
+
+  Assert.AreEqual('CustomernameApp',
+    PrimaryOutputFileName('Linux64', 'CustomernameApp', '', pokApplication),
+    'Linux64 applications have no extension');
+  Assert.AreEqual('libDemo_sfx.so',
+    PrimaryOutputFileName('Linux64', 'Demo', '_sfx', pokLibrary));
+  Assert.AreEqual('bplDemo290.so',
+    PrimaryOutputFileName('Linux64', 'Demo', '290', pokPackage));
+  Assert.AreEqual('CustomernameApp',
+    PrimaryOutputFileName('LinuxARM64', 'CustomernameApp', '', pokApplication));
+
+  Assert.AreEqual('CustomernameApp',
+    PrimaryOutputFileName('OSX64', 'CustomernameApp', '', pokApplication),
+    'macOS applications have no extension');
+  Assert.AreEqual('CustomernameApp',
+    PrimaryOutputFileName('OSXARM64', 'CustomernameApp', '', pokApplication));
+  Assert.AreEqual('libDemo_sfx.dylib',
+    PrimaryOutputFileName('OSX64', 'Demo', '_sfx', pokLibrary));
+  Assert.AreEqual('bplDemo290.dylib',
+    PrimaryOutputFileName('OSXARM64', 'Demo', '290', pokPackage));
+
+  Assert.AreEqual('CustomernameApp',
+    PrimaryOutputFileName('iOSDevice64', 'CustomernameApp', '', pokApplication),
+    'iOS device applications are extensionless Mach-O files');
+  Assert.AreEqual('CustomernameApp',
+    PrimaryOutputFileName('iOSDevice32', 'CustomernameApp', '', pokApplication));
+  Assert.AreEqual('libDemo_sfx.a',
+    PrimaryOutputFileName('iOSDevice64', 'Demo', '_sfx', pokLibrary),
+    'iOS device libraries are static archives');
+  Assert.AreEqual('libDemo290.a',
+    PrimaryOutputFileName('iOSDevice64', 'Demo', '290', pokPackage));
+  Assert.AreEqual('libDemo290.a',
+    PrimaryOutputFileName('iOSSimARM64', 'Demo', '290', pokPackage),
+    'iOSSimARM64 follows the iOS device static-library names');
+  Assert.AreEqual('bplDemo290.dylib',
+    PrimaryOutputFileName('iOSSimulator', 'Demo', '290', pokPackage),
+    'The 32-bit iOS simulator keeps the macOS package name');
+
+  Assert.AreEqual('',
+    PrimaryOutputFileName('Android64', '', '', pokApplication),
+    'An empty project name produces no file name');
+  Assert.AreEqual('application', PrimaryOutputArtefactType(pokApplication));
+  Assert.AreEqual('library', PrimaryOutputArtefactType(pokLibrary));
+  Assert.AreEqual('package', PrimaryOutputArtefactType(pokPackage));
+  Assert.AreEqual('application', PrimaryOutputArtefactType(pokUnknown));
+end;
+
+procedure TProjectScannerTests.Scan_PlatformOutputFile_UsesPlatformName;
+const
+  cAppDproj =
+    '<?xml version="1.0" encoding="utf-8"?>' + sLineBreak +
+    '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">' + sLineBreak +
+    '  <PropertyGroup>' + sLineBreak +
+    '    <MainSource>AndroidApp.dpr</MainSource>' + sLineBreak +
+    '    <AppType>Application</AppType>' + sLineBreak +
+    '    <DllSuffix>$(Auto)</DllSuffix>' + sLineBreak +
+    '    <DCC_ExeOutput>.\out\$(Platform)\$(Config)</DCC_ExeOutput>' + sLineBreak +
+    '    <DCC_BplOutput>.\bpl\$(Platform)\$(Config)</DCC_BplOutput>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '</Project>';
+  cPackageDproj =
+    '<?xml version="1.0" encoding="utf-8"?>' + sLineBreak +
+    '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">' + sLineBreak +
+    '  <PropertyGroup>' + sLineBreak +
+    '    <MainSource>Demo.dpk</MainSource>' + sLineBreak +
+    '    <AppType>Package</AppType>' + sLineBreak +
+    '    <DllSuffix>290</DllSuffix>' + sLineBreak +
+    '    <DCC_ExeOutput>.\bin</DCC_ExeOutput>' + sLineBreak +
+    '    <DCC_BplOutput>.\bpl\$(Platform)\$(Config)</DCC_BplOutput>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '</Project>';
+var
+  LDproj: string;
+  LProjectInfo: TProjectInfo;
+  LScanner: IProjectScanner;
+  LTempDir: string;
+  LWarning: string;
+begin
+  LTempDir := TPath.Combine(TPath.GetTempPath, 'DXComplyTest_OutputName99');
+  ForceDirectories(LTempDir);
+  try
+    LDproj := TPath.Combine(LTempDir, 'AndroidApp.dproj');
+    TFile.WriteAllText(LDproj, cAppDproj, TEncoding.UTF8);
+    LScanner := TProjectScanner.Create;
+
+    LProjectInfo := LScanner.Scan(LDproj, 'Android64', 'Release');
+    try
+      Assert.AreEqual(pokApplication, LProjectInfo.OutputKind);
+      Assert.AreEqual('libAndroidApp.so', TPath.GetFileName(LProjectInfo.OutputFilePath),
+        'Android64 must not look for AndroidApp.exe, but was: ' + LProjectInfo.OutputFilePath);
+      Assert.IsTrue(Pos('Android64', LProjectInfo.OutputFilePath) > 0,
+        'The Android output path must contain the platform');
+      Assert.IsTrue(Pos('.exe', LProjectInfo.OutputFilePath) = 0,
+        'The Android output path must not use .exe');
+      for LWarning in LProjectInfo.Warnings do
+        Assert.IsTrue(Pos('DllSuffix', LWarning) = 0,
+          'An Android application must not warn about DllSuffix: ' + LWarning);
+    finally
+      LProjectInfo.Free;
+    end;
+
+    LProjectInfo := LScanner.Scan(LDproj, 'Android32', 'Release');
+    try
+      Assert.AreEqual('libAndroidApp.so', TPath.GetFileName(LProjectInfo.OutputFilePath),
+        'Android32 uses the same shared-library name');
+    finally
+      LProjectInfo.Free;
+    end;
+
+    LProjectInfo := LScanner.Scan(LDproj, 'Linux64', 'Release');
+    try
+      Assert.AreEqual('AndroidApp', TPath.GetFileName(LProjectInfo.OutputFilePath),
+        'Linux64 applications have no extension, but was: ' + LProjectInfo.OutputFilePath);
+    finally
+      LProjectInfo.Free;
+    end;
+
+    LProjectInfo := LScanner.Scan(LDproj, 'OSX64', 'Release');
+    try
+      Assert.AreEqual('AndroidApp', TPath.GetFileName(LProjectInfo.OutputFilePath),
+        'macOS applications have no extension');
+    finally
+      LProjectInfo.Free;
+    end;
+
+    LProjectInfo := LScanner.Scan(LDproj, 'iOSDevice64', 'Release');
+    try
+      Assert.AreEqual('AndroidApp', TPath.GetFileName(LProjectInfo.OutputFilePath),
+        'iOS device applications have no extension');
+    finally
+      LProjectInfo.Free;
+    end;
+
+    LProjectInfo := LScanner.Scan(LDproj, 'Win64', 'Release');
+    try
+      Assert.AreEqual('AndroidApp.exe', TPath.GetFileName(LProjectInfo.OutputFilePath),
+        'Win64 applications stay Project.exe');
+    finally
+      LProjectInfo.Free;
+    end;
+
+    LDproj := TPath.Combine(LTempDir, 'Demo.dproj');
+    TFile.WriteAllText(LDproj, cPackageDproj, TEncoding.UTF8);
+    LProjectInfo := LScanner.Scan(LDproj, 'Linux64', 'Release');
+    try
+      Assert.AreEqual(pokPackage, LProjectInfo.OutputKind);
+      Assert.AreEqual('bplDemo290.so', TPath.GetFileName(LProjectInfo.OutputFilePath),
+        'Linux packages are bpl<Name><DllSuffix>.so, but was: ' + LProjectInfo.OutputFilePath);
+      Assert.IsTrue(LProjectInfo.OutputFilePath.StartsWith(LProjectInfo.BplOutputDir),
+        'A Linux package must still be written to the BPL directory, but was: ' +
+        LProjectInfo.OutputFilePath);
+      Assert.AreNotEqual(LProjectInfo.OutputDir, LProjectInfo.ArtefactOutputDir,
+        'A Linux package must not be taken from DCC_ExeOutput');
+    finally
+      LProjectInfo.Free;
+    end;
+
+    LProjectInfo := LScanner.Scan(LDproj, 'OSXARM64', 'Release');
+    try
+      Assert.AreEqual('bplDemo290.dylib', TPath.GetFileName(LProjectInfo.OutputFilePath));
+      Assert.IsTrue(LProjectInfo.OutputFilePath.StartsWith(LProjectInfo.BplOutputDir),
+        'A macOS package must be written to the BPL directory');
+    finally
+      LProjectInfo.Free;
+    end;
+
+    LProjectInfo := LScanner.Scan(LDproj, 'Android64', 'Release');
+    try
+      Assert.AreEqual('libDemo290.so', TPath.GetFileName(LProjectInfo.OutputFilePath),
+        'An Android package keeps DllSuffix inside lib<Name>.so');
+    finally
+      LProjectInfo.Free;
+    end;
+  finally
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir, True);
   end;
 end;
 
