@@ -1,4 +1,4 @@
-﻿/// <summary>
+/// <summary>
 /// DX.Comply.Tests
 /// DUnitX console test runner for DX.Comply.
 /// </summary>
@@ -87,8 +87,12 @@ begin
       ExitCode := EXIT_ERRORS;
 
     {$IFNDEF CI}
-    System.Write('Done. Press <Enter> key to quit.');
-    System.Readln;
+    // Only pause when asked to; automated runners pass --exitbehavior:Continue
+    if TDUnitX.Options.ExitBehavior = TDUnitXExitBehavior.Pause then
+    begin
+      System.Write('Done. Press <Enter> key to quit.');
+      System.Readln;
+    end;
     {$ENDIF}
   except
     on E: Exception do
