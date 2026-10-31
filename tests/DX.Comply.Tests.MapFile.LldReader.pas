@@ -168,8 +168,8 @@ begin
 
     var LContents := TLldMapReader.Read(LPath);
     Assert.IsFalse(LContents.IsLldMap);
-    Assert.AreEqual(0, Length(LContents.UnitNames));
-    Assert.AreEqual(0, Length(LContents.NativeComponents));
+    Assert.AreEqual(NativeInt(0), NativeInt(Length(LContents.UnitNames)));
+    Assert.AreEqual(NativeInt(0), NativeInt(Length(LContents.NativeComponents)));
   finally
     TFile.Delete(LPath);
   end;
