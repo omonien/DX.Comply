@@ -68,11 +68,11 @@ type
 
     // ---- Executable name in help and hints (issue #102) ---------------------
 
-    /// <summary>ExecutableName returns the file name of the given module path.</summary>
+    /// <summary>A renamed copy shows its own file name.</summary>
     [Test]
     procedure ExecutableName_FullPath_ReturnsFileName;
 
-    /// <summary>The installer copy keeps its own name (dxcomply.exe).</summary>
+    /// <summary>The standard install path yields dxcomply.exe.</summary>
     [Test]
     procedure ExecutableName_InstallerCopy_ReturnsDxcomplyExe;
 
@@ -277,8 +277,8 @@ end;
 
 procedure TCliOptionsTests.ExecutableName_FullPath_ReturnsFileName;
 begin
-  Assert.AreEqual('DX.Comply.CLI.exe',
-    TCliOptions.ExecutableName('C:\Tools\DX.Comply\DX.Comply.CLI.exe'));
+  Assert.AreEqual('dxcomply-2.1.exe',
+    TCliOptions.ExecutableName('C:\Tools\DX.Comply\dxcomply-2.1.exe'));
 end;
 
 procedure TCliOptionsTests.ExecutableName_InstallerCopy_ReturnsDxcomplyExe;
@@ -299,8 +299,8 @@ end;
 
 procedure TCliOptionsTests.UsageHint_ContainsExecutableName;
 begin
-  Assert.AreEqual('Run DX.Comply.CLI.exe --help for usage.',
-    TCliOptions.UsageHint('C:\Tools\DX.Comply.CLI.exe'));
+  Assert.AreEqual('Run dxcomply.exe --help for usage.',
+    TCliOptions.UsageHint('C:\Tools\dxcomply.exe'));
 end;
 
 procedure TCliOptionsTests.SanitizeForFilename_StripsBackslash;

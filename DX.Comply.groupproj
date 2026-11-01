@@ -12,7 +12,7 @@
         <Projects Include="tests\DX.Comply.Tests.dproj">
             <Dependencies/>
         </Projects>
-        <Projects Include="src\CLI\DX.Comply.CLI.dproj">
+        <Projects Include="src\CLI\dxcomply.dproj">
             <Dependencies/>
         </Projects>
     </ItemGroup>
@@ -51,13 +51,13 @@
         <MSBuild Projects="tests\DX.Comply.Tests.dproj" Targets="Make"/>
     </Target>
     <Target Name="DX_Comply_CLI">
-        <MSBuild Projects="src\CLI\DX.Comply.CLI.dproj"/>
+        <MSBuild Projects="src\CLI\dxcomply.dproj"/>
     </Target>
     <Target Name="DX_Comply_CLI:Clean">
-        <MSBuild Projects="src\CLI\DX.Comply.CLI.dproj" Targets="Clean"/>
+        <MSBuild Projects="src\CLI\dxcomply.dproj" Targets="Clean"/>
     </Target>
     <Target Name="DX_Comply_CLI:Make">
-        <MSBuild Projects="src\CLI\DX.Comply.CLI.dproj" Targets="Make"/>
+        <MSBuild Projects="src\CLI\dxcomply.dproj" Targets="Make"/>
     </Target>
     <Target Name="Build">
         <CallTarget Targets="DX_Comply_Engine;DX_Comply_IDE;DX_Comply_Tests;DX_Comply_CLI"/>
