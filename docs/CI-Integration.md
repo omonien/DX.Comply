@@ -2,7 +2,7 @@
 
 ## Overview
 
-The `dxcomply` CLI can be dropped into any Windows build pipeline that produces
+The DX.Comply CLI (`DX.Comply.CLI.exe`) can be dropped into any Windows build pipeline that produces
 Delphi build artefacts. It reads a `.dproj` file (or a `.dxcomply.json`
 configuration file in CI mode), combines project metadata with build evidence,
 lists the binary the project builds and the other binaries in that output
@@ -12,21 +12,22 @@ walked.
 
 The CLI tool expects an existing detailed MAP file. It does **not** compile your
 project. Your pipeline must build the project with `DCC_MapFile=3` before
-running `dxcomply`. This keeps the CLI lightweight and avoids any dependency on
+running `DX.Comply.CLI.exe`. This keeps the CLI lightweight and avoids any dependency on
 build scripts or Delphi installations beyond what your pipeline already provides.
 
-`dxcomply.exe` is not installed by GetIt. Copy it from the release ZIP or the
-installer `bin` folder, or build `src/CLI/DX.Comply.CLI.dproj`, and call that
-executable from the pipeline.
+The CLI is not installed by GetIt. Build `src/CLI/DX.Comply.CLI.dproj`, or copy
+the executable from the release ZIP or the installer `bin` folder (there it is
+named `dxcomply.exe`), and call that executable from the pipeline. The examples
+below use `DX.Comply.CLI.exe`.
 
 The `--no-pause` flag suppresses the interactive "Press Enter to quit" prompt
 and is **required** in all automated pipeline steps.
 
 If the MAP file is not located in the default output directory derived from the
-`.dproj`, use `--map-dir` to point `dxcomply` at the correct directory:
+`.dproj`, use `--map-dir` to point `DX.Comply.CLI.exe` at the correct directory:
 
 ```cmd
-dxcomply --project=src\MyApp.dproj --map-dir=build\Win32\Release --output=bom.json --no-pause
+DX.Comply.CLI.exe --project=src\MyApp.dproj --map-dir=build\Win32\Release --output=bom.json --no-pause
 ```
 
 This is also supported in `.dxcomply.json` via the `mapDir` key.
@@ -42,7 +43,7 @@ This is also supported in `.dxcomply.json` via the `mapDir` key.
   run: msbuild src/MyApp.dproj /p:Config=Release /p:Platform=Win32 /p:DCC_MapFile=3
 
 - name: Generate SBOM
-  run: dxcomply --project=src/MyApp.dproj --format=cyclonedx-json --output=bom.json --no-pause
+  run: DX.Comply.CLI.exe --project=src/MyApp.dproj --format=cyclonedx-json --output=bom.json --no-pause
 
 - name: Upload SBOM artifact
   uses: actions/upload-artifact@v4
@@ -71,7 +72,7 @@ jobs:
 
       - name: Generate SBOM
         run: >
-          dxcomply
+          DX.Comply.CLI.exe
           --project=src/MyApp.dproj
           --format=cyclonedx-json
           --output=bom-${{ github.ref_name }}.json
@@ -95,7 +96,7 @@ generate-sbom:
   script:
     - msbuild src/MyApp.dproj /p:Config=Release /p:Platform=Win32 /p:DCC_MapFile=3
     - >
-      dxcomply
+      DX.Comply.CLI.exe
       --project=src/MyApp.dproj
       --format=cyclonedx-json
       --output=bom.json
@@ -150,7 +151,7 @@ to the scanned directory.
 Then invoke in CI mode:
 
 ```
-dxcomply --project=src/MyApp.dproj --ci --config=.dxcomply.json --no-pause
+DX.Comply.CLI.exe --project=src/MyApp.dproj --ci --config=.dxcomply.json --no-pause
 ```
 
 When `--ci` is given and the config file exists, DX.Comply loads that file and then applies the options you actually passed on the command line. Precedence is:
@@ -159,7 +160,7 @@ When `--ci` is given and the config file exists, DX.Comply loads that file and t
 2. Values from `.dxcomply.json`.
 3. Command-line options that appear in the invocation. These win.
 
-A default you did not pass does not override the file. `dxcomply --ci --config-name=Debug` keeps Debug even if the file says `"configName": "Release"`. `dxcomply --ci --platform=Win64` keeps the file's `configName` and replaces only the platform. Without `--ci`, the file is not read. `--config` only changes the path used together with `--ci`.
+A default you did not pass does not override the file. `DX.Comply.CLI.exe --ci --config-name=Debug` keeps Debug even if the file says `"configName": "Release"`. `DX.Comply.CLI.exe --ci --platform=Win64` keeps the file's `configName` and replaces only the platform. Without `--ci`, the file is not read. `--config` only changes the path used together with `--ci`.
 
 The line printed after a successful run is the output path after that merge, including a `configName` or `platform` taken from the file.
 
@@ -168,7 +169,7 @@ The line printed after a successful run is the output path after that merge, inc
 ### Multi-platform builds
 
 When the same project is built for several targets in one pipeline (e.g. Win32
-and Win64), each invocation of `dxcomply` will by default write to the same
+and Win64), each invocation of `DX.Comply.CLI.exe` will by default write to the same
 `bom.json` and overwrite the previous run. Use `--include-platform-in-output`
 to append `<Platform>.<Config>` to the default base filename. Explicit
 `--output` paths are never decorated:
@@ -176,7 +177,7 @@ to append `<Platform>.<Config>` to the default base filename. Explicit
 ```yaml
 - name: Generate SBOM (Win32)
   run: >
-    dxcomply
+    DX.Comply.CLI.exe
     --project=src/MyApp.dproj
     --platform=Win32 --config-name=Release
     --include-platform-in-output
@@ -186,7 +187,7 @@ to append `<Platform>.<Config>` to the default base filename. Explicit
 
 - name: Generate SBOM (Win64)
   run: >
-    dxcomply
+    DX.Comply.CLI.exe
     --project=src/MyApp.dproj
     --platform=Win64 --config-name=Release
     --include-platform-in-output
@@ -207,7 +208,7 @@ msbuild src\MyApp.dproj /p:Config=Release /p:Platform=Win32 /p:DCC_MapFile=3
 
 If you use `.dxcomply.json`, `deepEvidence.build` is ignored. Set
 `deepEvidence.mode` to `always` or `when-missing` instead. The CLI still does
-not compile the project: the MAP file must already exist before `dxcomply` runs.
+not compile the project: the MAP file must already exist before `DX.Comply.CLI.exe` runs.
 
 ---
 
@@ -223,7 +224,7 @@ Pipeline steps should check the exit code and fail the job on non-zero values:
 
 ```yaml
 - name: Generate SBOM
-  run: dxcomply --project=src/MyApp.dproj --output=bom.json --no-pause
+  run: DX.Comply.CLI.exe --project=src/MyApp.dproj --output=bom.json --no-pause
   # GitHub Actions fails the step automatically on non-zero exit code
 ```
 

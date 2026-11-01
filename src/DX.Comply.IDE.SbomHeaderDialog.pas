@@ -213,7 +213,7 @@ begin
   LIntro.Height := S(48);
   LIntro.Caption := 'BSI TR-03183-2 and the Cyber Resilience Act expect these values in the ' +
     'SBOM header. They are saved in the .dxcomply.json of this project, so the ' +
-    'command line tool (dxcomply --ci) uses the same values. Leave a field empty to ' +
+    'command line tool (DX.Comply.CLI.exe --ci) uses the same values. Leave a field empty to ' +
     'remove it from the file.';
   LTop := LIntro.Top + LIntro.Height + S(8);
 

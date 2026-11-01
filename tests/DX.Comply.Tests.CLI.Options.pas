@@ -66,6 +66,28 @@ type
     [Test]
     procedure ToSbomConfig_Default_ConfigurationIsRelease;
 
+    // ---- Executable name in help and hints (issue #102) ---------------------
+
+    /// <summary>ExecutableName returns the file name of the given module path.</summary>
+    [Test]
+    procedure ExecutableName_FullPath_ReturnsFileName;
+
+    /// <summary>The installer copy keeps its own name (dxcomply.exe).</summary>
+    [Test]
+    procedure ExecutableName_InstallerCopy_ReturnsDxcomplyExe;
+
+    /// <summary>A path ending in a separator falls back to cDefaultExeName.</summary>
+    [Test]
+    procedure ExecutableName_NoFileName_FallsBackToDefault;
+
+    /// <summary>Without a path, the running test executable's name is used.</summary>
+    [Test]
+    procedure ExecutableName_Empty_UsesParamStr0;
+
+    /// <summary>UsageHint names the executable instead of a fixed dxcomply.</summary>
+    [Test]
+    procedure UsageHint_ContainsExecutableName;
+
     // ---- Filename sanitisation (issue #25 security follow-up) ---------------
 
     /// <summary>Backslashes must be stripped from filename segments.</summary>
@@ -252,6 +274,34 @@ begin
 end;
 
 // ---- Filename sanitisation --------------------------------------------------
+
+procedure TCliOptionsTests.ExecutableName_FullPath_ReturnsFileName;
+begin
+  Assert.AreEqual('DX.Comply.CLI.exe',
+    TCliOptions.ExecutableName('C:\Tools\DX.Comply\DX.Comply.CLI.exe'));
+end;
+
+procedure TCliOptionsTests.ExecutableName_InstallerCopy_ReturnsDxcomplyExe;
+begin
+  Assert.AreEqual('dxcomply.exe',
+    TCliOptions.ExecutableName('C:\Program Files\DX.Comply\bin\dxcomply.exe'));
+end;
+
+procedure TCliOptionsTests.ExecutableName_NoFileName_FallsBackToDefault;
+begin
+  Assert.AreEqual(cDefaultExeName, TCliOptions.ExecutableName('C:\Tools\'));
+end;
+
+procedure TCliOptionsTests.ExecutableName_Empty_UsesParamStr0;
+begin
+  Assert.AreEqual(ExtractFileName(ParamStr(0)), TCliOptions.ExecutableName);
+end;
+
+procedure TCliOptionsTests.UsageHint_ContainsExecutableName;
+begin
+  Assert.AreEqual('Run DX.Comply.CLI.exe --help for usage.',
+    TCliOptions.UsageHint('C:\Tools\DX.Comply.CLI.exe'));
+end;
 
 procedure TCliOptionsTests.SanitizeForFilename_StripsBackslash;
 begin

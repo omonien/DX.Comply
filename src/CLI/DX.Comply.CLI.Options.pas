@@ -1,6 +1,6 @@
 ﻿/// <summary>
 /// DX.Comply.CLI.Options
-/// Command-line argument parsing for the dxcomply CLI tool.
+/// Command-line argument parsing for the DX.Comply CLI tool (DX.Comply.CLI.exe).
 /// </summary>
 ///
 /// <remarks>
@@ -26,9 +26,16 @@ uses
   DX.Comply.Engine.Intf,
   DX.Comply.Report.Intf;
 
+const
+  /// <summary>
+  /// File name shown in help and hints when the running executable's own
+  /// name cannot be determined.
+  /// </summary>
+  cDefaultExeName = 'DX.Comply.CLI.exe';
+
 type
   /// <summary>
-  /// Parses command-line arguments for the dxcomply CLI and exposes them as
+  /// Parses command-line arguments for the DX.Comply CLI and exposes them as
   /// typed properties. Call Parse, check the result and ParseError, then read
   /// the properties or call ToSbomConfig.
   /// </summary>
@@ -109,6 +116,19 @@ type
     /// Used by tests so parsing does not depend on ParamStr.
     /// </summary>
     function Parse(const AArgs: TArray<string>): Boolean; overload;
+    /// <summary>
+    /// File name of the running executable (ExtractFileName of AModulePath,
+    /// or of ParamStr(0) when AModulePath is empty). Falls back to
+    /// cDefaultExeName when no name can be determined, so help and hints
+    /// show the name the user actually runs (DX.Comply.CLI.exe, or
+    /// dxcomply.exe for the installer copy).
+    /// </summary>
+    class function ExecutableName(const AModulePath: string = ''): string; static;
+    /// <summary>
+    /// The hint printed after a command-line error, e.g.
+    /// 'Run DX.Comply.CLI.exe --help for usage.'
+    /// </summary>
+    class function UsageHint(const AModulePath: string = ''): string; static;
     /// <summary>Writes the usage text to stdout.</summary>
     procedure PrintHelp;
     /// <summary>Writes the tool version line to stdout.</summary>
@@ -574,13 +594,33 @@ end;
 // PrintHelp / PrintVersion
 // ---------------------------------------------------------------------------
 
-procedure TCliOptions.PrintHelp;
+class function TCliOptions.ExecutableName(const AModulePath: string): string;
+var
+  LPath: string;
 begin
+  LPath := AModulePath;
+  if LPath = '' then
+    LPath := ParamStr(0);
+  Result := ExtractFileName(LPath);
+  if Result = '' then
+    Result := cDefaultExeName;
+end;
+
+class function TCliOptions.UsageHint(const AModulePath: string): string;
+begin
+  Result := 'Run ' + ExecutableName(AModulePath) + ' --help for usage.';
+end;
+
+procedure TCliOptions.PrintHelp;
+var
+  LExe: string;
+begin
+  LExe := ExecutableName;
   PrintVersion;
   Writeln;
   Writeln('Usage:');
-  Writeln('  dxcomply --project=<path> [options]');
-  Writeln('  dxcomply --library --source-dir=<dir> [options]');
+  Writeln('  ' + LExe + ' --project=<path> [options]');
+  Writeln('  ' + LExe + ' --library --source-dir=<dir> [options]');
   Writeln;
   Writeln('Options:');
   Writeln('  --project=<path>              Project file. Required in build mode:');
@@ -671,13 +711,13 @@ begin
   Writeln('  the file). Without --ci the file is not read.');
   Writeln;
   Writeln('Examples:');
-  Writeln('  dxcomply --project=src\MyApp.dproj --format=cyclonedx-json --output=bom.json');
-  Writeln('  dxcomply --project=src\MyApp.dproj --manifest=components.json --no-pause');
-  Writeln('  dxcomply --project=src\MyApp.dproj --sbom-creator=sbom@example.com --no-pause');
-  Writeln('  dxcomply --project=src\MyApp.dpr --delphi7-root=C:\Delphi7 --no-pause');
-  Writeln('  dxcomply --project=src\MyApp.dproj --ci --config=.dxcomply.json --no-pause');
-  Writeln('  dxcomply --project=src\MyApp.dproj --ci --config-name=Debug --no-pause');
-  Writeln('  dxcomply --library --project=Source\DEC60.dproj --source-dir=Source --licence=Apache-2.0 --no-pause');
+  Writeln('  ' + LExe + ' --project=src\MyApp.dproj --format=cyclonedx-json --output=bom.json');
+  Writeln('  ' + LExe + ' --project=src\MyApp.dproj --manifest=components.json --no-pause');
+  Writeln('  ' + LExe + ' --project=src\MyApp.dproj --sbom-creator=sbom@example.com --no-pause');
+  Writeln('  ' + LExe + ' --project=src\MyApp.dpr --delphi7-root=C:\Delphi7 --no-pause');
+  Writeln('  ' + LExe + ' --project=src\MyApp.dproj --ci --config=.dxcomply.json --no-pause');
+  Writeln('  ' + LExe + ' --project=src\MyApp.dproj --ci --config-name=Debug --no-pause');
+  Writeln('  ' + LExe + ' --library --project=Source\DEC60.dproj --source-dir=Source --licence=Apache-2.0 --no-pause');
 end;
 
 procedure TCliOptions.PrintVersion;
