@@ -78,7 +78,7 @@ begin
       if LOptions.ParseError <> '' then
       begin
         Writeln('Error: ', LOptions.ParseError);
-        Writeln('Run dxcomply --help for usage.');
+        Writeln(TCliOptions.UsageHint);
         ExitCode := 2;
         Exit;
       end;
@@ -116,7 +116,7 @@ begin
       if not LLibraryWithoutProject then
       begin
         Writeln('Error: --project is required.');
-        Writeln('Run dxcomply --help for usage.');
+        Writeln(TCliOptions.UsageHint);
         ExitCode := 2;
         Exit;
       end;

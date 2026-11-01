@@ -8,7 +8,7 @@ DX.Comply is structured as three deliverables that share a single core engine:
 src/
   DX.Comply.Engine.dpk/.dproj    Runtime package (core engine, RTL-only)
   DX.Comply.IDE.dpk/.dproj       Design-time IDE package (VCL + ToolsAPI)
-  dxcomply.dpr/.dproj             Console application (CLI)
+  DX.Comply.CLI.dpr/.dproj         Console application (CLI)
 ```
 
 The **Engine package** has no UI dependencies and can be consumed by both the IDE plugin and the CLI.
