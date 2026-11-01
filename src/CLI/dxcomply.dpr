@@ -1,5 +1,5 @@
 ﻿/// <summary>
-/// DX.Comply.CLI
+/// dxcomply
 /// Command-line entry point for DX.Comply SBOM generation in CI/CD workflows.
 /// </summary>
 ///
@@ -23,7 +23,7 @@ program dxcomply;
 
 {$APPTYPE CONSOLE}
 
-{$R 'DX.Comply.CLI.res'}
+{$R 'dxcomply.res'}
 
 uses
   DX.Comply.Locale.EN, // Must be first — forces English RTL messages

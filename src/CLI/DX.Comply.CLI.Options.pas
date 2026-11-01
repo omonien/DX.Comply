@@ -1,6 +1,6 @@
 ﻿/// <summary>
 /// DX.Comply.CLI.Options
-/// Command-line argument parsing for the DX.Comply CLI tool (DX.Comply.CLI.exe).
+/// Command-line argument parsing for the DX.Comply CLI tool (dxcomply.exe).
 /// </summary>
 ///
 /// <remarks>
@@ -31,7 +31,7 @@ const
   /// File name shown in help and hints when the running executable's own
   /// name cannot be determined.
   /// </summary>
-  cDefaultExeName = 'DX.Comply.CLI.exe';
+  cDefaultExeName = 'dxcomply.exe';
 
 type
   /// <summary>
@@ -120,13 +120,13 @@ type
     /// File name of the running executable (ExtractFileName of AModulePath,
     /// or of ParamStr(0) when AModulePath is empty). Falls back to
     /// cDefaultExeName when no name can be determined, so help and hints
-    /// show the name the user actually runs (DX.Comply.CLI.exe, or
-    /// dxcomply.exe for the installer copy).
+    /// show the name the user actually runs (normally dxcomply.exe, or
+    /// whatever the file was renamed to).
     /// </summary>
     class function ExecutableName(const AModulePath: string = ''): string; static;
     /// <summary>
     /// The hint printed after a command-line error, e.g.
-    /// 'Run DX.Comply.CLI.exe --help for usage.'
+    /// 'Run dxcomply.exe --help for usage.'
     /// </summary>
     class function UsageHint(const AModulePath: string = ''): string; static;
     /// <summary>Writes the usage text to stdout.</summary>

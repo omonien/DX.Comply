@@ -2,7 +2,7 @@
 
 ## Overview
 
-The release installer is built for Delphi 13 and registers the IDE plugin there. The command line tool is separate. GetIt installs the IDE plugin only and does not include `dxcomply.exe`. The executable is in the release ZIP and in the installer `bin` folder, or you can build `src/CLI/DX.Comply.CLI.dproj`. It does not compile the project. It reads a `.dproj`, `.dpk`, or `.groupproj`, or a Delphi 7 `.dpr` with its `.dof` and `.cfg`, and a detailed MAP file, so the Delphi version that wrote the MAP file does not have to be Delphi 13.
+The release installer is built for Delphi 13 and registers the IDE plugin there. The command line tool is separate. GetIt installs the IDE plugin only and does not include `dxcomply.exe`. The executable is in the release ZIP and in the installer `bin` folder, or you can build `src/CLI/dxcomply.dproj`. It does not compile the project. It reads a `.dproj`, `.dpk`, or `.groupproj`, or a Delphi 7 `.dpr` with its `.dof` and `.cfg`, and a detailed MAP file, so the Delphi version that wrote the MAP file does not have to be Delphi 13.
 
 The MAP file lists the units linked into the executable. DX.Comply turns that list into a CycloneDX or SPDX SBOM, with a hash where it could open the file.
 
@@ -16,7 +16,7 @@ The release installer registers the IDE plugin for Delphi 13. In that IDE, the p
 
 ### CLI tool
 
-The CLI tool expects the MAP file to already exist. `--project` may be a `.dproj`, `.dpk`, or `.groupproj`. A Delphi 7 project is the `.dpr` together with its `.dof` and `.cfg`, or the `.dpk` when a package has no `.dproj`. Delphi 2005 and 2006 can use the `.bdsproj`. A `.dof` by itself is not a project file. You compile the project yourself (either interactively or in a CI pipeline), then run `DX.Comply.CLI.exe` to generate the SBOM from the build output.
+The CLI tool expects the MAP file to already exist. `--project` may be a `.dproj`, `.dpk`, or `.groupproj`. A Delphi 7 project is the `.dpr` together with its `.dof` and `.cfg`, or the `.dpk` when a package has no `.dproj`. Delphi 2005 and 2006 can use the `.bdsproj`. A `.dof` by itself is not a project file. You compile the project yourself (either interactively or in a CI pipeline), then run `dxcomply` to generate the SBOM from the build output.
 
 ---
 
@@ -40,10 +40,10 @@ Build the project as usual. The compiler produces a `.map` file alongside the ex
 ### 3. Run the CLI Tool
 
 ```cmd
-DX.Comply.CLI.exe --project=MyApp.dpr --output=bom.json --no-pause
+dxcomply --project=MyApp.dpr --output=bom.json --no-pause
 ```
 
-Delphi 2007 and later still use the `.dproj` (`DX.Comply.CLI.exe --project=MyApp.dproj`). Delphi 7 passes the `.dpr`, or the `.dpk` when a package has no `.dproj`. Delphi 2005 and 2006 can pass the `.bdsproj`. DX.Comply reads the main source name from a `.bdsproj` and then uses the sibling `.dof` and `.cfg`. It does not read build configurations stored inside the `.bdsproj`. If a `.dproj` is present, pass the `.dproj`.
+Delphi 2007 and later still use the `.dproj` (`dxcomply --project=MyApp.dproj`). Delphi 7 passes the `.dpr`, or the `.dpk` when a package has no `.dproj`. Delphi 2005 and 2006 can pass the `.bdsproj`. DX.Comply reads the main source name from a `.bdsproj` and then uses the sibling `.dof` and `.cfg`. It does not read build configurations stored inside the `.bdsproj`. If a `.dproj` is present, pass the `.dproj`.
 
 The sibling `.dof` (INI) and `.cfg` (dcc32 response file) supply the output directory, search path, defines, runtime packages, and version info. When both files define a value, the `.dof` wins, including when the `.dof` value is empty. The `.cfg` is used only for settings the `.dof` does not define. `OutputDir` and `-E` are the exe/dll directory. `PackageDLLOutputDir` and `-LE` are the package directory. Runtime packages are listed only when the project is built with runtime packages: `UsePackages=1` uses `[Directories] Packages` (or `-LU` if that key is absent), `UsePackages=0` lists none, and a `.dof` that never mentions `UsePackages` uses `-LU`.
 
@@ -74,14 +74,14 @@ You can fully automate SBOM generation by adding a Post-Build Event to a dedicat
    - Add a Post-Build Event:
 
 ```cmd
-DX.Comply.CLI.exe --project="$(PROJECTPATH)" --output="$(OUTPUTDIR)bom.json" --no-pause
+dxcomply --project="$(PROJECTPATH)" --output="$(OUTPUTDIR)bom.json" --no-pause
 ```
 
 4. When you build with the `SBOM` configuration, both the application and its SBOM are generated in one step.
 
 ### CI Pipeline Example
 
-In a CI/CD pipeline, compile the project with detailed MAP output first, then run `DX.Comply.CLI.exe`:
+In a CI/CD pipeline, compile the project with detailed MAP output first, then run `dxcomply`:
 
 ```yaml
 # GitHub Actions example
@@ -94,7 +94,7 @@ In a CI/CD pipeline, compile the project with detailed MAP output first, then ru
 
 - name: Generate SBOM
   run: >
-    DX.Comply.CLI.exe
+    dxcomply
     --project=src/MyApp.dproj
     --format=cyclonedx-json
     --output=bom.json
@@ -110,7 +110,7 @@ The critical part is `/p:DCC_MapFile=3`. This tells MSBuild to produce the detai
 If the MAP file is not in the default output directory that DX.Comply derives from the `.dproj`, you can specify the directory explicitly:
 
 ```cmd
-DX.Comply.CLI.exe --project=MyApp.dproj --map-dir=C:\builds\output --output=bom.json --no-pause
+dxcomply --project=MyApp.dproj --map-dir=C:\builds\output --output=bom.json --no-pause
 ```
 
 This is particularly useful for legacy projects where output paths are configured outside the `.dproj` or when the MAP file is generated in a non-standard location.

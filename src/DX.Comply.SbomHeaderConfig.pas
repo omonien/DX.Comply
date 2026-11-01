@@ -8,7 +8,7 @@
 ///   sbomCreator, product.supplier, product.supplierUrl, product.licence
 ///   and product.version.
 /// The CLI reads the same keys in TDxComplyGenerator.LoadConfig, so a file
-/// written here works for both the IDE and DX.Comply.CLI.exe --ci.
+/// written here works for both the IDE and dxcomply --ci.
 /// Writing keeps every other key and the order of existing keys. An empty
 /// field removes its key. An empty product object that only held header
 /// keys is removed as well. A file that is not a JSON object is never

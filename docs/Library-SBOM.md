@@ -7,7 +7,7 @@ DX.Comply has two modes. Pick the one that matches what you ship.
 You ship a program, a DLL, or a runtime package. DX.Comply reads the `.dproj`, the MAP file, the DCUs, and the output directory of one build. The SBOM describes that build: the binary, the runtime packages it loads, the DLLs it references, and the units that were linked into it.
 
 ```cmd
-DX.Comply.CLI.exe --project=MyApp.dproj --config=Release --platform=Win64 --no-pause
+dxcomply --project=MyApp.dproj --config=Release --platform=Win64 --no-pause
 ```
 
 ## Library mode (`--library`)
@@ -40,7 +40,7 @@ Both sets are merged. A file appears once. `{$I}` directives are not followed, s
 ### Example
 
 ```cmd
-DX.Comply.CLI.exe --library --project=Source\DEC60.dproj --source-dir=Source --version=6.4.1 ^
+dxcomply --library --project=Source\DEC60.dproj --source-dir=Source --version=6.4.1 ^
   --purl=pkg:github/MHumm/DelphiEncryptionCompendium@V6.4.1 --licence=Apache-2.0 ^
   --supplier="Team DEC" --supplier-url=https://github.com/MHumm/DelphiEncryptionCompendium ^
   --sbom-creator=markus.humm@gmail.com --report=html --no-pause

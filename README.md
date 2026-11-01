@@ -87,13 +87,13 @@ The command line tool does not use the IDE and does not compile the project. It 
 
 ### GetIt
 
-GetIt installs the IDE plugin only. It does not include `dxcomply.exe`. The command line tool comes from the release ZIP, from the Delphi 13 installer, or from building `src/CLI/DX.Comply.CLI.dproj`.
+GetIt installs the IDE plugin only. It does not include `dxcomply.exe`. The command line tool comes from the release ZIP, from the Delphi 13 installer, or from building `src/CLI/dxcomply.dproj`.
 
 ### Manual
 
 1. Open `DX.Comply.groupproj` in RAD Studio.
 2. Build and install the `DX.Comply.IDE` design-time package.
-3. Optionally build the `DX.Comply.CLI` console application for command-line / CI use.
+3. Optionally build the `dxcomply` console application for command-line / CI use.
 
 ---
 
@@ -109,18 +109,18 @@ GetIt installs the IDE plugin only. It does not include `dxcomply.exe`. The comm
 
 ### Option B: Command line / CI
 
-The command line tool is not part of a GetIt install. Build `src/CLI/DX.Comply.CLI.dproj` and run `DX.Comply.CLI.exe` from the build output, or use the copy from the release ZIP or the installer `bin` folder, which is named `dxcomply.exe` and works the same way. The examples below use `DX.Comply.CLI.exe`; with the installer copy, type `dxcomply.exe` instead. `--help` and the CLI's own hints always show the name of the file you started. The examples assume that executable is on `PATH`, or that the current directory is the folder that contains it.
+`dxcomply.exe` is not part of a GetIt install. Use the copy from the release ZIP or the installer `bin` folder, or build `src/CLI/dxcomply.dproj`, which writes `dxcomply.exe`. The examples assume that executable is on `PATH`, or that the current directory is the folder that contains it.
 
 The CLI tool expects an existing detailed MAP file. Build your project first with `DCC_MapFile=3`, then run:
 
 ```cmd
-DX.Comply.CLI.exe --project=MyApp.dproj --format=cyclonedx-json --output=bom.json --no-pause
+dxcomply --project=MyApp.dproj --format=cyclonedx-json --output=bom.json --no-pause
 ```
 
 If the MAP file is in a non-standard directory, use `--map-dir`:
 
 ```cmd
-DX.Comply.CLI.exe --project=MyApp.dproj --map-dir=build\Win32\Release --output=bom.json --no-pause
+dxcomply --project=MyApp.dproj --map-dir=build\Win32\Release --output=bom.json --no-pause
 ```
 
 Paths in the `.dproj` can use `$(Name)` variables, for example `<DCC_ExeOutput>$(MyProject_bin)</DCC_ExeOutput>`. The CLI looks each one up in the process environment first, then in the user overrides from Tools > Options > Environment Variables of the detected Delphi version (`HKCU\Software\Embarcadero\BDS\<version>\Environment Variables`). A variable that is found in neither place stays in the path, and the CLI names it in a warning. A search path entry with such a variable is left out.
@@ -132,24 +132,24 @@ A variable can hold several paths, for example `MyLibs=C:\A;C:\B`. As in MSBuild
 To also generate the HTML/Markdown companion report from the CLI (the report ships disabled by default), pass `--report`. `--report=html` writes HTML only. `--report=both` writes HTML and Markdown. `--report` is the same as `--report=both`.
 
 ```cmd
-DX.Comply.CLI.exe --project=MyApp.dproj --report=html --no-pause
-DX.Comply.CLI.exe --project=MyApp.dproj --report=both --no-pause
-DX.Comply.CLI.exe --project=MyApp.dproj --report --no-pause
+dxcomply --project=MyApp.dproj --report=html --no-pause
+dxcomply --project=MyApp.dproj --report=both --no-pause
+dxcomply --project=MyApp.dproj --report --no-pause
 ```
 
 When building the same project for several targets, append the platform and configuration to the default filename so subsequent runs do not overwrite each other. The output file is `bom.Win64.Release.json`. With `--report` set, the HTML report is `bom.Win64.Release.report.html`.
 
 ```cmd
-DX.Comply.CLI.exe --project=MyApp.dproj --platform=Win64 --config-name=Release --include-platform-in-output --no-pause
+dxcomply --project=MyApp.dproj --platform=Win64 --config-name=Release --include-platform-in-output --no-pause
 ```
 
 To take the product version from git, pass `--version-from-git-tag`. DX.Comply reads the newest tag reachable from the checked-out commit in the project folder (`git describe --tags --abbrev=0`) and removes a leading `v` or `V`, so `v2.1.0` becomes `2.1.0`. In library mode without `--project`, the first `--source-dir` is used. `--version` wins when both are set. The tag also wins over `product.version` in a `--ci` config file. When git is not installed, the folder is not a git work tree, or there is no tag, DX.Comply prints a warning and uses the version it would use without the option.
 
 ```cmd
-DX.Comply.CLI.exe --project=MyApp.dproj --version-from-git-tag --no-pause
+dxcomply --project=MyApp.dproj --version-from-git-tag --no-pause
 ```
 
-Run `DX.Comply.CLI.exe --help` for the full list of switches. See [docs/CI-Integration.md](docs/CI-Integration.md) for GitHub Actions / GitLab CI examples.
+Run `dxcomply --help` for the full list of switches. See [docs/CI-Integration.md](docs/CI-Integration.md) for GitHub Actions / GitLab CI examples.
 
 ### Option C: Older Delphi, with a detailed MAP file
 
@@ -160,12 +160,12 @@ The command line tool can write an SBOM for a project that was built with an old
 3. Run the CLI against the project file. Delphi 2007 and later use a `.dproj`, `.dpk`, or `.groupproj`. A Delphi 7 project is the `.dpr` together with its `.dof` and `.cfg`, or the `.dpk` when a package has no `.dproj`. Delphi 2005 and 2006 can use the `.bdsproj`. If a `.dproj` with the same name is next to the `.dpr`, DX.Comply uses the `.dproj`, as Delphi does when it opens the project, and prints `[INFO ] Using MyApp.dproj found next to MyApp.dpr.`
 
 ```cmd
-DX.Comply.CLI.exe --project=MyApp.dpr --output=bom.json --no-pause
+dxcomply --project=MyApp.dpr --output=bom.json --no-pause
 ```
 
 The CLI reads the sibling `.dof` and `.cfg`. When both files define a setting, the `.dof` value is used. These projects have one Win32 option set, so `--platform` and `--config-name` are not applied. The built-in Win32 and Release defaults are not reported. A platform or configuration you set on the command line or in `.dxcomply.json` is reported and ignored. A blank package output directory uses the registry value `Package DPL Output` when Delphi 7's `RootDir` was found, and the project directory otherwise. The `.map` file must sit next to the output binary. If it is missing, the CLI stops. Library units come from a Delphi 7 install when `Software\Borland\Delphi\7.0` is in the registry. The scan still runs when that install is missing; pass `--delphi7-root` or set `delphi7Root` in `.dxcomply.json`. For a `.dproj`, if the MAP file is not in the output directory taken from the project, pass `--map-dir`.
 
-> **Tip:** You can automate this with a **Post-Build Event** in a dedicated build configuration. Create a configuration named e.g. `SBOM` that enables detailed MAP output and runs `DX.Comply.CLI.exe` as a post-build step. This way, a single build generates both your application and its SBOM.
+> **Tip:** You can automate this with a **Post-Build Event** in a dedicated build configuration. Create a configuration named e.g. `SBOM` that enables detailed MAP output and runs `dxcomply` as a post-build step. This way, a single build generates both your application and its SBOM.
 
 See [docs/LegacySupport.md](docs/LegacySupport.md) for details.
 
@@ -233,9 +233,9 @@ The same header also carries the product data that section 5.2.2 and CRA Annex I
 
 There are three ways to set them. All of them end up in the same SBOM fields.
 
-- **Command line.** Pass the flags above, for example `DX.Comply.CLI.exe --project=MyApp.dproj --sbom-creator=sbom@acme.example --licence=MIT`.
+- **Command line.** Pass the flags above, for example `dxcomply --project=MyApp.dproj --sbom-creator=sbom@acme.example --licence=MIT`.
 - **`.dxcomply.json`.** Put the keys into the `.dxcomply.json` in the project folder (see [Configuration](#configuration)) and run the CLI with `--ci`. A flag you pass on the command line wins over the file.
-- **IDE.** Choose **Project > DX.Comply - SBOM > SBOM Header Data...** The dialog edits the values for the active project and saves them in the `.dxcomply.json` next to the `.dproj`. Other keys in that file are kept, and an empty field removes its key. The SBOM creator is checked like on the command line, and the supplier URL must start with `http://` or `https://`. Because the dialog writes the same keys, `DX.Comply.CLI.exe --ci` run from the project folder produces the same header. When a generation in the IDE reports missing header data, DX.Comply offers to open the dialog right away and to generate the SBOM again after you save.
+- **IDE.** Choose **Project > DX.Comply - SBOM > SBOM Header Data...** The dialog edits the values for the active project and saves them in the `.dxcomply.json` next to the `.dproj`. Other keys in that file are kept, and an empty field removes its key. The SBOM creator is checked like on the command line, and the supplier URL must start with `http://` or `https://`. Because the dialog writes the same keys, `dxcomply --ci` run from the project folder produces the same header. When a generation in the IDE reports missing header data, DX.Comply offers to open the dialog right away and to generate the SBOM again after you save.
 
 ### CRA and BSI header warnings
 
@@ -262,7 +262,7 @@ Subfolders are not walked. `setup\`, `tools\`, and old build directories stay ou
 Pass `--scan-dir=<path>` (repeatable) or set `scanDirs` when you stage extra binaries on purpose. Each entry is scanned non-recursively. If the value contains `**`, subdirectories are included. A relative path is resolved from the project directory.
 
 ```cmd
-DX.Comply.CLI.exe --project=MyApp.dproj --scan-dir=redist --scan-dir=plugins\** --no-pause
+dxcomply --project=MyApp.dproj --scan-dir=redist --scan-dir=plugins\** --no-pause
 ```
 
 `--scan-tree` (or `"scanTree": true`) restores the previous recursive walk of the output directory. It is deprecated and will be removed in a future release. Prefer `--scan-dir`.
@@ -274,7 +274,7 @@ DX.Comply.CLI.exe --project=MyApp.dproj --scan-dir=redist --scan-dir=plugins\** 
 A component vendor or open source project often ships source, not a binary. `--library` writes an SBOM for that source release instead of a build. Nothing is compiled.
 
 ```cmd
-DX.Comply.CLI.exe --library --project=Source\MyLib.dproj --source-dir=Source --version=2.1.0 ^
+dxcomply --library --project=Source\MyLib.dproj --source-dir=Source --version=2.1.0 ^
   --repo-url=https://github.com/acme/mylib --licence=MIT --supplier="Acme" ^
   --supplier-url=https://acme.example --sbom-creator=sbom@acme.example --no-pause
 ```
@@ -330,7 +330,7 @@ When `--ci` is set and the file exists, values are merged in this order:
 2. Keys present in `.dxcomply.json`.
 3. Command-line options you actually pass. Those win over the file.
 
-An option you leave off the command line does not override the file, even though that option has a default. `DX.Comply.CLI.exe --ci --config-name=Debug` uses Debug even when the file says `"configName": "Release"`. `DX.Comply.CLI.exe --ci` with no `--config-name` uses the file's `configName`, or `Release` when the key is absent. The same rule applies to `--platform`, `--format`, `--output`, `--product`, `--version`, `--supplier`, `--supplier-url`, `--licence`, `--sbom-creator`, `--report`, `--include`, `--exclude`, `--map-dir`, `--manifest`, and `--no-composition-evidence`.
+An option you leave off the command line does not override the file, even though that option has a default. `dxcomply --ci --config-name=Debug` uses Debug even when the file says `"configName": "Release"`. `dxcomply --ci` with no `--config-name` uses the file's `configName`, or `Release` when the key is absent. The same rule applies to `--platform`, `--format`, `--output`, `--product`, `--version`, `--supplier`, `--supplier-url`, `--licence`, `--sbom-creator`, `--report`, `--include`, `--exclude`, `--map-dir`, `--manifest`, and `--no-composition-evidence`.
 
 If you pass `--include` or `--exclude`, that list replaces the file's list. `--report` overrides the file's enabled flag and format, and leaves the file's report output path as it is.
 
@@ -344,7 +344,7 @@ Without `--ci`, the file is not read. `--config=<path>` only chooses which file 
 An optional components file adds one library component for each matched row and fills in supplier, licence, version, type, and package URL. The format is the DelphiSBOM schema 1.0, so a file written for that tool works here unchanged. A sample is in [docs/samples/components.sample.json](docs/samples/components.sample.json).
 
 ```cmd
-DX.Comply.CLI.exe --project=MyApp.dproj --manifest=components.json --no-pause
+dxcomply --project=MyApp.dproj --manifest=components.json --no-pause
 ```
 
 The same path can live in `.dxcomply.json` as `"manifest"`. A relative path is resolved from the project directory. Without `--ci`, the CLI does not read `.dxcomply.json`, so pass `--manifest` on the command line. With `--ci`, the file supplies `manifest` unless you also pass `--manifest`. The flag wins. The IDE expert reads the same key from the project folder and has no extra options field.
@@ -405,7 +405,7 @@ The CRA requires (Annex I, Part II):
 
 ### Why does Generate SBOM in the IDE compile my project every time?
 
-The IDE always runs a Deep-Evidence build so the MAP file matches the sources you have open now. A stale MAP would describe an older link set. The CLI does not compile. You build with a detailed MAP yourself, then run `DX.Comply.CLI.exe`.
+The IDE always runs a Deep-Evidence build so the MAP file matches the sources you have open now. A stale MAP would describe an older link set. The CLI does not compile. You build with a detailed MAP yourself, then run `dxcomply`.
 
 ### When should I use `--library` instead of a normal product SBOM?
 
@@ -430,7 +430,7 @@ Keep both when both apply. The library author archives the `--library` SBOM for 
 | Mode | Requirement |
 |---|---|
 | **IDE plugin** | Release installer: Delphi 13. The design-time package is the IDE integration. |
-| **CLI tool** | Windows executable from the release ZIP, the installer `bin` folder, or a build of `src/CLI/DX.Comply.CLI.dproj`. GetIt does not include it. Needs a `.dproj`, `.dpk`, `.groupproj`, or a Delphi 7 `.dpr` with `.dof` and `.cfg`, and a detailed MAP file. It does not compile the project. |
+| **CLI tool** | Windows executable from the release ZIP, the installer `bin` folder, or a build of `src/CLI/dxcomply.dproj`. GetIt does not include it. Needs a `.dproj`, `.dpk`, `.groupproj`, or a Delphi 7 `.dpr` with `.dof` and `.cfg`, and a detailed MAP file. It does not compile the project. |
 | **Platform** | Windows build host |
 
 No internet connection is required. All processing is local.
