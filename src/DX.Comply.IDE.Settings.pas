@@ -186,6 +186,8 @@ begin
     Result.HumanReadableReport.IncludeWarnings := LIniFile.ReadBool(cSettingsSection, 'ReportIncludeWarnings', Result.HumanReadableReport.IncludeWarnings);
     Result.HumanReadableReport.IncludeCompositionEvidence := LIniFile.ReadBool(cSettingsSection, 'ReportIncludeCompositionEvidence', Result.HumanReadableReport.IncludeCompositionEvidence);
     Result.HumanReadableReport.IncludeBuildEvidence := LIniFile.ReadBool(cSettingsSection, 'ReportIncludeBuildEvidence', Result.HumanReadableReport.IncludeBuildEvidence);
+    // Issue #126: all, overview or units. An unknown value keeps all.
+    TryParseReportContent(LIniFile.ReadString(cSettingsSection, 'ReportContent', 'all'), Result.HumanReadableReport.Content);
   finally
     LIniFile.Free;
   end;
@@ -219,6 +221,7 @@ begin
     LIniFile.WriteBool(cSettingsSection, 'ReportIncludeWarnings', ASettings.HumanReadableReport.IncludeWarnings);
     LIniFile.WriteBool(cSettingsSection, 'ReportIncludeCompositionEvidence', ASettings.HumanReadableReport.IncludeCompositionEvidence);
     LIniFile.WriteBool(cSettingsSection, 'ReportIncludeBuildEvidence', ASettings.HumanReadableReport.IncludeBuildEvidence);
+    LIniFile.WriteString(cSettingsSection, 'ReportContent', ReportContentToString(ASettings.HumanReadableReport.Content));
     LIniFile.UpdateFile;
   finally
     LIniFile.Free;

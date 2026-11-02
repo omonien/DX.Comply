@@ -284,7 +284,7 @@
               'Markdown + HTML')
           end
         end
-        object FReportOutputRowPanel: TPanel
+        object FReportContentRowPanel: TPanel
           Left = 12
           Top = 364
           Width = 620
@@ -295,6 +295,58 @@
           Caption = ''
           ParentBackground = True
           TabOrder = 10
+          Margins.Left = 12
+          Margins.Top = 4
+          Margins.Right = 12
+          Margins.Bottom = 0
+          object ReportContentLabel: TLabel
+            Left = 0
+            Top = 4
+            Width = 220
+            Height = 32
+            Align = alLeft
+            AlignWithMargins = True
+            AutoSize = False
+            Caption = 'Report content'
+            Layout = tlCenter
+            Margins.Left = 0
+            Margins.Top = 4
+            Margins.Right = 8
+            Margins.Bottom = 4
+            WordWrap = True
+          end
+          object FReportContentComboBox: TComboBox
+            Left = 228
+            Top = 6
+            Width = 380
+            Height = 23
+            Align = alClient
+            AlignWithMargins = True
+            Style = csDropDownList
+            Margins.Left = 0
+            Margins.Top = 6
+            Margins.Right = 0
+            Margins.Bottom = 6
+            ItemIndex = 0
+            TabOrder = 0
+            Text = 'Overview and unit list'
+            Items.Strings = (
+              'Overview and unit list'
+              'Overview only'
+              'Unit list with hashes only')
+          end
+        end
+        object FReportOutputRowPanel: TPanel
+          Left = 12
+          Top = 408
+          Width = 620
+          Height = 40
+          Align = alTop
+          AlignWithMargins = True
+          BevelOuter = bvNone
+          Caption = ''
+          ParentBackground = True
+          TabOrder = 11
           Margins.Left = 12
           Margins.Top = 4
           Margins.Right = 12
@@ -331,7 +383,7 @@
         end
         object FReportIncludeWarningsCheckBox: TCheckBox
           Left = 12
-          Top = 408
+          Top = 452
           Width = 620
           Height = 36
           Align = alTop
@@ -341,12 +393,12 @@
           Margins.Top = 4
           Margins.Right = 12
           Margins.Bottom = 0
-          TabOrder = 11
+          TabOrder = 12
           WordWrap = True
         end
         object FReportIncludeCompositionCheckBox: TCheckBox
           Left = 12
-          Top = 440
+          Top = 484
           Width = 620
           Height = 36
           Align = alTop
@@ -356,12 +408,12 @@
           Margins.Top = 4
           Margins.Right = 12
           Margins.Bottom = 0
-          TabOrder = 12
+          TabOrder = 13
           WordWrap = True
         end
         object FReportIncludeBuildEvidenceCheckBox: TCheckBox
           Left = 12
-          Top = 472
+          Top = 516
           Width = 620
           Height = 36
           Align = alTop
@@ -371,12 +423,12 @@
           Margins.Top = 4
           Margins.Right = 12
           Margins.Bottom = 0
-          TabOrder = 13
+          TabOrder = 14
           WordWrap = True
         end
         object FAboutRowPanel: TPanel
           Left = 12
-          Top = 508
+          Top = 552
           Width = 620
           Height = 44
           Align = alTop
@@ -384,7 +436,7 @@
           BevelOuter = bvNone
           Caption = ''
           ParentBackground = True
-          TabOrder = 14
+          TabOrder = 15
           Margins.Left = 12
           Margins.Top = 8
           Margins.Right = 12

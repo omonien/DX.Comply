@@ -83,6 +83,12 @@ type
     procedure Write_EmptySbomHeaderData_IsOmitted;
     [Test]
     procedure Write_Overview_ShowsOriginsLicencesAndUnitsWithoutManifest;
+    /// <summary>Content overview writes the overview sections without the unit list. Issue #126.</summary>
+    [Test]
+    procedure Write_ContentOverview_OmitsUnitList;
+    /// <summary>Content units writes the unit list without the overview sections. Issue #126.</summary>
+    [Test]
+    procedure Write_ContentUnits_OmitsOverview;
   end;
 
 implementation
@@ -353,6 +359,33 @@ begin
   Assert.IsTrue(Pos('<section id="unit-evidence">', LContent) > 0);
   Assert.IsTrue(Pos('id="origin-summary"', LContent) < Pos('id="artefacts"', LContent),
     'the origin summary is near the top');
+end;
+
+procedure THtmlReportWriterTests.Write_ContentOverview_OmitsUnitList;
+begin
+  var LConfig := THumanReadableReportConfig.Default;
+  LConfig.Content := hrcOverview;
+  var LWriter: IHumanReadableReportWriter := THtmlReportWriter.Create;
+  Assert.IsTrue(LWriter.Write(FOutputPath, FData, LConfig));
+  var LContent := TFile.ReadAllText(FOutputPath, TEncoding.UTF8);
+  Assert.IsTrue(Pos('id="origin-summary"', LContent) > 0);
+  Assert.IsTrue(Pos('id="licences"', LContent) > 0);
+  Assert.AreEqual(0, Pos('id="unit-evidence"', LContent));
+  Assert.AreEqual(0, Pos('#unit-evidence', LContent), 'no link to a missing section');
+  Assert.IsTrue(Pos('ABCDEF0123456789', LContent) > 0, 'the artefact hashes stay');
+end;
+
+procedure THtmlReportWriterTests.Write_ContentUnits_OmitsOverview;
+begin
+  var LConfig := THumanReadableReportConfig.Default;
+  LConfig.Content := hrcUnits;
+  var LWriter: IHumanReadableReportWriter := THtmlReportWriter.Create;
+  Assert.IsTrue(LWriter.Write(FOutputPath, FData, LConfig));
+  var LContent := TFile.ReadAllText(FOutputPath, TEncoding.UTF8);
+  Assert.IsTrue(Pos('id="unit-evidence"', LContent) > 0);
+  Assert.IsTrue(Pos('Demo.Main', LContent) > 0);
+  Assert.AreEqual(0, Pos('id="origin-summary"', LContent));
+  Assert.AreEqual(0, Pos('id="licences"', LContent));
 end;
 
 initialization

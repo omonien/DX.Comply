@@ -34,7 +34,8 @@ type
     procedure AddUnitEvidence(Lines: TStrings; const AData: TComplianceReportData;
       const AConfig: THumanReadableReportConfig);
     procedure AddWarnings(Lines: TStrings; const AData: TComplianceReportData);
-    procedure AddOverview(Lines: TStrings; const AData: TComplianceReportData);
+    procedure AddOverview(Lines: TStrings; const AData: TComplianceReportData;
+      const AConfig: THumanReadableReportConfig);
     procedure AddValidation(Lines: TStrings; const AData: TComplianceReportData);
   public
     function Write(const AOutputPath: string; const AData: TComplianceReportData;
@@ -189,7 +190,8 @@ begin
   Lines.Add('');
 end;
 
-procedure TMarkdownReportWriter.AddOverview(Lines: TStrings; const AData: TComplianceReportData);
+procedure TMarkdownReportWriter.AddOverview(Lines: TStrings; const AData: TComplianceReportData;
+  const AConfig: THumanReadableReportConfig);
 begin
   var LOverview := BuildReportOverview(AData);
 
@@ -199,7 +201,11 @@ begin
   Lines.Add('| --- | ---: |');
   for var LGroup in LOverview.Origins do
   begin
-    Lines.Add(Format('| [%s](#%s) | %d |', [EscapeMarkdown(LGroup.Title), LGroup.Anchor, LGroup.Count]));
+    // Issue #126: without the unit list there is no target for the link.
+    if (AConfig.Content = hrcOverview) and (LGroup.Anchor = cAnchorUnitEvidence) then
+      Lines.Add(Format('| %s | %d |', [EscapeMarkdown(LGroup.Title), LGroup.Count]))
+    else
+      Lines.Add(Format('| [%s](#%s) | %d |', [EscapeMarkdown(LGroup.Title), LGroup.Anchor, LGroup.Count]));
   end;
   Lines.Add(Format('| **Total SBOM components** | **%d** |', [LOverview.TotalComponents]));
   Lines.Add('');
@@ -332,10 +338,13 @@ begin
     AddKeyValue(Lines, 'Warnings', IntToStr(LWarningsCount));
     AddKeyValue(Lines, 'Structural check', ValidationStatusText(AData));
     Lines.Add('');
-    AddOverview(Lines, AData);
+    // Issue #126: --report-content / report.content selects the sections.
+    if AConfig.Content <> hrcUnits then
+      AddOverview(Lines, AData, AConfig);
     AddValidation(Lines, AData);
     AddArtefacts(Lines, AData);
-    if AConfig.IncludeCompositionEvidence or AConfig.IncludeBuildEvidence then
+    if (AConfig.Content <> hrcOverview) and
+      (AConfig.IncludeCompositionEvidence or AConfig.IncludeBuildEvidence) then
       AddUnitEvidence(Lines, AData, AConfig);
     if AConfig.IncludeWarnings then
       AddWarnings(Lines, AData);
