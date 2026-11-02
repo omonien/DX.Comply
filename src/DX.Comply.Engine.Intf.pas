@@ -207,8 +207,9 @@ type
     /// </summary>
     IsLegacyProject: Boolean;
     /// <summary>
-    /// CompanyName from legacy version info. The engine uses this as the
-    /// SBOM supplier when the configuration does not set one.
+    /// CompanyName from the project version info: VerInfo_Keys in a .dproj,
+    /// or the legacy .dof / .cfg version info keys. The engine uses this as
+    /// the SBOM supplier when the configuration does not set one.
     /// </summary>
     CompanyName: string;
     /// <summary>

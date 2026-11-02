@@ -389,7 +389,40 @@ function DprojForDprMessage(const ADprPath, ADprojPath: string): string;
 function TryReadPeImportNames(const AFilePath: string;
   out ANames: TArray<string>): Boolean;
 
+/// <summary>
+/// Returns the value of AKey from a .dproj VerInfo_Keys string such as
+/// CompanyName=Acme;FileVersion=1.0.0.0. The key match ignores case.
+/// Returns an empty string when the key is missing, empty, or still holds an
+/// unexpanded $(...) macro.
+/// </summary>
+function ExtractVerInfoKeyValue(const AVerInfoKeys, AKey: string): string;
+
 implementation
+
+function ExtractVerInfoKeyValue(const AVerInfoKeys, AKey: string): string;
+var
+  LPair: string;
+  LEqualPos: Integer;
+begin
+  Result := '';
+  for LPair in AVerInfoKeys.Split([';']) do
+  begin
+    LEqualPos := Pos('=', LPair);
+    if LEqualPos < 2 then
+    begin
+      Continue;
+    end;
+    if SameText(Trim(Copy(LPair, 1, LEqualPos - 1)), AKey) then
+    begin
+      Result := Trim(Copy(LPair, LEqualPos + 1, MaxInt));
+      if Pos('$(', Result) > 0 then
+      begin
+        Result := '';
+      end;
+      Exit;
+    end;
+  end;
+end;
 
 function ReadLatestInstalledBdsVersion: string;
 var
@@ -2695,6 +2728,10 @@ begin
     LVersionStr := GetPropertyValue('FileVersion', '');
     if (LVersionStr <> '') and (Pos('.', LVersionStr) > 0) then
       Result.Version := LVersionStr;
+
+    // CompanyName from Project Options > Version Info. The engine uses it as
+    // the SBOM supplier when the configuration sets none (issue #88).
+    Result.CompanyName := ExtractVerInfoKeyValue(GetPropertyValue('VerInfo_Keys', ''), 'CompanyName');
 
     // Extract output directory. Try the expanded path, then the same path
     // with unknown tokens removed, then a path with $(ProductVersion) empty.
