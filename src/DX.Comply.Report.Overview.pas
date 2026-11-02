@@ -334,7 +334,7 @@ begin
 
     // The product itself (metadata component).
     var LProductName := Trim(AData.Metadata.ProductName);
-    if (LProductName = '') and Assigned(AData.ProjectInfo) then
+    if LProductName = '' then
     begin
       LProductName := AData.ProjectInfo.ProjectName;
     end;
