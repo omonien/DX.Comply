@@ -632,7 +632,9 @@ begin
   LProject := FScanner.Scan(LDproj, 'Win32', 'Debug');
   try
     Assert.IsFalse(LProject.IsLegacyProject);
-    Assert.AreEqual('', LProject.CompanyName);
+    // A .dproj takes CompanyName from VerInfo_Keys (issue #88), not from a
+    // legacy .dof or .bdsproj. The Engine .dproj sets CompanyName=Olaf Monien.
+    Assert.AreEqual('Olaf Monien', LProject.CompanyName);
     Assert.AreEqual('', LProject.ConditionalDefines);
   finally
     LProject.Free;

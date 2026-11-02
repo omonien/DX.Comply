@@ -135,6 +135,14 @@ type
     [Test]
     procedure Scan_PlatformOutputFile_UsesPlatformName;
 
+    /// <summary>VerInfo_Keys CompanyName fills TProjectInfo.CompanyName (issue #88).</summary>
+    [Test]
+    procedure Scan_VerInfoKeysCompanyName_FillsCompanyName;
+
+    /// <summary>ExtractVerInfoKeyValue reads one key and ignores macros.</summary>
+    [Test]
+    procedure ExtractVerInfoKeyValue_ReadsKey;
+
     /// <summary>
     /// An Android application scan expects libProject.so.map and does not
     /// accept a desktop Project.map in that directory. Win32 stays
@@ -791,6 +799,53 @@ begin
   Assert.AreEqual('library', PrimaryOutputArtefactType(pokLibrary));
   Assert.AreEqual('package', PrimaryOutputArtefactType(pokPackage));
   Assert.AreEqual('application', PrimaryOutputArtefactType(pokUnknown));
+end;
+
+procedure TProjectScannerTests.Scan_VerInfoKeysCompanyName_FillsCompanyName;
+const
+  cDproj =
+    '<?xml version="1.0" encoding="utf-8"?>' + sLineBreak +
+    '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">' + sLineBreak +
+    '  <PropertyGroup>' + sLineBreak +
+    '    <MainSource>VerApp.dpr</MainSource>' + sLineBreak +
+    '    <AppType>Application</AppType>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '  <PropertyGroup Condition="''$(Base)''!=''''">' + sLineBreak +
+    '    <VerInfo_Keys>CompanyName=Acme Software GmbH;FileDescription=$(MSBuildProjectName);' +
+    'FileVersion=1.2.0.0;ProductName=VerApp</VerInfo_Keys>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '</Project>';
+var
+  LDproj: string;
+  LProjectInfo: TProjectInfo;
+  LScanner: IProjectScanner;
+  LTempDir: string;
+begin
+  LTempDir := TPath.Combine(TPath.GetTempPath, 'DXComplyTest_VerInfoCompany88');
+  ForceDirectories(LTempDir);
+  try
+    LDproj := TPath.Combine(LTempDir, 'VerApp.dproj');
+    TFile.WriteAllText(LDproj, cDproj, TEncoding.UTF8);
+    LScanner := TProjectScanner.Create;
+    LProjectInfo := LScanner.Scan(LDproj, 'Win32', 'Release');
+    try
+      Assert.AreEqual('Acme Software GmbH', LProjectInfo.CompanyName);
+    finally
+      LProjectInfo.Free;
+    end;
+  finally
+    TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+procedure TProjectScannerTests.ExtractVerInfoKeyValue_ReadsKey;
+begin
+  Assert.AreEqual('Acme', ExtractVerInfoKeyValue('FileVersion=1.0;CompanyName=Acme;ProductName=X', 'CompanyName'));
+  Assert.AreEqual('Acme', ExtractVerInfoKeyValue('companyname = Acme ', 'CompanyName'));
+  Assert.AreEqual('', ExtractVerInfoKeyValue('CompanyName=;FileVersion=1.0', 'CompanyName'));
+  Assert.AreEqual('', ExtractVerInfoKeyValue('CompanyName=$(Company);FileVersion=1.0', 'CompanyName'));
+  Assert.AreEqual('', ExtractVerInfoKeyValue('FileVersion=1.0', 'CompanyName'));
+  Assert.AreEqual('', ExtractVerInfoKeyValue('', 'CompanyName'));
 end;
 
 procedure TProjectScannerTests.Scan_PlatformOutputFile_UsesPlatformName;
