@@ -129,6 +129,12 @@ type
     /// 'Run dxcomply.exe --help for usage.'
     /// </summary>
     class function UsageHint(const AModulePath: string = ''): string; static;
+    /// <summary>
+    /// The version line, e.g. 'DX.Comply v2.1.0.0'. The number comes from the
+    /// version resource of the running executable, so it always matches the
+    /// VerInfo keys of the build and cannot drift from a hardcoded literal.
+    /// </summary>
+    class function VersionLine: string; static;
     /// <summary>Writes the usage text to stdout.</summary>
     procedure PrintHelp;
     /// <summary>Writes the tool version line to stdout.</summary>
@@ -204,6 +210,9 @@ type
   end;
 
 implementation
+
+uses
+  DX.Comply.VersionInfo;
 
 { TCliOptions }
 
@@ -720,9 +729,14 @@ begin
   Writeln('  ' + LExe + ' --library --project=Source\DEC60.dproj --source-dir=Source --licence=Apache-2.0 --no-pause');
 end;
 
+class function TCliOptions.VersionLine: string;
+begin
+  Result := 'DX.Comply v' + GetDxComplyToolVersion;
+end;
+
 procedure TCliOptions.PrintVersion;
 begin
-  Writeln('DX.Comply v2.0.3');
+  Writeln(VersionLine);
 end;
 
 // ---------------------------------------------------------------------------
