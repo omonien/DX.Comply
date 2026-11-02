@@ -42,6 +42,7 @@ uses
   DX.Comply.Tests.Report.HtmlWriter in 'DX.Comply.Tests.Report.HtmlWriter.pas',
   DX.Comply.Tests.Report.Overview in 'DX.Comply.Tests.Report.Overview.pas',
   DX.Comply.Tests.Spdx.Writer in 'DX.Comply.Tests.Spdx.Writer.pas',
+  DX.Comply.Tests.Spdx3.Writer in 'DX.Comply.Tests.Spdx3.Writer.pas',
   DX.Comply.Tests.Schema.Validator in 'DX.Comply.Tests.Schema.Validator.pas',
   DX.Comply.Tests.IDE.Settings in 'DX.Comply.Tests.IDE.Settings.pas',
   DX.Comply.Tests.IDE.ReadmeSupport in 'DX.Comply.Tests.IDE.ReadmeSupport.pas',

@@ -50,6 +50,7 @@ uses
   DX.Comply.Report.MarkdownWriter,
   DX.Comply.Report.HtmlWriter,
   DX.Comply.Spdx.Writer,
+  DX.Comply.Spdx3.Writer,
   DX.Comply.Schema.Validator;
 
 type
@@ -80,7 +81,8 @@ type
     scoSourceDirs,
     scoPurl,
     scoRepoUrl,
-    scoStrictMode
+    scoStrictMode,
+    scoSpdxVersion
   );
   /// <summary>Set of TSbomConfig fields that were set explicitly.</summary>
   TSbomConfigOverrides = set of TSbomConfigOverride;
@@ -238,6 +240,11 @@ type
     /// then exits with code 3 when a CRA/BSI warning was raised (issue #111).
     /// </summary>
     StrictMode: Boolean;
+    /// <summary>
+    /// --spdx-version or the spdxVersion key: 3.0.1 selects the SPDX 3.0.1
+    /// writer for --format=spdx-json. Empty or 2.3 keeps SPDX 2.3 (issue #108).
+    /// </summary>
+    SpdxVersion: string;
     /// <summary>Creates a new TSbomConfig with default values.</summary>
     class function Default: TSbomConfig; static;
     /// <summary>
@@ -562,6 +569,7 @@ begin
   Result.RepoUrl := '';
   Result.WarningContext := swcCli;
   Result.StrictMode := False;
+  Result.SpdxVersion := '';
 end;
 
 
@@ -2002,6 +2010,8 @@ begin
       Result := TCycloneDxXmlWriter.Create;
     sfSpdxJson:
       Result := TSpdxJsonWriter.Create;
+    sfSpdx3Json:
+      Result := TSpdx3JsonWriter.Create;
   else
     Result := TCycloneDxJsonWriter.Create;
   end;
@@ -2237,6 +2247,13 @@ begin
         if LJson.GetValue('strict') <> nil then
         begin
           Result.StrictMode := LJson.GetValue<Boolean>('strict');
+        end;
+
+        // Issue #108: "spdxVersion": "3.0.1" selects SPDX 3.0.1 for spdx-json.
+        if LJson.GetValue('spdxVersion') <> nil then
+        begin
+          Result.SpdxVersion := Trim(LJson.GetValue<string>('spdxVersion'));
+          Result.Format := ApplySpdxVersion(Result.Format, Result.SpdxVersion);
         end;
 
         if LJson.GetValue('sourceDirs') is TJSONArray then
@@ -3346,6 +3363,11 @@ begin
   begin
     Result.StrictMode := ACaller.StrictMode;
   end;
+  if scoSpdxVersion in ACaller.ExplicitOverrides then
+  begin
+    Result.SpdxVersion := ACaller.SpdxVersion;
+  end;
+  Result.Format := ApplySpdxVersion(Result.Format, Result.SpdxVersion);
 
   Result.IncludePlatformInOutput := ACaller.IncludePlatformInOutput;
   Result.ExplicitOverrides := ACaller.ExplicitOverrides;

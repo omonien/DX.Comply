@@ -123,6 +123,12 @@ type
     /// <summary>The strict key loads from .dxcomply.json, and --strict=false wins. Issue #111.</summary>
     [Test]
     procedure Config_Strict_LoadsAndMerges;
+    /// <summary>--spdx-version=3.0.1 selects SPDX 3.0.1 for spdx-json. Issue #108.</summary>
+    [Test]
+    procedure Parse_SpdxVersion_SelectsSpdx3;
+    /// <summary>The spdxVersion key loads from .dxcomply.json, and the CLI wins. Issue #108.</summary>
+    [Test]
+    procedure Config_SpdxVersion_LoadsAndMerges;
 
     /// <summary>Defaults are not treated as explicit overrides.</summary>
     [Test]
@@ -798,6 +804,69 @@ begin
     LGen := TDxComplyGenerator.Create(LOptions.ToSbomConfig);
     LGen.GenerateFromConfig('missing.dproj', LPath);
     Assert.IsFalse(LGen.Config.StrictMode, '--strict=false overrides the file');
+  finally
+    LGen.Free;
+    LOptions.Free;
+    if TFile.Exists(LPath) then
+    begin
+      TFile.Delete(LPath);
+    end;
+  end;
+end;
+
+procedure TCliOptionsTests.Parse_SpdxVersion_SelectsSpdx3;
+begin
+  var LOptions := TCliOptions.Create;
+  try
+    Assert.IsTrue(LOptions.Parse(['--project=App.dproj', '--format=spdx-json']));
+    Assert.IsTrue(LOptions.ToSbomConfig.Format = sfSpdxJson, 'SPDX 2.3 stays the default');
+    Assert.IsFalse(scoSpdxVersion in LOptions.ToSbomConfig.ExplicitOverrides);
+  finally
+    LOptions.Free;
+  end;
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsTrue(LOptions.Parse(['--project=App.dproj', '--format=spdx-json', '--spdx-version=3.0.1']));
+    Assert.IsTrue(LOptions.ToSbomConfig.Format = sfSpdx3Json);
+    Assert.AreEqual('3.0.1', LOptions.ToSbomConfig.SpdxVersion);
+    Assert.IsTrue(scoSpdxVersion in LOptions.ToSbomConfig.ExplicitOverrides);
+  finally
+    LOptions.Free;
+  end;
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsTrue(LOptions.Parse(['--project=App.dproj', '--spdx-version=3.0.1']));
+    Assert.IsTrue(LOptions.ToSbomConfig.Format = sfCycloneDxJson,
+      '--spdx-version does not change a CycloneDX format');
+  finally
+    LOptions.Free;
+  end;
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsFalse(LOptions.Parse(['--project=App.dproj', '--spdx-version=4.0']));
+    Assert.Contains(LOptions.ParseError, '--spdx-version');
+  finally
+    LOptions.Free;
+  end;
+end;
+
+procedure TCliOptionsTests.Config_SpdxVersion_LoadsAndMerges;
+begin
+  var LPath := TPath.Combine(TPath.GetTempPath, 'dxcomply-spdx3-test.json');
+  TFile.WriteAllText(LPath, '{"format":"spdx-json","spdxVersion":"3.0.1"}', TEncoding.UTF8);
+  var LGen: TDxComplyGenerator := nil;
+  var LOptions := TCliOptions.Create;
+  try
+    LGen := TDxComplyGenerator.Create;
+    var LConfig := LGen.LoadConfig(LPath);
+    Assert.IsTrue(LConfig.Format = sfSpdx3Json, 'spdxVersion 3.0.1 selects the SPDX 3 writer');
+    Assert.AreEqual('3.0.1', LConfig.SpdxVersion);
+    FreeAndNil(LGen);
+
+    Assert.IsTrue(LOptions.Parse(['--project=App.dproj', '--spdx-version=2.3']));
+    LGen := TDxComplyGenerator.Create(LOptions.ToSbomConfig);
+    LGen.GenerateFromConfig('missing.dproj', LPath);
+    Assert.IsTrue(LGen.Config.Format = sfSpdxJson, '--spdx-version=2.3 overrides the file');
   finally
     LGen.Free;
     LOptions.Free;

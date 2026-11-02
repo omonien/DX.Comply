@@ -74,6 +74,14 @@ type
       const APackageIds: TArray<string>;
       const ADocumentSpdxId, AProjectName: string): TJSONArray;
   public
+    /// <summary>
+    /// Builds the SPDX 2.3 document in memory. APackageIds holds the package
+    /// SPDXID of each artefact, in artefact order. The caller owns the result.
+    /// The SPDX 3.0.1 writer converts this document (issue #108).
+    /// </summary>
+    function BuildDocument(const AMetadata: TSbomMetadata;
+      const AArtefacts: TArtefactList; const AProjectInfo: TProjectInfo;
+      out APackageIds: TArray<string>): TJSONObject;
     function Write(const AOutputPath: string;
       const AMetadata: TSbomMetadata;
       const AArtefacts: TArtefactList;
@@ -453,14 +461,12 @@ begin
     end;
 end;
 
-function TSpdxJsonWriter.Write(const AOutputPath: string;
-  const AMetadata: TSbomMetadata;
-  const AArtefacts: TArtefactList;
-  const AProjectInfo: TProjectInfo): Boolean;
+function TSpdxJsonWriter.BuildDocument(const AMetadata: TSbomMetadata;
+  const AArtefacts: TArtefactList; const AProjectInfo: TProjectInfo;
+  out APackageIds: TArray<string>): TJSONObject;
 var
   LRoot: TJSONObject;
   LPackages: TJSONArray;
-  LOutput: TStringList;
   LDocumentSpdxId: string;
   LDocNamespace: string;
   LPackageIds: TArray<string>;
@@ -468,14 +474,6 @@ var
   I: Integer;
   LRootIndex: Integer;
 begin
-  Result := False;
-  if AOutputPath = '' then
-    Exit;
-
-  var LOutputDir := TPath.GetDirectoryName(AOutputPath);
-  if (LOutputDir <> '') and not TDirectory.Exists(LOutputDir) then
-    TDirectory.CreateDirectory(LOutputDir);
-
   LDocumentSpdxId := cSpdxIdPrefix + 'DOCUMENT';
   LDocNamespace := 'https://spdx.org/spdxdocs/' +
     SanitizeSpdxId(AProjectInfo.ProjectName) + '-' + GenerateUuid;
@@ -523,8 +521,33 @@ begin
       AddRootExtractedLicence(LRoot, AMetadata.Licence);
     AppendUsesRelationships(LRoot.GetValue('relationships') as TJSONArray,
       LPackageIds, LGraph);
+  except
+    LRoot.Free;
+    raise;
+  end;
+  APackageIds := LPackageIds;
+  Result := LRoot;
+end;
 
-    // Write to file
+function TSpdxJsonWriter.Write(const AOutputPath: string;
+  const AMetadata: TSbomMetadata;
+  const AArtefacts: TArtefactList;
+  const AProjectInfo: TProjectInfo): Boolean;
+var
+  LRoot: TJSONObject;
+  LOutput: TStringList;
+  LPackageIds: TArray<string>;
+begin
+  Result := False;
+  if AOutputPath = '' then
+    Exit;
+
+  var LOutputDir := TPath.GetDirectoryName(AOutputPath);
+  if (LOutputDir <> '') and not TDirectory.Exists(LOutputDir) then
+    TDirectory.CreateDirectory(LOutputDir);
+
+  LRoot := BuildDocument(AMetadata, AArtefacts, AProjectInfo, LPackageIds);
+  try
     LOutput := TStringList.Create;
     try
       LOutput.Text := LRoot.Format(2);

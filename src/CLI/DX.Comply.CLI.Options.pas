@@ -43,6 +43,7 @@ type
   private
     FProject: string;
     FFormat: TSbomFormat;
+    FSpdxVersion: string;
     FOutput: string;
     FPlatform: string;
     FPlatformExplicit: Boolean;
@@ -193,6 +194,8 @@ type
     property LibraryMode: Boolean read FLibraryMode;
     /// <summary>True when --strict was requested (issue #111).</summary>
     property StrictMode: Boolean read FStrictMode;
+    /// <summary>SPDX version from --spdx-version (issue #108).</summary>
+    property SpdxVersion: string read FSpdxVersion;
     /// <summary>Source directories from repeatable --source-dir.</summary>
     property SourceDirs: TArray<string> read FSourceDirs;
     /// <summary>Package URL from --purl.</summary>
@@ -215,6 +218,7 @@ type
 implementation
 
 uses
+  DX.Comply.Spdx3.Writer,
   DX.Comply.VersionInfo;
 
 { TCliOptions }
@@ -328,6 +332,7 @@ begin
   FParseError := '';
   FExplicitOverrides := [];
   FOutputExplicit := False;
+  FSpdxVersion := '';
 
   for I := 0 to High(AArgs) do
   begin
@@ -525,6 +530,16 @@ begin
         end;
         Include(FExplicitOverrides, scoStrictMode);
       end
+      else if LKey = 'spdx-version' then
+      begin
+        if not IsSupportedSpdxVersion(LValue) then
+        begin
+          FParseError := 'Invalid value for --spdx-version: ' + LValue + ' (expected 2.3 or 3.0.1)';
+          Exit(False);
+        end;
+        FSpdxVersion := Trim(LValue);
+        Include(FExplicitOverrides, scoSpdxVersion);
+      end
       else if LKey = 'library' then
       begin
         if not TryParseBool(LValue, FLibraryMode) then
@@ -657,7 +672,9 @@ begin
   Writeln('                                one --source-dir is set. Library mode');
   Writeln('                                accepts .dproj, .dpk, or .dpr.');
   Writeln('  --format=<format>             Output format (default: cyclonedx-json)');
-  Writeln('                                  cyclonedx-json (1.6) | cyclonedx-xml (1.6) | spdx-json (2.3)');
+  Writeln('                                  cyclonedx-json (1.6) | cyclonedx-xml (1.6) | spdx-json');
+  Writeln('  --spdx-version=<version>      SPDX version for spdx-json: 2.3 (default) | 3.0.1');
+  Writeln('                                File key: spdxVersion');
   Writeln('  --output=<path>               Output file path (default: bom.json)');
   Writeln('  --platform=<name>             Target platform (default: Win32)');
   Writeln('                                File key: platform');
@@ -795,7 +812,8 @@ function TCliOptions.ToSbomConfig: TSbomConfig;
 begin
   Result := TSbomConfig.Default;
   Result.OutputPath      := FOutput;
-  Result.Format          := FFormat;
+  Result.SpdxVersion     := FSpdxVersion;
+  Result.Format          := ApplySpdxVersion(FFormat, FSpdxVersion);
   Result.Platform        := FPlatform;
   Result.PlatformExplicit := FPlatformExplicit;
   Result.Configuration   := FConfiguration;
