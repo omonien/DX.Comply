@@ -303,7 +303,8 @@ begin
   if (AArtefact.FileSize >= 0) or (Trim(AArtefact.Origin) <> '') or
      (Trim(AArtefact.Evidence) <> '') or (Trim(AArtefact.Confidence) <> '') or
      AArtefact.Conditional or (LFileName <> '') or AUnresolvedSource or
-     (AArtefact.LocationSource <> '') or (AArtefact.Location <> '') then
+     (AArtefact.LocationSource <> '') or (AArtefact.Location <> '') or
+     AArtefact.VersionFromFileDate then
   begin
     OpenTag('properties');
     if AArtefact.FileSize >= 0 then
@@ -351,6 +352,9 @@ begin
     if AArtefact.Location <> '' then
       AddLine('<property name="net.developer-experts.dx-comply:location">' +
         EscapeXml(AArtefact.Location) + '</property>');
+    // Issue #109: the version is the file modification time, not a real version.
+    if AArtefact.VersionFromFileDate then
+      AddLine('<property name="' + cVersionSourceProperty + '">' + cVersionSourceFileDate + '</property>');
     if LFileName <> '' then
     begin
       AddLine('<property name="bsi:component:filename">' + EscapeXml(LFileName) + '</property>');

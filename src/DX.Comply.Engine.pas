@@ -483,8 +483,12 @@ type
 /// empty, that .exe, .dll, or .bpl still on disk gets its PE FileVersion
 /// (or ProductVersion) so the report and CycloneDX stay aligned (issue #90).
 /// Any other .exe, .dll, or .bpl found on disk gets the version from its own
-/// version resource, and no version when it has none (issue #96). Other files
-/// (.res, .map, ...) get no version. Unit evidence, requires packages and
+/// version resource (issue #96). A .dcp is the project's own only when
+/// AOwnOutputPath is a package whose name starts with the .dcp name; any
+/// other .dcp is treated like a third-party file. A file that still has no
+/// version and exists on disk gets its last modification time in UTC as an
+/// RFC 3339 timestamp, with VersionFromFileDate set (BSI TR-03183-2 section
+/// 5.2.2, issue #109). Unit evidence, requires packages and
 /// library source files are left unchanged. A runtime package with no file is
 /// left unchanged. A runtime package whose BPL was found is versioned from
 /// that file.
@@ -608,12 +612,37 @@ begin
   inherited;
 end;
 
+function TryFileDateVersion(const AFilePath: string; out AVersion: string): Boolean;
+begin
+  AVersion := '';
+  Result := (AFilePath <> '') and TFile.Exists(AFilePath);
+  if Result then
+  begin
+    AVersion := FormatRfc3339Utc(TFile.GetLastWriteTimeUtc(AFilePath));
+  end;
+end;
+
+function IsOwnDcp(const ADcpPath, AOwnOutputPath: string): Boolean;
+var
+  LDcpStem, LOwnStem: string;
+begin
+  // Without a known output every .dcp keeps the product version, as before.
+  if AOwnOutputPath = '' then
+    Exit(True);
+  if not SameText(TPath.GetExtension(AOwnOutputPath), '.bpl') then
+    Exit(False);
+  LDcpStem := TPath.GetFileNameWithoutExtension(ADcpPath);
+  LOwnStem := TPath.GetFileNameWithoutExtension(AOwnOutputPath);
+  // A package MyPkg with LibSuffix 290 builds MyPkg290.bpl and MyPkg.dcp.
+  Result := (LDcpStem <> '') and SameText(Copy(LOwnStem, 1, Length(LDcpStem)), LDcpStem);
+end;
+
 procedure ApplyProductVersionToBuildFiles(const AArtefacts: TArtefactList;
   const AVersion: string; const AOwnOutputPath: string);
 var
   I: Integer;
   LArtefact: TArtefactInfo;
-  LType, LExt, LFileName: string;
+  LType, LExt, LFileName, LDateVersion: string;
   LOwnOutput: Boolean;
 begin
   if AArtefacts = nil then
@@ -640,10 +669,11 @@ begin
     LOwnOutput := (AOwnOutputPath <> '') and (LArtefact.FilePath <> '') and
       SameText(ExpandFileName(LArtefact.FilePath), ExpandFileName(AOwnOutputPath));
 
-    // Only the binary this project builds, plus a .dcp, carries the product
+    // Only the binary this project builds, plus its .dcp, carries the product
     // version. Another .exe in the same directory is a third-party file
-    // (issue #96), same as a DLL or .bpl that the project did not build.
-    if LOwnOutput or ((LType <> 'external-reference') and (LExt = '.dcp')) then
+    // (issue #96), same as a DLL, .bpl or .dcp that the project did not build.
+    if LOwnOutput or ((LType <> 'external-reference') and (LExt = '.dcp') and
+       IsOwnDcp(LFileName, AOwnOutputPath)) then
     begin
       LArtefact.Version := Trim(AVersion);
       // Issue #90: when no product version was configured, still surface the
@@ -660,9 +690,16 @@ begin
       // A third-party EXE, DLL, or package carries its own version, or none.
       // The project's own output was handled above via AOwnOutputPath.
       LArtefact.Version := GetFileVersionText(LArtefact.FilePath);
-    end
-    else
-      Continue;
+    end;
+    // BSI TR-03183-2 5.2.2: without a version, use the file modification
+    // time as an RFC 3339 timestamp. A DLL found only in a system directory
+    // (Location set) does not represent the target system and stays empty.
+    if (Trim(LArtefact.Version) = '') and (LArtefact.Location = '') and
+       TryFileDateVersion(LArtefact.FilePath, LDateVersion) then
+    begin
+      LArtefact.Version := LDateVersion;
+      LArtefact.VersionFromFileDate := True;
+    end;
     AArtefacts[I] := LArtefact;
   end;
 end;
