@@ -81,6 +81,8 @@ type
     procedure Write_SbomHeaderData_AppearsInProjectOverview;
     [Test]
     procedure Write_EmptySbomHeaderData_IsOmitted;
+    [Test]
+    procedure Write_Overview_ShowsOriginsLicencesAndUnitsWithoutManifest;
   end;
 
 implementation
@@ -323,8 +325,34 @@ begin
   Assert.IsTrue(LWriter.Write(FOutputPath, FData, THumanReadableReportConfig.Default));
   var LContent := TFile.ReadAllText(FOutputPath, TEncoding.UTF8);
   Assert.AreEqual(0, Pos('SBOM Creator', LContent));
-  Assert.AreEqual(0, Pos('Supplier', LContent));
-  Assert.AreEqual(0, Pos('Licence', LContent));
+  Assert.AreEqual(0, Pos('<th>Supplier</th>', LContent));
+  Assert.AreEqual(0, Pos('<th>Licence</th>', LContent));
+end;
+
+procedure THtmlReportWriterTests.Write_Overview_ShowsOriginsLicencesAndUnitsWithoutManifest;
+begin
+  var LUnit := Default(TArtefactInfo);
+  LUnit.RelativePath := 'JvComponent.pas';
+  LUnit.ArtefactType := 'unit-evidence';
+  LUnit.Origin := 'Third party';
+  FArtefacts.Add(LUnit);
+  FData.Metadata.Licence := 'Proprietary';
+  var LWriter: IHumanReadableReportWriter := THtmlReportWriter.Create;
+  Assert.IsTrue(LWriter.Write(FOutputPath, FData, THumanReadableReportConfig.Default));
+  var LContent := TFile.ReadAllText(FOutputPath, TEncoding.UTF8);
+  Assert.IsTrue(Pos('<section id="origin-summary"><h2>Origin summary</h2>', LContent) > 0);
+  Assert.IsTrue(Pos('<a href="#third-party-units-without-manifest">Third party</a></td><td>1</td>',
+    LContent) > 0);
+  Assert.IsTrue(Pos('<section id="licences"><h2>Licences</h2>', LContent) > 0);
+  Assert.IsTrue(Pos('<td>Proprietary</td><td>1</td>', LContent) > 0);
+  Assert.IsTrue(Pos('<td>No licence information</td>', LContent) > 0);
+  Assert.IsTrue(Pos('<section id="third-party-units-without-manifest">', LContent) > 0);
+  Assert.IsTrue(Pos('<td>Jv</td><td>1</td><td>supplier, version, licence</td><td>JvComponent</td>',
+    LContent) > 0);
+  Assert.IsTrue(Pos('<section id="artefacts">', LContent) > 0);
+  Assert.IsTrue(Pos('<section id="unit-evidence">', LContent) > 0);
+  Assert.IsTrue(Pos('id="origin-summary"', LContent) < Pos('id="artefacts"', LContent),
+    'the origin summary is near the top');
 end;
 
 initialization

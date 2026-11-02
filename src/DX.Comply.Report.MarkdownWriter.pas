@@ -34,6 +34,7 @@ type
     procedure AddUnitEvidence(Lines: TStrings; const AData: TComplianceReportData;
       const AConfig: THumanReadableReportConfig);
     procedure AddWarnings(Lines: TStrings; const AData: TComplianceReportData);
+    procedure AddOverview(Lines: TStrings; const AData: TComplianceReportData);
     procedure AddValidation(Lines: TStrings; const AData: TComplianceReportData);
   public
     function Write(const AOutputPath: string; const AData: TComplianceReportData;
@@ -46,6 +47,7 @@ implementation
 uses
   System.IOUtils,
   System.SysUtils,
+  DX.Comply.Report.Overview,
   DX.Comply.Report.Support;
 
 procedure TMarkdownReportWriter.AddArtefacts(Lines: TStrings; const AData: TComplianceReportData);
@@ -187,6 +189,66 @@ begin
   Lines.Add('');
 end;
 
+procedure TMarkdownReportWriter.AddOverview(Lines: TStrings; const AData: TComplianceReportData);
+begin
+  var LOverview := BuildReportOverview(AData);
+
+  // Issue #113: where the components come from.
+  Lines.Add('## Origin summary');
+  Lines.Add('| Origin | Components |');
+  Lines.Add('| --- | ---: |');
+  for var LGroup in LOverview.Origins do
+  begin
+    Lines.Add(Format('| [%s](#%s) | %d |', [EscapeMarkdown(LGroup.Title), LGroup.Anchor, LGroup.Count]));
+  end;
+  Lines.Add(Format('| **Total SBOM components** | **%d** |', [LOverview.TotalComponents]));
+  Lines.Add('');
+  if Length(LOverview.Suppliers) > 0 then
+  begin
+    Lines.Add('Third-party units by supplier (from the component manifest):');
+    Lines.Add('');
+    Lines.Add('| Supplier | Units |');
+    Lines.Add('| --- | ---: |');
+    for var LGroup in LOverview.Suppliers do
+    begin
+      Lines.Add(Format('| %s | %d |', [EscapeMarkdown(LGroup.Title), LGroup.Count]));
+    end;
+    Lines.Add('');
+  end;
+
+  // Issue #112: licences as declared in the SBOM.
+  Lines.Add('## Licences');
+  Lines.Add('Licences as declared in the SBOM. Review hints are not legal advice.');
+  Lines.Add('');
+  Lines.Add('| Declared licence | Components | Names | Note |');
+  Lines.Add('| --- | ---: | --- | --- |');
+  for var LGroup in LOverview.Licences do
+  begin
+    Lines.Add(Format('| %s | %d | %s | %s |', [EscapeMarkdown(LGroup.Title), LGroup.Count,
+      EscapeMarkdown(LGroup.NamesText), EscapeMarkdown(LGroup.Note)]));
+  end;
+  Lines.Add('');
+
+  // Issue #114: third-party units the component manifest does not cover.
+  if LOverview.WithoutManifestCount > 0 then
+  begin
+    Lines.Add('## Third-party units without manifest');
+    Lines.Add(Format('%d of %d third-party units have no component manifest row. ' +
+      'Add a row with supplier, version and licence for each library ' +
+      '(see README, section Component manifest).', [LOverview.WithoutManifestCount,
+      LOverview.ThirdPartyUnitCount]));
+    Lines.Add('');
+    Lines.Add('| Unit prefix | Units | Missing | Names |');
+    Lines.Add('| --- | ---: | --- | --- |');
+    for var LGroup in LOverview.WithoutManifest do
+    begin
+      Lines.Add(Format('| %s | %d | %s | %s |', [EscapeMarkdown(LGroup.Title), LGroup.Count,
+        LGroup.Note, EscapeMarkdown(LGroup.NamesText)]));
+    end;
+    Lines.Add('');
+  end;
+end;
+
 function TMarkdownReportWriter.EscapeMarkdown(const AValue: string): string;
 begin
   Result := StringReplace(AValue, '|', '\|', [rfReplaceAll]);
@@ -270,6 +332,7 @@ begin
     AddKeyValue(Lines, 'Warnings', IntToStr(LWarningsCount));
     AddKeyValue(Lines, 'Structural check', ValidationStatusText(AData));
     Lines.Add('');
+    AddOverview(Lines, AData);
     AddValidation(Lines, AData);
     AddArtefacts(Lines, AData);
     if AConfig.IncludeCompositionEvidence or AConfig.IncludeBuildEvidence then

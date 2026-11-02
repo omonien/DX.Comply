@@ -518,6 +518,7 @@ uses
   DX.Comply.CraChecks,
   DX.Comply.LegacyProject,
   DX.Comply.LibrarySource,
+  DX.Comply.Report.Overview,
   DX.Comply.Report.Support,
   DX.Comply.VersionInfo;
 
@@ -3223,6 +3224,10 @@ begin
           LCraWarnings.Add(LCraText);
         ReportWarnings(LCraWarnings, LReportedWarnings, 69);
         FCraWarnings := LCraWarnings.ToArray;
+        // Issue #114: one-line count for the CLI and the IDE log.
+        var LWithoutManifestLine := ThirdPartyWithoutManifestLine(LArtefacts, LMetadata.ComponentManifestJson);
+        if LWithoutManifestLine <> '' then
+          DoProgress('Info: ' + LWithoutManifestLine, 69);
       finally
         LCraWarnings.Free;
       end;
