@@ -65,6 +65,18 @@ type
     [Test]
     procedure CycloneDxJson_EmptyString_ReportsError;
 
+    [Test]
+    procedure CycloneDxJson_SpecVersion15_ReportsError;
+
+    [Test]
+    procedure CycloneDxJson_SpecVersion17_PassesValidation;
+
+    [Test]
+    procedure CycloneDxXml_Namespace15_ReportsError;
+
+    [Test]
+    procedure IsCycloneDxSpecVersionAccepted_Boundaries;
+
     // CycloneDX XML
     [Test]
     procedure CycloneDxXml_ValidDocument_PassesValidation;
@@ -500,6 +512,41 @@ var
 begin
   LResult := FValidator.ValidateAuto('{"foo": "bar"}');
   Assert.IsFalse(LResult.IsValid);
+end;
+
+procedure TSchemaValidatorTests.CycloneDxJson_SpecVersion15_ReportsError;
+begin
+  var LJson := MakeValidCycloneDxJson.Replace('"specVersion": "1.6"', '"specVersion": "1.5"');
+  Assert.AreNotEqual(MakeValidCycloneDxJson, LJson, 'Fixture must contain specVersion 1.6');
+  var LResult := FValidator.ValidateCycloneDxJson(LJson);
+  Assert.IsFalse(LResult.IsValid, 'CycloneDX 1.5 is below the TR-03183-2 minimum');
+  Assert.IsTrue(string.Join(' ', LResult.Errors).Contains('1.6'));
+end;
+
+procedure TSchemaValidatorTests.CycloneDxJson_SpecVersion17_PassesValidation;
+begin
+  var LJson := MakeValidCycloneDxJson.Replace('"specVersion": "1.6"', '"specVersion": "1.7"');
+  var LResult := FValidator.ValidateCycloneDxJson(LJson);
+  Assert.IsTrue(LResult.IsValid, string.Join(' ', LResult.Errors));
+end;
+
+procedure TSchemaValidatorTests.CycloneDxXml_Namespace15_ReportsError;
+begin
+  var LXml := MakeValidCycloneDxXml.Replace('cyclonedx.org/schema/bom/1.6', 'cyclonedx.org/schema/bom/1.5');
+  Assert.AreNotEqual(MakeValidCycloneDxXml, LXml, 'Fixture must use the 1.6 namespace');
+  var LResult := FValidator.ValidateCycloneDxXml(LXml);
+  Assert.IsFalse(LResult.IsValid, 'CycloneDX 1.5 XML is below the TR-03183-2 minimum');
+end;
+
+procedure TSchemaValidatorTests.IsCycloneDxSpecVersionAccepted_Boundaries;
+begin
+  Assert.IsTrue(IsCycloneDxSpecVersionAccepted('1.6'));
+  Assert.IsTrue(IsCycloneDxSpecVersionAccepted('1.10'));
+  Assert.IsTrue(IsCycloneDxSpecVersionAccepted('2.0'));
+  Assert.IsFalse(IsCycloneDxSpecVersionAccepted('1.5'));
+  Assert.IsFalse(IsCycloneDxSpecVersionAccepted('1.4'));
+  Assert.IsFalse(IsCycloneDxSpecVersionAccepted(''));
+  Assert.IsFalse(IsCycloneDxSpecVersionAccepted('one.six'));
 end;
 
 end.

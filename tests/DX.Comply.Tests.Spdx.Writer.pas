@@ -75,6 +75,9 @@ type
     procedure Write_CreationInfo_HasCreators;
 
     [Test]
+    procedure Write_CreationInfo_LicenseListVersionFromConstant;
+
+    [Test]
     procedure Write_SingleArtefact_ContainsPackage;
 
     [Test]
@@ -319,6 +322,21 @@ begin
     Assert.IsTrue(LCreators.Count > 0);
     Assert.AreEqual('Tool: DX.Comply-' + GetDxComplyToolVersion, LCreators.Items[0].Value,
       'The SPDX creator tool token must use the running module version');
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TSpdxWriterTests.Write_CreationInfo_LicenseListVersionFromConstant;
+var
+  LJson: TJSONObject;
+begin
+  FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo);
+  LJson := LoadOutputJson;
+  try
+    Assert.AreEqual(cSpdxLicenseListVersion,
+      (LJson.GetValue('creationInfo') as TJSONObject).GetValue<string>('licenseListVersion'));
+    Assert.AreNotEqual('3.19', cSpdxLicenseListVersion, 'The licence list version must not stay at 3.19');
   finally
     LJson.Free;
   end;
