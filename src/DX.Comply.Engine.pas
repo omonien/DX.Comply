@@ -82,7 +82,8 @@ type
     scoPurl,
     scoRepoUrl,
     scoStrictMode,
-    scoSpdxVersion
+    scoSpdxVersion,
+    scoReportContent
   );
   /// <summary>Set of TSbomConfig fields that were set explicitly.</summary>
   TSbomConfigOverrides = set of TSbomConfigOverride;
@@ -2211,6 +2212,11 @@ begin
           if LReport.GetValue('includeBuildEvidence') <> nil then
             Result.HumanReadableReport.IncludeBuildEvidence :=
               LReport.GetValue<Boolean>('includeBuildEvidence');
+          // Issue #126: all (default), overview or units. Like format, an
+          // unknown value keeps the default.
+          if LReport.GetValue('content') <> nil then
+            TryParseReportContent(LReport.GetValue<string>('content'),
+              Result.HumanReadableReport.Content);
         end;
 
         // MAP file directory override
@@ -3362,6 +3368,10 @@ begin
   if scoStrictMode in ACaller.ExplicitOverrides then
   begin
     Result.StrictMode := ACaller.StrictMode;
+  end;
+  if scoReportContent in ACaller.ExplicitOverrides then
+  begin
+    Result.HumanReadableReport.Content := ACaller.HumanReadableReport.Content;
   end;
   if scoSpdxVersion in ACaller.ExplicitOverrides then
   begin

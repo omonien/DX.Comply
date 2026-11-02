@@ -35,7 +35,8 @@ type
     procedure AddSummaryCard(Lines: TStrings; const ATitle, AValue, ACssClass: string);
     procedure AddValidation(Lines: TStrings; const AData: TComplianceReportData);
     procedure AddWarnings(Lines: TStrings; const AData: TComplianceReportData);
-    procedure AddOverview(Lines: TStrings; const AData: TComplianceReportData);
+    procedure AddOverview(Lines: TStrings; const AData: TComplianceReportData;
+      const AConfig: THumanReadableReportConfig);
   public
     function Write(const AOutputPath: string; const AData: TComplianceReportData;
       const AConfig: THumanReadableReportConfig): Boolean;
@@ -198,7 +199,8 @@ begin
   Lines.Add('</ul></section>');
 end;
 
-procedure THtmlReportWriter.AddOverview(Lines: TStrings; const AData: TComplianceReportData);
+procedure THtmlReportWriter.AddOverview(Lines: TStrings; const AData: TComplianceReportData;
+  const AConfig: THumanReadableReportConfig);
 begin
   var LOverview := BuildReportOverview(AData);
 
@@ -207,8 +209,12 @@ begin
   Lines.Add('<thead><tr><th>Origin</th><th>Components</th></tr></thead><tbody>');
   for var LGroup in LOverview.Origins do
   begin
-    Lines.Add(Format('<tr><td><a href="#%s">%s</a></td><td>%d</td></tr>',
-      [LGroup.Anchor, EscapeHtml(LGroup.Title), LGroup.Count]));
+    // Issue #126: without the unit list there is no target for the link.
+    if (AConfig.Content = hrcOverview) and (LGroup.Anchor = cAnchorUnitEvidence) then
+      Lines.Add(Format('<tr><td>%s</td><td>%d</td></tr>', [EscapeHtml(LGroup.Title), LGroup.Count]))
+    else
+      Lines.Add(Format('<tr><td><a href="#%s">%s</a></td><td>%d</td></tr>',
+        [LGroup.Anchor, EscapeHtml(LGroup.Title), LGroup.Count]));
   end;
   Lines.Add(Format('<tr><th>Total SBOM components</th><th>%d</th></tr>', [LOverview.TotalComponents]));
   Lines.Add('</tbody></table></div>');
@@ -363,10 +369,13 @@ begin
     if Trim(AData.ProjectInfo.Toolchain.RootDir) <> '' then
       Lines.Add('<tr><th>Toolchain Root</th><td>' + EscapeHtml(AData.ProjectInfo.Toolchain.RootDir) + '</td></tr>');
     Lines.Add('</tbody></table></div></section>');
-    AddOverview(Lines, AData);
+    // Issue #126: --report-content / report.content selects the sections.
+    if AConfig.Content <> hrcUnits then
+      AddOverview(Lines, AData, AConfig);
     AddValidation(Lines, AData);
     AddArtefacts(Lines, AData);
-    if AConfig.IncludeCompositionEvidence or AConfig.IncludeBuildEvidence then
+    if (AConfig.Content <> hrcOverview) and
+      (AConfig.IncludeCompositionEvidence or AConfig.IncludeBuildEvidence) then
       AddUnitEvidence(Lines, AData, AConfig);
     if AConfig.IncludeWarnings then
       AddWarnings(Lines, AData);

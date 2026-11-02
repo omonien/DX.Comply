@@ -31,6 +31,15 @@ type
   THumanReadableReportFormat = (hrfMarkdown, hrfHtml, hrfBoth);
 
   /// <summary>
+  /// Selects the sections of a human-readable report (issue #126).
+  /// hrcAll writes the overview sections and the unit list, hrcOverview
+  /// only the overview sections (origin summary, licences, third-party
+  /// units without manifest), hrcUnits only the unit list with hashes.
+  /// The SBOM itself is not affected.
+  /// </summary>
+  THumanReadableReportContent = (hrcAll, hrcOverview, hrcUnits);
+
+  /// <summary>
   /// Controls optional human-readable report generation.
   /// </summary>
   THumanReadableReportConfig = record
@@ -40,6 +49,7 @@ type
     IncludeWarnings: Boolean;
     IncludeCompositionEvidence: Boolean;
     IncludeBuildEvidence: Boolean;
+    Content: THumanReadableReportContent;
     class function Default: THumanReadableReportConfig; static;
   end;
 
@@ -79,7 +89,49 @@ type
     function GetFormat: THumanReadableReportFormat;
   end;
 
+/// <summary>
+/// Converts a report content value to its option text: all, overview or units.
+/// </summary>
+function ReportContentToString(AValue: THumanReadableReportContent): string;
+
+/// <summary>
+/// Parses all, overview or units (case-insensitive). Returns False for
+/// anything else and leaves AValue unchanged.
+/// </summary>
+function TryParseReportContent(const AText: string;
+  var AValue: THumanReadableReportContent): Boolean;
+
 implementation
+
+uses
+  System.SysUtils;
+
+function ReportContentToString(AValue: THumanReadableReportContent): string;
+begin
+  case AValue of
+    hrcOverview: Result := 'overview';
+    hrcUnits: Result := 'units';
+  else
+    Result := 'all';
+  end;
+end;
+
+function TryParseReportContent(const AText: string;
+  var AValue: THumanReadableReportContent): Boolean;
+var
+  LText: string;
+begin
+  LText := LowerCase(Trim(AText));
+  Result := True;
+  if LText = 'all' then
+    AValue := hrcAll
+  else if LText = 'overview' then
+    AValue := hrcOverview
+  else if LText = 'units' then
+    AValue := hrcUnits
+  else
+    Result := False;
+end;
 
 { THumanReadableReportConfig }
 
@@ -91,6 +143,7 @@ begin
   Result.IncludeWarnings := True;
   Result.IncludeCompositionEvidence := True;
   Result.IncludeBuildEvidence := True;
+  Result.Content := hrcAll;
 end;
 
 end.
