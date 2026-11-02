@@ -6,7 +6,7 @@
 /// <remarks>
 /// This unit provides TSpdxJsonWriter which generates SPDX 2.3 JSON SBOMs:
 /// - Document creation information (tool, timestamp, namespace)
-/// - Package list with checksums (SHA-256)
+/// - Package list with checksums (SHA-256 and SHA-512)
 /// - Relationship graph (DESCRIBES, DEPENDS_ON, CONTAINS), including direct uses edges
 /// - Extracted licensing information
 ///
@@ -41,6 +41,13 @@ uses
   System.Generics.Collections,
   System.DateUtils,
   DX.Comply.Engine.Intf;
+
+const
+  /// <summary>
+  /// SPDX License List version written as creationInfo.licenseListVersion.
+  /// Update this one constant when a newer list is adopted.
+  /// </summary>
+  cSpdxLicenseListVersion = '3.29';
 
 type
   /// <summary>
@@ -234,7 +241,7 @@ begin
   LCreationInfo := TJSONObject.Create;
 
   LCreationInfo.AddPair('created', FormatUtcTimestamp(AMetadata.Timestamp));
-  LCreationInfo.AddPair('licenseListVersion', '3.19');
+  LCreationInfo.AddPair('licenseListVersion', cSpdxLicenseListVersion);
 
   LCreators := TJSONArray.Create;
   LCreators.Add('Tool: ' + cToolName + '-' + ResolveDxComplyToolVersion(AMetadata.ToolVersion));

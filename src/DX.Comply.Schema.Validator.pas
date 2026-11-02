@@ -17,6 +17,9 @@
 /// constraints. CycloneDX XML checks also enforce the 1.6 child order of
 /// metadata and component. That is still not a substitute for xmllint against
 /// bom-1.6.xsd.
+///
+/// CycloneDX documents below specification version 1.6 are reported as errors,
+/// because BSI TR-03183-2 chapter 4 requires CycloneDX 1.6 or later.
 /// </remarks>
 ///
 /// <copyright>
@@ -97,7 +100,28 @@ type
 /// </summary>
 function CycloneDxXmlSequenceErrors(const AContent: string): TArray<string>;
 
+/// <summary>
+/// True when AVersion is a CycloneDX specification version of 1.6 or later.
+/// BSI TR-03183-2 chapter 4 requires CycloneDX 1.6 as the minimum.
+/// </summary>
+function IsCycloneDxSpecVersionAccepted(const AVersion: string): Boolean;
+
 implementation
+
+function IsCycloneDxSpecVersionAccepted(const AVersion: string): Boolean;
+var
+  LParts: TArray<string>;
+  LMajor, LMinor: Integer;
+begin
+  LParts := Trim(AVersion).Split(['.']);
+  if Length(LParts) <> 2 then
+    Exit(False);
+  if not TryStrToInt(LParts[0], LMajor) or not TryStrToInt(LParts[1], LMinor) then
+    Exit(False);
+  if (LMajor < 0) or (LMinor < 0) then
+    Exit(False);
+  Result := (LMajor > 1) or ((LMajor = 1) and (LMinor >= 6));
+end;
 
 { TValidationResult }
 
@@ -224,15 +248,18 @@ begin
       AddError('bomFormat must be "CycloneDX", got "' + LBomFormat + '"');
   end;
 
-  // specVersion (required, must be 1.4 or 1.5 or 1.6)
+  // specVersion (required). BSI TR-03183-2 chapter 4 requires 1.6 or later.
   LValue := AJson.GetValue('specVersion');
   if LValue = nil then
     AddError('Missing required field: specVersion')
   else
   begin
     LSpecVersion := LValue.Value;
-    if (LSpecVersion <> '1.4') and (LSpecVersion <> '1.5') and (LSpecVersion <> '1.6') then
-      AddWarning('specVersion "' + LSpecVersion + '" is not 1.4, 1.5, or 1.6');
+    if not IsCycloneDxSpecVersionAccepted(LSpecVersion) then
+    begin
+      AddError('specVersion "' + LSpecVersion +
+        '" is below 1.6. BSI TR-03183-2 requires CycloneDX 1.6 or later');
+    end;
   end;
 
   // serialNumber (optional but recommended; must start with urn:uuid: if present)
@@ -454,7 +481,16 @@ begin
 
   // CycloneDX namespace
   if Pos('http://cyclonedx.org/schema/bom/', AContent) = 0 then
-    AddError('Missing CycloneDX namespace (http://cyclonedx.org/schema/bom/...)');
+    AddError('Missing CycloneDX namespace (http://cyclonedx.org/schema/bom/...)')
+  else
+  begin
+    LMatch := TRegEx.Match(AContent, 'http://cyclonedx\.org/schema/bom/([0-9]+\.[0-9]+)');
+    if LMatch.Success and not IsCycloneDxSpecVersionAccepted(LMatch.Groups[1].Value) then
+    begin
+      AddError('CycloneDX namespace version ' + LMatch.Groups[1].Value +
+        ' is below 1.6. BSI TR-03183-2 requires CycloneDX 1.6 or later');
+    end;
+  end;
 
   // <bom> root element
   if Pos('<bom', AContent) = 0 then
