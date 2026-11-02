@@ -287,6 +287,7 @@ begin
     sfCycloneDxJson: Result := 'CycloneDX 1.6 JSON';
     sfCycloneDxXml: Result := 'CycloneDX 1.6 XML';
     sfSpdxJson: Result := 'SPDX 2.3 JSON';
+    sfSpdx3Json: Result := 'SPDX 3.0.1 JSON-LD';
   else
     Result := 'Unknown';
   end;

@@ -198,7 +198,8 @@ DX.Comply produces **one machine-readable SBOM** and, if you ask for them, one o
 |---|---|---|
 | **CycloneDX JSON** | 1.6 | Default. A common SBOM format for tooling |
 | **CycloneDX XML** | 1.6 | XML variant for XML-based toolchains |
-| **SPDX JSON** | 2.3 | SPDX 2.3 JSON. SPDX 3.0.1 is out of scope |
+| **SPDX JSON** | 2.3 | SPDX 2.3 JSON, the SPDX default |
+| **SPDX JSON-LD** | 3.0.1 | `--format=spdx-json --spdx-version=3.0.1`, or the file key `"spdxVersion": "3.0.1"` |
 
 ### Human-readable companion reports (optional, opt-in via `--report=<format>`)
 
@@ -219,9 +220,11 @@ After it writes a file, DX.Comply runs its own structural check of required fiel
 
 The checked-in example is [docs/examples/ConwaysLifeFMX.cdx.json](docs/examples/ConwaysLifeFMX.cdx.json), CycloneDX 1.6, from ConwaysLifeFMX in [Embarcadero/RADStudio13Demos](https://github.com/Embarcadero/RADStudio13Demos.git), project `Object Pascal/RTL/Parallel Library/FMX/ConwaysLifeFMX.dproj`, Release/Win32 with a map file. It replaces the earlier AlienInvasion example. New CycloneDX output uses `specVersion` 1.6. The tool's own check is structural. It is not a validation against the official schema. SPDX JSON and CycloneDX XML are not checked against official schemas inside the tool.
 
+SPDX 3.0.1 output is built from the same data as SPDX 2.3: the same packages, IDs, manifest libraries, licences and uses graph. It uses the Core, Software and SimpleLicensing profiles. Relationships with the same source and type are grouped into one `Relationship` element, and its `completeness` carries what CycloneDX writes as compositions: the built program is `incomplete`, a unit whose source was read is `complete`, and a manifest library is `complete`. The IDE expert writes CycloneDX JSON only, so the SPDX version applies to the CLI.
+
 ### BSI TR-03183-2
 
-[BSI TR-03183-2](https://www.bsi.bund.de/dok/TR-03183-en) version 2.1.0 (20 August 2025) asks for CycloneDX 1.6 or later, or SPDX 3.0.1 or later. CycloneDX output is 1.6. SPDX stays at 2.3. SPDX 3.0.1 is out of scope. DX.Comply writes the fields it can fill from the build or from values you set. Where a unit's Pascal source was read, direct uses edges to other units already in the SBOM are written as well. A unit with no source stays a leaf. That is not a certification, and it is not full coverage of the technical guideline. The field list, including when a dependency set is complete, is in [docs/BSI-TR-03183-2.md](docs/BSI-TR-03183-2.md).
+[BSI TR-03183-2](https://www.bsi.bund.de/dok/TR-03183-en) version 2.1.0 (20 August 2025) asks for CycloneDX 1.6 or later, or SPDX 3.0.1 or later. CycloneDX output is 1.6. SPDX output is 2.3 by default, and 3.0.1 with `--spdx-version=3.0.1`. DX.Comply writes the fields it can fill from the build or from values you set. Where a unit's Pascal source was read, direct uses edges to other units already in the SBOM are written as well. A unit with no source stays a leaf. That is not a certification, and it is not full coverage of the technical guideline. The field list, including when a dependency set is complete, is in [docs/BSI-TR-03183-2.md](docs/BSI-TR-03183-2.md).
 
 ### SBOM creator and header data
 
@@ -337,6 +340,8 @@ Add a `.dxcomply.json` to your project folder and pass `--ci` so the CLI loads i
 }
 ```
 
+`spdxVersion` selects the SPDX version when `format` is `spdx-json`: `2.3` (the default) or `3.0.1` (the same value as `--spdx-version`).
+
 `configName` is the build configuration (the same value as `--config-name`). `platform` matches `--platform`. Use these when the project is not built as `Release|Win32`.
 
 `product.supplierUrl` is the supplier contact URL (`--supplier-url`). `product.licence` is the distribution licence of the product (`--licence`): an SPDX identifier, an SPDX expression, or a name. Leave a key out to omit that field.
@@ -349,7 +354,7 @@ When `--ci` is set and the file exists, values are merged in this order:
 2. Keys present in `.dxcomply.json`.
 3. Command-line options you actually pass. Those win over the file.
 
-An option you leave off the command line does not override the file, even though that option has a default. `dxcomply --ci --config-name=Debug` uses Debug even when the file says `"configName": "Release"`. `dxcomply --ci` with no `--config-name` uses the file's `configName`, or `Release` when the key is absent. The same rule applies to `--platform`, `--format`, `--output`, `--product`, `--version`, `--supplier`, `--supplier-url`, `--licence`, `--sbom-creator`, `--report`, `--include`, `--exclude`, `--map-dir`, `--manifest`, `--strict`, and `--no-composition-evidence`.
+An option you leave off the command line does not override the file, even though that option has a default. `dxcomply --ci --config-name=Debug` uses Debug even when the file says `"configName": "Release"`. `dxcomply --ci` with no `--config-name` uses the file's `configName`, or `Release` when the key is absent. The same rule applies to `--platform`, `--format`, `--output`, `--product`, `--version`, `--supplier`, `--supplier-url`, `--licence`, `--sbom-creator`, `--report`, `--include`, `--exclude`, `--map-dir`, `--manifest`, `--strict`, `--spdx-version`, and `--no-composition-evidence`.
 
 If you pass `--include` or `--exclude`, that list replaces the file's list. `--report` overrides the file's enabled flag and format, and leaves the file's report output path as it is.
 
@@ -372,7 +377,7 @@ The units come from the MAP file, including a Delphi 7 `.dpr` with its `.dof` an
 
 `own_code_units` and `own_code_prefixes` mark the project's own units. Those units stay in the evidence. They are not dropped, and they are not attributed to a third-party library. Unmatched units stay as they are: one component each, linked from the program that was built.
 
-A matched unit stays as its own evidence component (hash, origin). The SBOM adds one library component for the row (`name`, `version`, `type`, supplier and author from `vendor`, optional `vendor_url`). The program that was built depends on that library, and the library depends on the matched units. Other binaries stay linked from that program. This is written for CycloneDX JSON, CycloneDX XML, and SPDX 2.3 JSON.
+A matched unit stays as its own evidence component (hash, origin). The SBOM adds one library component for the row (`name`, `version`, `type`, supplier and author from `vendor`, optional `vendor_url`). The program that was built depends on that library, and the library depends on the matched units. Other binaries stay linked from that program. This is written for CycloneDX JSON, CycloneDX XML, SPDX 2.3 JSON, and SPDX 3.0.1 JSON-LD.
 
 `licence` (British spelling) is an SPDX identifier such as `MIT` (written as `license.id`), an SPDX expression such as `MPL-1.1 OR LGPL-2.1-or-later` (written as `expression`), or any other text such as `Commercial` or `Proprietary` (written as `license.name`). `licence_url` is optional and is omitted for expressions. `license` and `license_url` are accepted as aliases. `type` is `library`, `framework`, or `application`.
 

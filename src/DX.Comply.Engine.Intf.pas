@@ -353,8 +353,10 @@ type
     sfCycloneDxJson,
     /// <summary>CycloneDX XML format.</summary>
     sfCycloneDxXml,
-    /// <summary>SPDX JSON format.</summary>
-    sfSpdxJson
+    /// <summary>SPDX 2.3 JSON format.</summary>
+    sfSpdxJson,
+    /// <summary>SPDX 3.0.1 JSON-LD format (issue #108).</summary>
+    sfSpdx3Json
   );
 
   /// <summary>

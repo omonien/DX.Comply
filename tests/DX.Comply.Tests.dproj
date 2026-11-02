@@ -100,6 +100,7 @@
         <DCCReference Include="DX.Comply.Tests.Report.HtmlWriter.pas"/>
         <DCCReference Include="DX.Comply.Tests.Report.Overview.pas"/>
         <DCCReference Include="DX.Comply.Tests.Spdx.Writer.pas"/>
+        <DCCReference Include="DX.Comply.Tests.Spdx3.Writer.pas"/>
         <DCCReference Include="DX.Comply.Tests.Schema.Validator.pas"/>
         <DCCReference Include="DX.Comply.Tests.IDE.Settings.pas"/>
         <DCCReference Include="DX.Comply.Tests.IDE.ReadmeSupport.pas"/>

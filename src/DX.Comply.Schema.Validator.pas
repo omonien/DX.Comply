@@ -71,6 +71,7 @@ type
     procedure ValidateHashValue(const AAlgorithm, AHash, AContext: string);
     procedure ValidateSpdxJsonInternal(const AJson: TJSONObject);
     procedure ValidateSpdxJsonPackage(const APackage: TJSONObject; const AContext: string);
+    procedure ValidateSpdx3JsonInternal(const AJson: TJSONObject);
     function BuildResult: TValidationResult;
   public
     constructor Create;
@@ -87,6 +88,12 @@ type
     /// Validates an SPDX 2.3 JSON document.
     /// </summary>
     function ValidateSpdxJson(const AContent: string): TValidationResult;
+    /// <summary>
+    /// Validates the structure of an SPDX 3.0.1 JSON-LD document (issue #108):
+    /// context, graph, one CreationInfo, one SpdxDocument, element IDs and
+    /// relationship endpoints. It does not run the full SHACL model.
+    /// </summary>
+    function ValidateSpdx3Json(const AContent: string): TValidationResult;
     /// <summary>
     /// Auto-detects the format and validates accordingly.
     /// </summary>
@@ -923,6 +930,132 @@ end;
 // Auto-detect and validate
 // ---------------------------------------------------------------------------
 
+function TSbomValidator.ValidateSpdx3Json(const AContent: string): TValidationResult;
+begin
+  FErrors.Clear;
+  FWarnings.Clear;
+
+  if Trim(AContent) = '' then
+  begin
+    AddError('Document is empty');
+    Exit(BuildResult);
+  end;
+
+  try
+    var LValue := TJSONObject.ParseJSONValue(AContent);
+    try
+      if not (LValue is TJSONObject) then
+      begin
+        AddError('Invalid JSON: could not parse document');
+        Exit(BuildResult);
+      end;
+      ValidateSpdx3JsonInternal(TJSONObject(LValue));
+    finally
+      LValue.Free;
+    end;
+  except
+    on E: Exception do
+      AddError('JSON parse error: ' + E.Message);
+  end;
+
+  Result := BuildResult;
+end;
+
+procedure TSbomValidator.ValidateSpdx3JsonInternal(const AJson: TJSONObject);
+begin
+  var LContext := AJson.GetValue('@context');
+  if not Assigned(LContext) or (LContext.Value <> 'https://spdx.org/rdf/3.0.1/spdx-context.jsonld') then
+    AddError('"@context" must be https://spdx.org/rdf/3.0.1/spdx-context.jsonld');
+  if not (AJson.GetValue('@graph') is TJSONArray) then
+  begin
+    AddError('"@graph" must be an array');
+    Exit;
+  end;
+
+  var LGraph := TJSONArray(AJson.GetValue('@graph'));
+  var LIds := TDictionary<string, Boolean>.Create;
+  try
+    var LCreationInfos := 0;
+    var LDocuments := 0;
+    for var i := 0 to LGraph.Count - 1 do
+    begin
+      if not (LGraph.Items[i] is TJSONObject) then
+      begin
+        AddError(Format('@graph[%d] must be an object', [i]));
+        Continue;
+      end;
+      var LItem := TJSONObject(LGraph.Items[i]);
+      var LType := '';
+      if Assigned(LItem.GetValue('type')) then
+        LType := LItem.GetValue('type').Value;
+      if LType = '' then
+      begin
+        AddError(Format('@graph[%d] has no type', [i]));
+        Continue;
+      end;
+      if LType = 'CreationInfo' then
+      begin
+        Inc(LCreationInfos);
+        if not Assigned(LItem.GetValue('specVersion')) or (LItem.GetValue('specVersion').Value <> '3.0.1') then
+          AddError('CreationInfo specVersion must be 3.0.1');
+        if not Assigned(LItem.GetValue('created')) or
+          not TRegEx.IsMatch(LItem.GetValue('created').Value, '^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$') then
+          AddError('CreationInfo created must be a UTC timestamp (YYYY-MM-DDThh:mm:ssZ)');
+        if not (LItem.GetValue('createdBy') is TJSONArray) or (TJSONArray(LItem.GetValue('createdBy')).Count = 0) then
+          AddError('CreationInfo createdBy must name at least one agent');
+        Continue;
+      end;
+      if LType = 'SpdxDocument' then
+        Inc(LDocuments);
+      var LId := '';
+      if Assigned(LItem.GetValue('spdxId')) then
+        LId := LItem.GetValue('spdxId').Value;
+      if LId = '' then
+        AddError(Format('%s at @graph[%d] has no spdxId', [LType, i]))
+      else if LIds.ContainsKey(LId) then
+        AddError('Duplicate spdxId: ' + LId)
+      else
+        LIds.Add(LId, True);
+      if not Assigned(LItem.GetValue('creationInfo')) then
+        AddError(Format('%s %s has no creationInfo', [LType, LId]));
+    end;
+    if LCreationInfos <> 1 then
+      AddError(Format('Expected one CreationInfo, found %d', [LCreationInfos]));
+    if LDocuments <> 1 then
+      AddError(Format('Expected one SpdxDocument, found %d', [LDocuments]));
+
+    // Relationship endpoints must be graph elements or the SPDX individuals.
+    for var i := 0 to LGraph.Count - 1 do
+    begin
+      if not (LGraph.Items[i] is TJSONObject) then
+        Continue;
+      var LItem := TJSONObject(LGraph.Items[i]);
+      if not Assigned(LItem.GetValue('type')) or (LItem.GetValue('type').Value <> 'Relationship') then
+        Continue;
+      var LFrom := '';
+      if Assigned(LItem.GetValue('from')) then
+        LFrom := LItem.GetValue('from').Value;
+      if not LIds.ContainsKey(LFrom) then
+        AddError('Relationship from is not an element in the graph: ' + LFrom);
+      if not Assigned(LItem.GetValue('relationshipType')) then
+        AddError('Relationship without relationshipType from ' + LFrom);
+      if not (LItem.GetValue('to') is TJSONArray) or (TJSONArray(LItem.GetValue('to')).Count = 0) then
+      begin
+        AddError('Relationship from ' + LFrom + ' has no to');
+        Continue;
+      end;
+      for var LTarget in TJSONArray(LItem.GetValue('to')) do
+      begin
+        if (LTarget.Value <> 'NoneElement') and (LTarget.Value <> 'NoAssertionElement') and
+          not LIds.ContainsKey(LTarget.Value) then
+          AddError('Relationship to is not an element in the graph: ' + LTarget.Value);
+      end;
+    end;
+  finally
+    LIds.Free;
+  end;
+end;
+
 function TSbomValidator.ValidateAuto(const AContent: string): TValidationResult;
 var
   LTrimmed: string;
@@ -947,9 +1080,11 @@ begin
       Result := ValidateCycloneDxJson(AContent)
     else if Pos('"spdxVersion"', LTrimmed) > 0 then
       Result := ValidateSpdxJson(AContent)
+    else if (Pos('"@context"', LTrimmed) > 0) and (Pos('spdx.org/rdf/3.', LTrimmed) > 0) then
+      Result := ValidateSpdx3Json(AContent)
     else
     begin
-      AddError('Cannot determine SBOM format: no "bomFormat" or "spdxVersion" field found');
+      AddError('Cannot determine SBOM format: no "bomFormat", "spdxVersion" or SPDX 3 "@context" found');
       Result := BuildResult;
     end;
   end
