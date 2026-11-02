@@ -22,6 +22,7 @@ uses
   System.SysUtils,
   System.IOUtils,
   System.JSON,
+  System.RegularExpressions,
   DUnitX.TestFramework,
   DX.Comply.Engine.Intf,
   DX.Comply.Schema.Validator,
@@ -311,7 +312,11 @@ begin
     var LFound := '';
     for var LExpr in Elements(LDoc, 'simplelicensing_LicenseExpression') do
       if LExpr.GetValue<string>('simplelicensing_licenseExpression') = 'MIT' then
+      begin
         LFound := LExpr.GetValue<string>('spdxId');
+        Assert.IsTrue(TRegEx.IsMatch(LExpr.GetValue<string>('simplelicensing_licenseListVersion'),
+          '^\d+\.\d+\.\d+$'), 'licenseListVersion must be SemVer');
+      end;
     Assert.AreNotEqual('', LFound, 'MIT must be a licence expression');
     var LRel := FindRelationship(LDoc, PackageId(LDoc, 'TestProject.exe'), 'hasDeclaredLicense');
     Assert.IsNotNull(LRel, 'the deliverable declares its licence');

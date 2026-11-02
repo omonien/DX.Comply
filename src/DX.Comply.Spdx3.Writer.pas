@@ -336,7 +336,11 @@ begin
   var LElement := NewElement('simplelicensing_LicenseExpression', 'SPDXRef-License-' +
     IntToStr(FLicences.Count + 1));
   LElement.AddPair('simplelicensing_licenseExpression', LExpression);
-  LElement.AddPair('simplelicensing_licenseListVersion', cSpdxLicenseListVersion);
+  // SPDX 3 types this as SemVer, so 3.29 is written as 3.29.0.
+  var LListVersion := cSpdxLicenseListVersion;
+  if Length(LListVersion.Split(['.'])) = 2 then
+    LListVersion := LListVersion + '.0';
+  LElement.AddPair('simplelicensing_licenseListVersion', LListVersion);
 
   // LicenseRef- tokens point at their licence text.
   var LText := StringReplace(StringReplace(LExpression, '(', ' ', [rfReplaceAll]), ')', ' ',
