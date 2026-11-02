@@ -514,7 +514,7 @@ begin
     LArtefacts.Add(ThirdPartyUnit('MainForm', 'Local project'));
     var LWarnings := BuildThirdPartyComponentWarnings(TSbomConfig.Default,
       Default(TComponentManifest), LArtefacts);
-    Assert.AreEqual(2, Length(LWarnings));
+    Assert.AreEqual<Integer>(2, Length(LWarnings));
     Assert.IsTrue(LWarnings[0].StartsWith(cThirdPartyWarningPrefix + 'units with prefix "Jv"'), LWarnings[0]);
     Assert.IsTrue(Pos('2 units (JvComponent, JvButtons)', LWarnings[0]) > 0, LWarnings[0]);
     Assert.IsTrue(Pos('--manifest=<file>', LWarnings[0]) > 0, LWarnings[0]);
@@ -532,7 +532,7 @@ begin
   var LArtefacts := TArtefactList.Create;
   try
     LArtefacts.Add(ThirdPartyUnit('JvComponent'));
-    Assert.AreEqual(0, Length(BuildThirdPartyComponentWarnings(TSbomConfig.Default, LManifest, LArtefacts)));
+    Assert.AreEqual<Integer>(0, Length(BuildThirdPartyComponentWarnings(TSbomConfig.Default, LManifest, LArtefacts)));
   finally
     LArtefacts.Free;
   end;
@@ -546,7 +546,7 @@ begin
   try
     LArtefacts.Add(ThirdPartyUnit('JvComponent'));
     var LWarnings := BuildThirdPartyComponentWarnings(TSbomConfig.Default, LManifest, LArtefacts);
-    Assert.AreEqual(1, Length(LWarnings));
+    Assert.AreEqual<Integer>(1, Length(LWarnings));
     Assert.IsTrue(Pos('library "JVCL" in the component manifest has no licence, 1 unit (JvComponent)',
       LWarnings[0]) > 0, LWarnings[0]);
   finally
@@ -564,7 +564,7 @@ begin
     end;
     var LWarnings := BuildThirdPartyComponentWarnings(TSbomConfig.Default,
       Default(TComponentManifest), LArtefacts);
-    Assert.AreEqual(cMaxComponentWarningGroups + 1, Length(LWarnings));
+    Assert.AreEqual<Integer>(cMaxComponentWarningGroups + 1, Length(LWarnings));
     Assert.IsTrue(Pos('units in 3 more groups', LWarnings[High(LWarnings)]) > 0, LWarnings[High(LWarnings)]);
   finally
     LArtefacts.Free;
