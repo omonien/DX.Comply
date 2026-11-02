@@ -117,6 +117,8 @@ The CLI tool expects an existing detailed MAP file. Build your project first wit
 dxcomply --project=MyApp.dproj --format=cyclonedx-json --output=bom.json --no-pause
 ```
 
+For Android, iOS, Linux, and macOS ARM, the linker writes an LLD map instead. Enable it with Project Options > Linker > Map file ARM > On; these targets have no Detailed setting. Android names the map `lib<Project>.so.map`, next to `lib<Project>.so`.
+
 If the MAP file is in a non-standard directory, use `--map-dir`:
 
 ```cmd
@@ -180,7 +182,7 @@ When an optional Deep-Evidence rebuild fails, the progress output names the proj
 | Evidence source | Details |
 |---|---|
 | **Project metadata** | Name, version, platform, configuration, DllSuffix |
-| **MAP file analysis** | Extracts linked units from segment entries and line-number sections |
+| **MAP file analysis** | Extracts linked units from segment entries and line-number sections. For ARM and LLVM targets (Android, iOS, Linux, macOS ARM) it reads the LLD linker map: Delphi units from `.o` files, native components from `.a` archives |
 | **Unit resolution** | Resolves each unit to its source/DCU/BPL file with SHA-256 and SHA-512 hashes when the file could be opened |
 | **Origin classification** | Classifies each unit as Embarcadero RTL, VCL, FMX, Local project, or Third party |
 | **Build artefacts** | The exe, dll, or bpl named by the project, plus other `.exe`, `.dll`, `.bpl`, and `.dcp` files in that output directory. SHA-256 and SHA-512 are recorded when the file could be opened |
@@ -301,6 +303,8 @@ dxcomply --project=MyApp.dproj --scan-dir=redist --scan-dir=plugins\** --no-paus
 ```
 
 `--scan-tree` (or `"scanTree": true`) restores the previous recursive walk of the output directory. It is deprecated and will be removed in a future release. Prefer `--scan-dir`.
+
+Each listed file gets a version. The binary the project builds gets the product version. Any other `.exe`, DLL, or `.bpl` gets the FileVersion from its own version resource, else its ProductVersion. A file that still has no version, such as a `.res`, a `.map`, or a third-party `.dcp`, gets its last modification time in UTC as an RFC 3339 timestamp, as BSI TR-03183-2 section 5.2.2 allows. Such a component carries the property `net.developer-experts.dx-comply:versionSource` = `file-modification-time`.
 
 `include` and `exclude` still filter what was scanned. Patterns match the path relative to the directory being scanned. `*.dll` matches a DLL next to the exe. Patterns such as `build/**` matter when the scanned directory itself contains a `build` folder, which is the case for `--scan-tree` when the project has no output directory, and for a `--scan-dir` value that contains `**`.
 
@@ -461,6 +465,10 @@ No. The manufacturer archives a machine-readable SBOM per product version with t
 ### Which SBOM format should I pick?
 
 CycloneDX 1.6 JSON, the default, unless your customer or toolchain asks for something else. It meets the TR-03183-2 minimum and carries dependency completeness. Pick `--format=spdx-json --spdx-version=3.0.1` when SPDX is required. SPDX 2.3 is below the TR-03183-2 minimum. Use it only for tools that cannot read SPDX 3.
+
+### The HTML report is too long. Can I leave out the unit list?
+
+Yes. `--report-content=overview` writes the origin summary, suppliers, and licences without the list of all units. `--report-content=units` writes only the unit list with SHA-256 hashes. The default `all` writes both. The SBOM always stays complete. See [Human-readable companion reports](#human-readable-companion-reports-optional-opt-in-via---reportformat).
 
 ### Library SBOM vs product SBOM: which one do I keep?
 
