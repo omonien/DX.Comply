@@ -1,14 +1,16 @@
 # Konzept: DX.Comply Pilot, Begleiter fuer die technische Dokumentation
 
+> **Status:** Konzeptpapier fuer eine moegliche spaetere Anwendung. Es beschreibt keinen geplanten Funktionsumfang von DX.Comply. Massgeblich fuer den heutigen Stand sind die README und [docs/BSI-TR-03183-2.md](BSI-TR-03183-2.md).
+
 ## Was DX.Comply heute schreibt
 
 DX.Comply schreibt eine Komponentenliste (SBOM) und Build-Nachweise. Es listet die Units, Packages und DLL-Namen, die es aus dem Build sehen kann, und einen Hash, wo es die Datei oeffnen konnte. Diese Liste ist ein Anfang fuer den SBOM-Teil der technischen Dokumentation nach dem EU Cyber Resilience Act (Anhang I Teil II, Anhang VII). Sie macht ein Produkt nicht konform und ersetzt die uebrige technische Dokumentation nicht.
 
 Lieferant, Version und Lizenz fuer Komponenten Dritter schreibt DX.Comply, wenn ein Komponenten-Manifest (components.json) sie enthaelt. Der Rest der technischen Dokumentation fehlt weiterhin: Verfahren zur Behandlung von Schwachstellen, Offenlegungspolitik, Auslieferung von Updates und Risikobewertung. Schwachstellenmanagement und Meldewesen liegen ausserhalb dieses Werkzeugs.
 
-Die Pruefung im Werkzeug ist eine strukturelle Pruefung. Das CycloneDX-JSON-Beispiel in diesem Repository ist ein aelteres CycloneDX-1.5-Dokument und wurde nicht als 1.6 neu erzeugt. SPDX und CycloneDX-XML werden im Werkzeug nicht gegen offizielle Schemas geprueft.
+Die Pruefung im Werkzeug ist eine strukturelle Pruefung. Das CycloneDX-JSON-Beispiel in diesem Repository ist ein CycloneDX-1.6-Dokument. SPDX und CycloneDX-XML werden im Werkzeug nicht gegen offizielle Schemas geprueft.
 
-Die BSI TR-03183-2 Version 2.1.0 verlangt CycloneDX 1.6 oder neuer und SPDX 3.0.1 oder neuer. DX.Comply schreibt CycloneDX 1.6. SPDX bleibt bei 2.3. SPDX 3.0.1 liegt ausserhalb des Umfangs. Es schreibt SHA-512 neben SHA-256 und fuer eine auslieferbare Datei denselben SHA-512 als externalReference vom Typ distribution. Den Dateinamen und die Eigenschaften executable, archive und structured schreibt es, wenn ein Dateiname vorliegt. Den Ersteller der SBOM schreibt es nur, wenn eine E-Mail oder eine http(s)-URL angegeben wird. Lizenzen und Herstellerangaben kommen aus dem Komponenten-Manifest, wenn eines angegeben wird. Direkte uses-Kanten schreibt es nur zwischen Units, deren Pascal-Quelltext gelesen wurde und die schon in der SBOM stehen. Eine Unit ohne Quelltext bleibt ein Blatt. Das ist keine Zertifizierung und keine volle Abdeckung der Richtlinie.
+Die BSI TR-03183-2 Version 2.1.0 verlangt CycloneDX 1.6 oder neuer und SPDX 3.0.1 oder neuer. DX.Comply schreibt CycloneDX 1.6 sowie SPDX 3.0.1 (`--spdx-version=3.0.1`) und SPDX 2.3. Es schreibt SHA-512 neben SHA-256 und fuer eine auslieferbare Datei denselben SHA-512 als externalReference vom Typ distribution. Den Dateinamen und die Eigenschaften executable, archive und structured schreibt es, wenn ein Dateiname vorliegt. Den Ersteller der SBOM schreibt es nur, wenn eine E-Mail oder eine http(s)-URL angegeben wird. Lizenzen und Herstellerangaben kommen aus dem Komponenten-Manifest, wenn eines angegeben wird. Direkte uses-Kanten schreibt es nur zwischen Units, deren Pascal-Quelltext gelesen wurde und die schon in der SBOM stehen. Eine Unit ohne Quelltext bleibt ein Blatt. Das ist keine Zertifizierung und keine volle Abdeckung der Richtlinie.
 
 ## Vision
 

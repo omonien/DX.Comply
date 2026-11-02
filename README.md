@@ -406,7 +406,7 @@ A file that cannot be read (missing, not JSON, or not an object or array) stops 
 ### What counts as a valid SBOM?
 
 The CRA requires (Annex I, Part II):
-- Machine-readable format (CycloneDX or SPDX)
+- A commonly used, machine-readable format. The CRA names no format and no version. The versions come from [BSI TR-03183-2](docs/BSI-TR-03183-2.md) version 2.1.0: CycloneDX 1.6 or later, or SPDX 3.0.1 or later. DX.Comply writes CycloneDX 1.6, SPDX 3.0.1, and SPDX 2.3 for tools that still need it.
 - Coverage of at least top-level dependencies
 - One SBOM per software version
 
@@ -419,7 +419,7 @@ The CRA requires (Annex I, Part II):
 ## What to do with your SBOM
 
 1. **Archive it with each release.** Store `bom.json` alongside your release artefacts.
-2. **Retain for at least 10 years.** CRA Article 13 requires this.
+2. **Keep it for at least 10 years after the product is placed on the market, or for the support period if that is longer.** CRA Article 13(13) sets this for the technical documentation, and the SBOM is part of it.
 3. **Be ready to hand it over if asked.** Market surveillance authorities can request it (Article 52).
 4. **Sharing with customers is optional.** That choice is yours (Annex II, Part I, point 9).
 
@@ -442,6 +442,10 @@ For each app that loads those DLLs, the product SBOM still lists the DLL binarie
 ### Is a GetIt "has SBOM" flag enough for the CRA?
 
 No. The manufacturer archives a machine-readable SBOM per product version with the release. A marketplace flag alone is not the technical documentation. Prefer attaching the SBOM to the release (and keeping a hash registry if you publish many artefacts). See [What to do with your SBOM](#what-to-do-with-your-sbom).
+
+### Which SBOM format should I pick?
+
+CycloneDX 1.6 JSON, the default, unless your customer or toolchain asks for something else. It meets the TR-03183-2 minimum and carries dependency completeness. Pick `--format=spdx-json --spdx-version=3.0.1` when SPDX is required. SPDX 2.3 is below the TR-03183-2 minimum. Use it only for tools that cannot read SPDX 3.
 
 ### Library SBOM vs product SBOM: which one do I keep?
 

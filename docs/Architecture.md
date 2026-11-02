@@ -60,6 +60,7 @@ Every SBOM generation follows the same pipeline, regardless of whether it was tr
 | `DX.Comply.CycloneDx.Writer.pas` | CycloneDX 1.6 JSON output |
 | `DX.Comply.CycloneDx.XmlWriter.pas` | CycloneDX 1.6 XML output |
 | `DX.Comply.Spdx.Writer.pas` | SPDX 2.3 JSON output |
+| `DX.Comply.Spdx3.Writer.pas` | SPDX 3.0.1 JSON-LD output, converted from the SPDX 2.3 document |
 | `DX.Comply.Report.HtmlWriter.pas` | HTML companion report |
 | `DX.Comply.Report.MarkdownWriter.pas` | Markdown companion report |
 | `DX.Comply.Report.Intf.pas` | Report writer interface and shared report types |
@@ -105,7 +106,7 @@ Each resolved unit is emitted as a CycloneDX `component` with `type: "library"`,
 
 When `--manifest` or the `manifest` key points at a components file, matched units stay in the document and are linked from one library component (name, version, supplier, licence, package URL, type). The program that was built depends on that library. Own-code rules keep those units with the program. The units come from the MAP file, so a Delphi 7 `.dpr` uses the same list. Matching and licence classification live in `DX.Comply.ComponentManifest.pas`. The CycloneDX and SPDX writers call that unit.
 
-CycloneDX 1.6 and SPDX 2.3 also carry the BSI TR-03183-2 fields DX.Comply can support from evidence. SHA-512 sits next to SHA-256, and a deployable file also carries that SHA-512 on an external reference of type distribution. The SBOM creator contact is written only from `sbomCreator` or `--sbom-creator`, as `metadata.manufacturer`. SPDX stays at 2.3. SPDX 3.0.1 is out of scope. The built program still depends on runtime packages, external DLLs, and linked units, in that order. Where a unit's Pascal source was read, the SBOM also lists the direct uses edges to other units already in the document. CycloneDX compositions say which of those sets are complete. A unit with no source, the built program, a runtime package, and an external DLL stay incomplete. Details, including the fields that are left out, are in [BSI-TR-03183-2.md](BSI-TR-03183-2.md). This is not a certification against the technical guideline.
+CycloneDX 1.6, SPDX 3.0.1 and SPDX 2.3 also carry the BSI TR-03183-2 fields DX.Comply can support from evidence. SHA-512 sits next to SHA-256, and a deployable file also carries that SHA-512 on an external reference of type distribution. The SBOM creator contact is written only from `sbomCreator` or `--sbom-creator`, as `metadata.manufacturer`. SPDX 3.0.1 is written by converting the SPDX 2.3 document in memory, so both SPDX versions share IDs, packages and licences. The built program still depends on runtime packages, external DLLs, and linked units, in that order. Where a unit's Pascal source was read, the SBOM also lists the direct uses edges to other units already in the document. CycloneDX compositions and SPDX 3.0.1 relationship completeness say which of those sets are complete. A unit with no source, the built program, a runtime package, and an external DLL stay incomplete. Details, including the fields that are left out, are in [BSI-TR-03183-2.md](BSI-TR-03183-2.md). This is not a certification against the technical guideline.
 
 ## Test suite
 
