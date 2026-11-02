@@ -32,6 +32,7 @@ type
   TSpdx3WriterTests = class
   private
     FWriter: TSpdx3JsonWriter;
+    FWriterRef: ISbomWriter;
     FArtefacts: TArtefactList;
     FMetadata: TSbomMetadata;
     FProjectInfo: TProjectInfo;
@@ -86,7 +87,7 @@ implementation
 procedure TSpdx3WriterTests.Setup;
 begin
   FWriter := TSpdx3JsonWriter.Create;
-  FWriter._AddRef;
+  FWriterRef := FWriter;
   FArtefacts := TArtefactList.Create;
   FMetadata := Default(TSbomMetadata);
   FMetadata.ProductName := 'TestProduct';
@@ -108,7 +109,7 @@ procedure TSpdx3WriterTests.TearDown;
 begin
   FArtefacts.Free;
   FProjectInfo.Free;
-  FWriter._Release;
+  FWriterRef := nil;
 end;
 
 procedure TSpdx3WriterTests.AddArtefact(const ARelativePath, AArtefactType, AHash: string);
