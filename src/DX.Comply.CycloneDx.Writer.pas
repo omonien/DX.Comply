@@ -345,6 +345,9 @@ begin
     AddProperty('net.developer-experts.dx-comply:locationSource', AArtefact.LocationSource);
   if AArtefact.Location <> '' then
     AddProperty('net.developer-experts.dx-comply:location', AArtefact.Location);
+  // Issue #109: the version is the file modification time, not a real version.
+  if AArtefact.VersionFromFileDate then
+    AddProperty(cVersionSourceProperty, cVersionSourceFileDate);
 
   // BSI TR-03183-2 file properties. Omitted when there is no file name,
   // which is how a logical component is left without these fields.

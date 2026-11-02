@@ -505,12 +505,29 @@ type
     /// </summary>
     [Test]
     procedure Apply_NeighborExeWithVersion_KeepsOwnVersion;
+    /// <summary>A real version never sets VersionFromFileDate. Issue #109.</summary>
+    [Test]
+    procedure Apply_ProductVersion_NotFromFileDate;
+    /// <summary>A system DLL (Location set) gets no file date version. Issue #109.</summary>
+    [Test]
+    procedure Apply_SystemLocationDll_GetsNoFileDate;
+    /// <summary>A resource file on disk gets its file date as version. Issue #109.</summary>
+    [Test]
+    procedure Apply_ResourceOnDisk_GetsFileDate;
+    /// <summary>A third-party .dcp does not take the product version.</summary>
+    [Test]
+    procedure Apply_ThirdPartyDcp_NoProductVersion;
+    /// <summary>FormatRfc3339Utc writes YYYY-MM-DDThh:mm:ssZ.</summary>
+    [Test]
+    procedure FormatRfc3339Utc_Format;
   end;
 
 implementation
 
 uses
   Winapi.Windows,
+  System.DateUtils,
+  System.RegularExpressions,
   DX.Comply.Tests.Paths;
 
 { TEngineTests }
@@ -2932,6 +2949,16 @@ begin
     PathDelim + 'binaries' + PathDelim + AFileName);
 end;
 
+function IsRfc3339Utc(const AValue: string): Boolean;
+begin
+  Result := TRegEx.IsMatch(AValue, '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$');
+end;
+
+function FileDateVersion(const APath: string): string;
+begin
+  Result := FormatRfc3339Utc(TFile.GetLastWriteTimeUtc(APath));
+end;
+
 procedure TEngineTests.Generate_NeighborExe_UsesOwnVersionOrNa;
 const
   cProjectVersion = '26.12.0.0';
@@ -2975,12 +3002,14 @@ begin
       'the SBOM root version is the project version');
     Assert.AreEqual(cProjectVersion, ComponentVersion(LJson, 'MyApp.exe'),
       'the primary EXE keeps the project version');
-    Assert.AreEqual('', ComponentVersion(LJson, 'ThirdParty.exe'),
-      'a neighboring EXE without version info has no version');
+    Assert.IsTrue(IsRfc3339Utc(ComponentVersion(LJson, 'ThirdParty.exe')),
+      'a neighboring EXE without version info gets its file date as version');
     Assert.AreEqual(cVendorVersion, ComponentVersion(LJson, 'Vendor.exe'),
       'a neighboring EXE keeps its own FileVersion');
-    Assert.AreEqual('', ComponentVersion(LJson, 'plugin.dll'),
-      'a DLL without version info has no version');
+    Assert.IsTrue(Pos('"' + cVersionSourceProperty + '","value":"' + cVersionSourceFileDate + '"',
+      LJson.ToJSON) > 0, 'a file date version is marked with the versionSource property');
+    Assert.AreEqual(FileDateVersion(TPath.Combine(LOutput, 'plugin.dll')),
+      ComponentVersion(LJson, 'plugin.dll'), 'a DLL without version info gets its file date as version');
   finally
     LJson.Free;
   end;
@@ -2989,12 +3018,14 @@ begin
     TPath.Combine(FTempDir, 'neighbor-exe.report.md'), TEncoding.UTF8);
   Assert.IsTrue(Pos('| MyApp.exe | application | ' + cProjectVersion + ' |',
     LReportText) > 0, 'the report shows the project version on the primary EXE');
-  Assert.IsTrue(Pos('| ThirdParty.exe | application | n/a |', LReportText) > 0,
-    'the report shows n/a for a neighboring EXE without version info');
+  Assert.IsTrue(Pos('| ThirdParty.exe | application | ' +
+    FileDateVersion(TPath.Combine(LOutput, 'ThirdParty.exe')) + ' |', LReportText) > 0,
+    'the report shows the file date for a neighboring EXE without version info');
   Assert.IsTrue(Pos('| Vendor.exe | application | ' + cVendorVersion + ' |',
     LReportText) > 0, 'the report shows the neighboring EXE''s own version');
-  Assert.IsTrue(Pos('| plugin.dll | library | n/a |', LReportText) > 0,
-    'the report shows n/a for a DLL without version info');
+  Assert.IsTrue(Pos('| plugin.dll | library | ' +
+    FileDateVersion(TPath.Combine(LOutput, 'plugin.dll')) + ' |', LReportText) > 0,
+    'the report shows the file date for a DLL without version info');
 end;
 
 { TBuildFileVersionTests }
@@ -3181,7 +3212,8 @@ begin
     LArtefact.FilePath := LPath;
     LList.Add(LArtefact);
     ApplyProductVersionToBuildFiles(LList, '2.1.0');
-    Assert.AreEqual('', LList[0].Version);
+    Assert.AreEqual(FileDateVersion(LPath), LList[0].Version);
+    Assert.IsTrue(LList[0].VersionFromFileDate);
   finally
     LList.Free;
     TFile.Delete(LPath);
@@ -3259,7 +3291,8 @@ begin
     LArtefact.FilePath := LPath;
     LList.Add(LArtefact);
     ApplyProductVersionToBuildFiles(LList, '2.1.0', 'C:\Build\App.exe');
-    Assert.AreEqual('', LList[0].Version);
+    Assert.AreEqual(FileDateVersion(LPath), LList[0].Version);
+    Assert.IsTrue(LList[0].VersionFromFileDate);
   finally
     LList.Free;
     TFile.Delete(LPath);
@@ -3351,8 +3384,9 @@ begin
     LArtefact.FilePath := LPath;
     LList.Add(LArtefact);
     ApplyProductVersionToBuildFiles(LList, '26.12.0.0', 'C:\Build\MyApp.exe');
-    Assert.AreEqual('', LList[0].Version,
-      'a neighboring EXE without version info has no version');
+    Assert.AreEqual(FileDateVersion(LPath), LList[0].Version,
+      'a neighboring EXE without version info gets its file date as version');
+    Assert.IsTrue(LList[0].VersionFromFileDate);
   finally
     LList.Free;
   end;
@@ -3373,6 +3407,84 @@ begin
   finally
     LList.Free;
   end;
+end;
+
+procedure TBuildFileVersionTests.Apply_ProductVersion_NotFromFileDate;
+begin
+  var LPath := NewDllWithoutResource;
+  var LList := TArtefactList.Create;
+  try
+    var LArtefact := MakeBuildArtefact(TPath.GetFileName(LPath), 'library', '');
+    LArtefact.FilePath := LPath;
+    LList.Add(LArtefact);
+    ApplyProductVersionToBuildFiles(LList, '2.1.0', LPath);
+    Assert.AreEqual('2.1.0', LList[0].Version);
+    Assert.IsFalse(LList[0].VersionFromFileDate);
+  finally
+    LList.Free;
+    TFile.Delete(LPath);
+  end;
+end;
+
+procedure TBuildFileVersionTests.Apply_SystemLocationDll_GetsNoFileDate;
+begin
+  var LPath := NewDllWithoutResource;
+  var LList := TArtefactList.Create;
+  try
+    var LArtefact := MakeBuildArtefact(TPath.GetFileName(LPath), 'external-reference', '');
+    LArtefact.FilePath := LPath;
+    LArtefact.Location := 'system';
+    LList.Add(LArtefact);
+    ApplyProductVersionToBuildFiles(LList, '2.1.0', 'C:\Build\App.exe');
+    Assert.AreEqual('', LList[0].Version);
+    Assert.IsFalse(LList[0].VersionFromFileDate);
+  finally
+    LList.Free;
+    TFile.Delete(LPath);
+  end;
+end;
+
+procedure TBuildFileVersionTests.Apply_ResourceOnDisk_GetsFileDate;
+begin
+  var LPath := TPath.Combine(TPath.GetTempPath,
+    'dxc-res-' + TGUID.NewGuid.ToString.Replace('{', '').Replace('}', '') + '.res');
+  TFile.WriteAllText(LPath, 'resource');
+  TFile.SetLastWriteTimeUtc(LPath, EncodeDateTime(2026, 3, 4, 5, 6, 7, 0));
+  var LList := TArtefactList.Create;
+  try
+    var LArtefact := MakeBuildArtefact(TPath.GetFileName(LPath), 'resource', '');
+    LArtefact.FilePath := LPath;
+    LList.Add(LArtefact);
+    ApplyProductVersionToBuildFiles(LList, '2.1.0', 'C:\Build\App.exe');
+    Assert.AreEqual('2026-03-04T05:06:07Z', LList[0].Version);
+    Assert.IsTrue(LList[0].VersionFromFileDate);
+  finally
+    LList.Free;
+    TFile.Delete(LPath);
+  end;
+end;
+
+procedure TBuildFileVersionTests.Apply_ThirdPartyDcp_NoProductVersion;
+begin
+  var LList := TArtefactList.Create;
+  try
+    LList.Add(MakeBuildArtefact('MyPkg.dcp', 'dcu-package', ''));
+    LList.Add(MakeBuildArtefact('VendorLib.dcp', 'dcu-package', ''));
+    ApplyProductVersionToBuildFiles(LList, '2.1.0', 'C:\Build\MyPkg290.bpl');
+    Assert.AreEqual('2.1.0', LList[0].Version, 'the own .dcp takes the product version');
+    Assert.AreEqual('', LList[1].Version, 'a third-party .dcp does not');
+    LList.Clear;
+    LList.Add(MakeBuildArtefact('VendorLib.dcp', 'dcu-package', ''));
+    ApplyProductVersionToBuildFiles(LList, '2.1.0', 'C:\Build\App.exe');
+    Assert.AreEqual('', LList[0].Version, 'an application project builds no .dcp');
+  finally
+    LList.Free;
+  end;
+end;
+
+procedure TBuildFileVersionTests.FormatRfc3339Utc_Format;
+begin
+  Assert.AreEqual('2026-11-02T09:08:07Z', FormatRfc3339Utc(EncodeDateTime(2026, 11, 2, 9, 8, 7, 500)));
 end;
 
 initialization

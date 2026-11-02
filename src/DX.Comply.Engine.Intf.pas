@@ -72,11 +72,18 @@ type
     /// </summary>
     ComponentName: string;
     /// <summary>
-    /// Component version written into the SBOM. Empty means the first 12
-    /// characters of the SHA-256 hash when a hash is present, except for a
-    /// library source file.
+    /// Component version written into the SBOM. Empty means the writers omit
+    /// the version. Build mode fills it from the product version, the file's
+    /// version resource, or the file modification time (VersionFromFileDate).
     /// </summary>
     Version: string;
+    /// <summary>
+    /// True when Version is the last modification time of the file in UTC
+    /// (RFC 3339), because the file has no version of its own. BSI TR-03183-2
+    /// section 5.2.2 prescribes this fallback. Writers emit
+    /// net.developer-experts.dx-comply:versionSource=file-modification-time.
+    /// </summary>
+    VersionFromFileDate: Boolean;
     /// <summary>
     /// True for a file of a library source release (library mode). Writers
     /// omit the version when Version is empty, write no file: purl, and add
@@ -524,6 +531,18 @@ function TryParseUtcTimestamp(const ATimestamp: string; out AUtc: TDateTime): Bo
 /// metadata.timestamp, SPDX creationInfo.created and the reports.
 /// </summary>
 function FormatUtcTimestamp(const ATimestamp: string): string;
+
+const
+  /// <summary>Property name that marks how a component version was found.</summary>
+  cVersionSourceProperty = 'net.developer-experts.dx-comply:versionSource';
+  /// <summary>Value of cVersionSourceProperty for the file date fallback.</summary>
+  cVersionSourceFileDate = 'file-modification-time';
+
+/// <summary>
+/// AUtc formatted per RFC 3339 as YYYY-MM-DDThh:mm:ssZ. AUtc must already
+/// be UTC.
+/// </summary>
+function FormatRfc3339Utc(const AUtc: TDateTime): string;
 
 /// <summary>
 /// True when AValue is empty, or an email address, or an http(s) URL.
@@ -1026,6 +1045,10 @@ begin
   Result := 'bsi:component:executable=' + BsiExecutableValue(AArtefact) + '; ' +
     'bsi:component:archive=' + BsiArchiveValue(LFileName) + '; ' +
     'bsi:component:structured=' + BsiStructuredValue(LFileName);
+  if AArtefact.VersionFromFileDate then
+  begin
+    Result := Result + '; ' + cVersionSourceProperty + '=' + cVersionSourceFileDate;
+  end;
 end;
 
 function TryParseUtcTimestamp(const ATimestamp: string;
@@ -1137,6 +1160,11 @@ begin
   except
     Result := False;
   end;
+end;
+
+function FormatRfc3339Utc(const AUtc: TDateTime): string;
+begin
+  Result := FormatDateTime('yyyy-mm-dd''T''hh:nn:ss''Z''', AUtc, TFormatSettings.Invariant);
 end;
 
 function FormatUtcTimestamp(const ATimestamp: string): string;

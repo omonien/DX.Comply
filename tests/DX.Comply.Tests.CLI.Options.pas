@@ -26,7 +26,8 @@ uses
   DX.Comply.Engine,
   DX.Comply.Engine.Intf,
   DX.Comply.Report.Intf,
-  DX.Comply.CLI.Options;
+  DX.Comply.CLI.Options,
+  DX.Comply.VersionInfo;
 
 type
   /// <summary>
@@ -87,6 +88,10 @@ type
     /// <summary>UsageHint names the executable instead of a fixed dxcomply.</summary>
     [Test]
     procedure UsageHint_ContainsExecutableName;
+
+    /// <summary>VersionLine uses the module version resource, not a literal (issue #41).</summary>
+    [Test]
+    procedure VersionLine_UsesModuleVersion;
 
     // ---- Filename sanitisation (issue #25 security follow-up) ---------------
 
@@ -301,6 +306,12 @@ end;
 procedure TCliOptionsTests.ExecutableName_Empty_UsesParamStr0;
 begin
   Assert.AreEqual(ExtractFileName(ParamStr(0)), TCliOptions.ExecutableName);
+end;
+
+procedure TCliOptionsTests.VersionLine_UsesModuleVersion;
+begin
+  Assert.AreEqual('DX.Comply v' + GetDxComplyToolVersion, TCliOptions.VersionLine);
+  Assert.IsTrue(GetDxComplyToolVersion <> '', 'The version part must not be empty');
 end;
 
 procedure TCliOptionsTests.UsageHint_ContainsExecutableName;
