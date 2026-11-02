@@ -218,6 +218,7 @@ not compile the project: the MAP file must already exist before `dxcomply` runs.
 | 0    | SBOM generated successfully |
 | 1    | Generation failed (see console output for details) |
 | 2    | Invalid or missing arguments |
+| 3    | SBOM generated, but `--strict` (or `"strict": true`) is set and at least one CRA/BSI warning was raised |
 
 Pipeline steps should check the exit code and fail the job on non-zero values:
 

@@ -1,6 +1,6 @@
 ﻿/// <summary>
 /// DX.Comply.CraChecks
-/// Non-fatal CRA and BSI header warnings.
+/// Non-fatal CRA and BSI header and component warnings.
 /// </summary>
 ///
 /// <remarks>
@@ -8,6 +8,10 @@
 /// at the hashed artefacts. It does not read the project from disk. A missing
 /// deployable is an artefact with no hash, or no artefact for that path.
 /// The caller prints each line and still writes the SBOM.
+///
+/// BuildThirdPartyComponentWarnings looks at third-party units and names
+/// those without supplier or licence, grouped by unit prefix or manifest
+/// library (issue #110).
 /// </remarks>
 ///
 /// <copyright>
@@ -20,6 +24,7 @@ unit DX.Comply.CraChecks;
 interface
 
 uses
+  DX.Comply.ComponentManifest,
   DX.Comply.Engine,
   DX.Comply.Engine.Intf;
 
@@ -45,7 +50,30 @@ function BuildCraMetadataWarnings(const AConfig: TSbomConfig;
 /// </summary>
 function IsSbomHeaderWarning(const AText: string): Boolean;
 
+/// <summary>
+/// Warnings for third-party units (Origin "Third party") that have no
+/// supplier or no licence. A unit gets both only from a component manifest
+/// row. Units without a row are grouped by unit prefix, units of a row that
+/// lacks vendor or licence by that row. At most cMaxComponentWarningGroups
+/// groups are listed; one more line counts the rest. BSI TR-03183-2
+/// sections 5.2.2 and 6.1.
+/// </summary>
+function BuildThirdPartyComponentWarnings(const AConfig: TSbomConfig;
+  const AManifest: TComponentManifest; const AArtefacts: TArtefactList): TArray<string>;
+
+/// <summary>
+/// Group key of a unit name without a manifest row: the text before the
+/// first dot, else the leading part up to the second capital letter
+/// (JvComponent gives Jv, JclBase gives Jcl). A name without a second
+/// capital is its own key.
+/// </summary>
+function ThirdPartyUnitPrefix(const AUnitName: string): string;
+
 const
+  /// <summary>Start of every warning from BuildThirdPartyComponentWarnings.</summary>
+  cThirdPartyWarningPrefix = 'CRA/BSI: Third-party ';
+  /// <summary>Groups listed one by one before the rest is counted.</summary>
+  cMaxComponentWarningGroups = 10;
   /// <summary>
   /// Menu path of the IDE dialog that edits the SBOM header data. The IDE
   /// warning texts name it.
@@ -135,7 +163,167 @@ begin
   begin
     LText := Trim(Copy(LText, Length('Warning:') + 1, MaxInt));
   end;
-  Result := LText.StartsWith('CRA/BSI:') and not LText.StartsWith(cDeployablePrefix);
+  Result := LText.StartsWith('CRA/BSI:') and not LText.StartsWith(cDeployablePrefix) and
+    not LText.StartsWith(cThirdPartyWarningPrefix);
+end;
+
+function ThirdPartyUnitPrefix(const AUnitName: string): string;
+begin
+  var LName := Trim(AUnitName);
+  var LDot := Pos('.', LName);
+  if LDot > 1 then
+    Exit(Copy(LName, 1, LDot - 1));
+  for var i := 2 to Length(LName) do
+  begin
+    if CharInSet(LName[i], ['A'..'Z']) then
+      Exit(Copy(LName, 1, i - 1));
+  end;
+  Result := LName;
+end;
+
+function JoinNames(const ANames: TList<string>): string;
+const
+  cShown = 5;
+begin
+  Result := '';
+  for var i := 0 to ANames.Count - 1 do
+  begin
+    if i = cShown then
+    begin
+      Result := Result + ', ...';
+      Break;
+    end;
+    if Result <> '' then
+    begin
+      Result := Result + ', ';
+    end;
+    Result := Result + ANames[i];
+  end;
+end;
+
+function UnitCountText(ACount: Integer): string;
+begin
+  if ACount = 1 then
+  begin
+    Result := '1 unit';
+  end
+  else
+  begin
+    Result := IntToStr(ACount) + ' units';
+  end;
+end;
+
+function BuildThirdPartyComponentWarnings(const AConfig: TSbomConfig;
+  const AManifest: TComponentManifest; const AArtefacts: TArtefactList): TArray<string>;
+const
+  cRule = ' BSI TR-03183-2 sections 5.2.2 and 6.1 require the creator and the distribution licence of each component. ';
+  cHintCli = 'Add a row for them to a component manifest (components.json) and pass --manifest=<file> or set manifest in .dxcomply.json. See README, section Component manifest.';
+  cHintIde = 'Add a row for them to a component manifest (components.json) next to the project. See README, section Component manifest.';
+begin
+  Result := nil;
+  if not Assigned(AArtefacts) then
+    Exit;
+
+  // Key: 'p:' + prefix for units without a row, 'm:' + index for a row.
+  var LGroups := TObjectDictionary<string, TList<string>>.Create([doOwnsValues]);
+  var LOrder := TList<string>.Create;
+  var LWarnings := TList<string>.Create;
+  try
+    for var i := 0 to AArtefacts.Count - 1 do
+    begin
+      var LArtefact := AArtefacts[i];
+      if not SameText(LArtefact.ArtefactType, 'unit-evidence') or
+         not SameText(LArtefact.Origin, 'Third party') then
+        Continue;
+      var LUnitName := ArtefactUnitName(LArtefact);
+      if LUnitName = '' then
+        Continue;
+
+      var LMatch := MatchManifestUnit(AManifest, LUnitName);
+      var LKey: string;
+      case LMatch.Kind of
+        mmOwnCode:
+          Continue;
+        mmLibrary:
+          begin
+            var LEntry := AManifest.Components[LMatch.ComponentIndex];
+            if (Trim(LEntry.Vendor) <> '') and (Trim(LEntry.Licence) <> '') then
+              Continue;
+            LKey := 'm:' + IntToStr(LMatch.ComponentIndex);
+          end;
+      else
+        LKey := 'p:' + ThirdPartyUnitPrefix(LUnitName);
+      end;
+
+      var LNames: TList<string>;
+      if not LGroups.TryGetValue(LKey, LNames) then
+      begin
+        LNames := TList<string>.Create;
+        LGroups.Add(LKey, LNames);
+        LOrder.Add(LKey);
+      end;
+      LNames.Add(LUnitName);
+    end;
+
+    var LHint: string;
+    if AConfig.WarningContext = swcIde then
+    begin
+      LHint := cHintIde;
+    end
+    else
+    begin
+      LHint := cHintCli;
+    end;
+
+    var LRestGroups := 0;
+    var LRestUnits := 0;
+    for var i := 0 to LOrder.Count - 1 do
+    begin
+      var LNames := LGroups[LOrder[i]];
+      if i >= cMaxComponentWarningGroups then
+      begin
+        Inc(LRestGroups);
+        Inc(LRestUnits, LNames.Count);
+        Continue;
+      end;
+      if LOrder[i].StartsWith('m:') then
+      begin
+        var LEntry := AManifest.Components[StrToInt(Copy(LOrder[i], 3, MaxInt))];
+        var LMissing: string;
+        if Trim(LEntry.Vendor) = '' then
+        begin
+          LMissing := 'no supplier (vendor)';
+        end;
+        if Trim(LEntry.Licence) = '' then
+        begin
+          if LMissing <> '' then
+          begin
+            LMissing := LMissing + ' and ';
+          end;
+          LMissing := LMissing + 'no licence';
+        end;
+        LWarnings.Add(cThirdPartyWarningPrefix + 'library "' + LEntry.Name + '" in the component manifest has ' +
+          LMissing + ', ' + UnitCountText(LNames.Count) + ' (' + JoinNames(LNames) + ').' + cRule +
+          'Fill vendor and licence for that row.');
+      end
+      else
+      begin
+        LWarnings.Add(cThirdPartyWarningPrefix + 'units with prefix "' + Copy(LOrder[i], 3, MaxInt) +
+          '" have no supplier and no licence, ' + UnitCountText(LNames.Count) + ' (' + JoinNames(LNames) +
+          ').' + cRule + LHint);
+      end;
+    end;
+    if LRestGroups > 0 then
+    begin
+      LWarnings.Add(cThirdPartyWarningPrefix + 'units in ' + IntToStr(LRestGroups) +
+        ' more groups have no supplier or no licence, ' + UnitCountText(LRestUnits) + '.' + cRule + LHint);
+    end;
+    Result := LWarnings.ToArray;
+  finally
+    LWarnings.Free;
+    LOrder.Free;
+    LGroups.Free;
+  end;
 end;
 
 function ArtefactIsHashed(const AArtefact: TArtefactInfo): Boolean;

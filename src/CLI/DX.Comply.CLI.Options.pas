@@ -70,6 +70,7 @@ type
     FScanDirs: TArray<string>;
     FScanTree: Boolean;
     FLibraryMode: Boolean;
+    FStrictMode: Boolean;
     FSourceDirs: TArray<string>;
     FPurl: string;
     FRepoUrl: string;
@@ -190,6 +191,8 @@ type
     property ScanTree: Boolean read FScanTree;
     /// <summary>True when --library was requested.</summary>
     property LibraryMode: Boolean read FLibraryMode;
+    /// <summary>True when --strict was requested (issue #111).</summary>
+    property StrictMode: Boolean read FStrictMode;
     /// <summary>Source directories from repeatable --source-dir.</summary>
     property SourceDirs: TArray<string> read FSourceDirs;
     /// <summary>Package URL from --purl.</summary>
@@ -381,6 +384,13 @@ begin
       Continue;
     end;
 
+    if LArg = '--strict' then
+    begin
+      FStrictMode := True;
+      Include(FExplicitOverrides, scoStrictMode);
+      Continue;
+    end;
+
     if LArg = '--library' then
     begin
       FLibraryMode := True;
@@ -505,6 +515,15 @@ begin
           Exit(False);
         end;
         Include(FExplicitOverrides, scoScanTree);
+      end
+      else if LKey = 'strict' then
+      begin
+        if not TryParseBool(LValue, FStrictMode) then
+        begin
+          FParseError := 'Invalid value for --strict: ' + LValue + ' (expected true or false)';
+          Exit(False);
+        end;
+        Include(FExplicitOverrides, scoStrictMode);
       end
       else if LKey = 'library' then
       begin
@@ -708,6 +727,9 @@ begin
   Writeln('  --report[=<format>]           Generate companion human-readable report');
   Writeln('                                  markdown | html | both (default) | none');
   Writeln('  --ci                          CI mode: use .dxcomply.json config file');
+  Writeln('  --strict[=true|false]         Write the SBOM, then exit with code 3 when');
+  Writeln('                                any CRA/BSI warning was raised.');
+  Writeln('                                File key: strict');
   Writeln('  --config=<path>               Path to .dxcomply.json (default: .dxcomply.json)');
   Writeln('  --help, -h                    Show this help');
   Writeln('  --verbose                     Print all progress messages (default: errors only)');
@@ -718,6 +740,12 @@ begin
   Writeln('  option you actually pass. A passed option wins over the file. An');
   Writeln('  option you omit keeps the file value (the default does not override');
   Writeln('  the file). Without --ci the file is not read.');
+  Writeln;
+  Writeln('Exit codes:');
+  Writeln('  0  SBOM generated');
+  Writeln('  1  Generation failed');
+  Writeln('  2  Invalid arguments');
+  Writeln('  3  SBOM generated, but --strict and at least one CRA/BSI warning');
   Writeln;
   Writeln('Examples:');
   Writeln('  ' + LExe + ' --project=src\MyApp.dproj --format=cyclonedx-json --output=bom.json');
@@ -783,6 +811,7 @@ begin
   Result.ScanDirs                    := FScanDirs;
   Result.ScanTree                    := FScanTree;
   Result.LibraryMode                 := FLibraryMode;
+  Result.StrictMode                  := FStrictMode;
   Result.SourceDirs                  := FSourceDirs;
   Result.Purl                        := FPurl;
   Result.RepoUrl                     := FRepoUrl;
