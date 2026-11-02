@@ -112,6 +112,7 @@
         <DCCReference Include="DX.Comply.CycloneDx.XmlWriter.pas"/>
         <DCCReference Include="DX.Comply.Report.Intf.pas"/>
         <DCCReference Include="DX.Comply.Report.Support.pas"/>
+        <DCCReference Include="DX.Comply.Report.Overview.pas"/>
         <DCCReference Include="DX.Comply.Report.MarkdownWriter.pas"/>
         <DCCReference Include="DX.Comply.Report.HtmlWriter.pas"/>
         <DCCReference Include="DX.Comply.Spdx.Writer.pas"/>

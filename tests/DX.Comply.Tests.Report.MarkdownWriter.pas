@@ -67,6 +67,8 @@ type
     procedure Write_SbomHeaderData_AppearsInProjectOverview;
     [Test]
     procedure Write_EmptySbomHeaderData_IsOmitted;
+    [Test]
+    procedure Write_Overview_ShowsOriginsLicencesAndUnitsWithoutManifest;
   end;
 
 implementation
@@ -266,8 +268,31 @@ begin
   Assert.IsTrue(LWriter.Write(FOutputPath, FData, THumanReadableReportConfig.Default));
   var LContent := TFile.ReadAllText(FOutputPath, TEncoding.UTF8);
   Assert.AreEqual(0, Pos('SBOM Creator', LContent));
-  Assert.AreEqual(0, Pos('Supplier', LContent));
-  Assert.AreEqual(0, Pos('Licence', LContent));
+  Assert.AreEqual(0, Pos('| Supplier |', LContent));
+  Assert.AreEqual(0, Pos('| Licence |', LContent));
+end;
+
+procedure TMarkdownReportWriterTests.Write_Overview_ShowsOriginsLicencesAndUnitsWithoutManifest;
+begin
+  var LUnit := Default(TArtefactInfo);
+  LUnit.RelativePath := 'JvComponent.pas';
+  LUnit.ArtefactType := 'unit-evidence';
+  LUnit.Origin := 'Third party';
+  FArtefacts.Add(LUnit);
+  FData.Metadata.Licence := 'Proprietary';
+  var LWriter: IHumanReadableReportWriter := TMarkdownReportWriter.Create;
+  Assert.IsTrue(LWriter.Write(FOutputPath, FData, THumanReadableReportConfig.Default));
+  var LContent := TFile.ReadAllText(FOutputPath, TEncoding.UTF8);
+  Assert.IsTrue(Pos('## Origin summary', LContent) > 0);
+  Assert.IsTrue(Pos('| [Third party](#third-party-units-without-manifest) | 1 |', LContent) > 0);
+  Assert.IsTrue(Pos('| **Total SBOM components** | **2** |', LContent) > 0);
+  Assert.IsTrue(Pos('## Licences', LContent) > 0);
+  Assert.IsTrue(Pos('| Proprietary | 1 | Demo (product) |', LContent) > 0);
+  Assert.IsTrue(Pos('| No licence information | 2 |', LContent) > 0);
+  Assert.IsTrue(Pos('## Third-party units without manifest', LContent) > 0);
+  Assert.IsTrue(Pos('| Jv | 1 | supplier, version, licence | JvComponent |', LContent) > 0);
+  Assert.IsTrue(Pos('## Origin summary', LContent) < Pos('## Artefacts', LContent),
+    'the origin summary is near the top');
 end;
 
 initialization

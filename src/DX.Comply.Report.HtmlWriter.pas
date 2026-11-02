@@ -35,6 +35,7 @@ type
     procedure AddSummaryCard(Lines: TStrings; const ATitle, AValue, ACssClass: string);
     procedure AddValidation(Lines: TStrings; const AData: TComplianceReportData);
     procedure AddWarnings(Lines: TStrings; const AData: TComplianceReportData);
+    procedure AddOverview(Lines: TStrings; const AData: TComplianceReportData);
   public
     function Write(const AOutputPath: string; const AData: TComplianceReportData;
       const AConfig: THumanReadableReportConfig): Boolean;
@@ -46,6 +47,7 @@ implementation
 uses
   System.IOUtils,
   System.SysUtils,
+  DX.Comply.Report.Overview,
   DX.Comply.Report.Support;
 
 procedure THtmlReportWriter.AddArtefacts(Lines: TStrings; const AData: TComplianceReportData);
@@ -55,7 +57,7 @@ var
 begin
   // Issue #90: Version is the PE FileVersion/ProductVersion (or product
   // version) already stored on the artefact for CycloneDX consistency.
-  Lines.Add('<section><h2>Artefacts</h2><div class="table-wrap"><table><thead><tr><th>Relative Path</th><th>Type</th><th>Version</th><th>Size</th><th>SHA-256</th></tr></thead><tbody>');
+  Lines.Add('<section id="artefacts"><h2>Artefacts</h2><div class="table-wrap"><table><thead><tr><th>Relative Path</th><th>Type</th><th>Version</th><th>Size</th><th>SHA-256</th></tr></thead><tbody>');
   for LArtefact in AData.Artefacts do
   begin
     if LArtefact.ArtefactType = 'unit-evidence' then
@@ -97,7 +99,7 @@ var
 begin
   LRows := BuildConsolidatedUnitEvidenceRows(AData);
   try
-    Lines.Add('<section><h2>Unit Evidence</h2><div class="table-wrap"><table><thead>');
+    Lines.Add('<section id="unit-evidence"><h2>Unit Evidence</h2><div class="table-wrap"><table><thead>');
     if AConfig.IncludeCompositionEvidence and AConfig.IncludeBuildEvidence then
       Lines.Add('<tr><th>Unit</th><th>Origin</th><th>Evidence</th><th>Confidence</th><th>SHA-256</th><th>SBOM Trace</th><th>Build Trace</th><th>Location</th></tr>')
     else if AConfig.IncludeCompositionEvidence then
@@ -194,6 +196,63 @@ begin
     for LWarning in AData.Warnings do
       Lines.Add('<li>' + EscapeHtml(LWarning) + '</li>');
   Lines.Add('</ul></section>');
+end;
+
+procedure THtmlReportWriter.AddOverview(Lines: TStrings; const AData: TComplianceReportData);
+begin
+  var LOverview := BuildReportOverview(AData);
+
+  // Issue #113: where the components come from.
+  Lines.Add('<section id="' + cAnchorOrigins + '"><h2>Origin summary</h2><div class="table-wrap"><table>');
+  Lines.Add('<thead><tr><th>Origin</th><th>Components</th></tr></thead><tbody>');
+  for var LGroup in LOverview.Origins do
+  begin
+    Lines.Add(Format('<tr><td><a href="#%s">%s</a></td><td>%d</td></tr>',
+      [LGroup.Anchor, EscapeHtml(LGroup.Title), LGroup.Count]));
+  end;
+  Lines.Add(Format('<tr><th>Total SBOM components</th><th>%d</th></tr>', [LOverview.TotalComponents]));
+  Lines.Add('</tbody></table></div>');
+  if Length(LOverview.Suppliers) > 0 then
+  begin
+    Lines.Add('<p>Third-party units by supplier (from the component manifest):</p>');
+    Lines.Add('<div class="table-wrap"><table><thead><tr><th>Supplier</th><th>Units</th></tr></thead><tbody>');
+    for var LGroup in LOverview.Suppliers do
+    begin
+      Lines.Add(Format('<tr><td>%s</td><td>%d</td></tr>', [EscapeHtml(LGroup.Title), LGroup.Count]));
+    end;
+    Lines.Add('</tbody></table></div>');
+  end;
+  Lines.Add('</section>');
+
+  // Issue #112: licences as declared in the SBOM.
+  Lines.Add('<section id="' + cAnchorLicences + '"><h2>Licences</h2>');
+  Lines.Add('<p>Licences as declared in the SBOM. Review hints are not legal advice.</p>');
+  Lines.Add('<div class="table-wrap"><table><thead><tr><th>Declared licence</th><th>Components</th>' +
+    '<th>Names</th><th>Note</th></tr></thead><tbody>');
+  for var LGroup in LOverview.Licences do
+  begin
+    Lines.Add(Format('<tr><td>%s</td><td>%d</td><td>%s</td><td>%s</td></tr>',
+      [EscapeHtml(LGroup.Title), LGroup.Count, EscapeHtml(LGroup.NamesText), EscapeHtml(LGroup.Note)]));
+  end;
+  Lines.Add('</tbody></table></div></section>');
+
+  // Issue #114: third-party units the component manifest does not cover.
+  if LOverview.WithoutManifestCount > 0 then
+  begin
+    Lines.Add('<section id="' + cAnchorWithoutManifest + '"><h2>Third-party units without manifest</h2>');
+    Lines.Add(Format('<p>%d of %d third-party units have no component manifest row. ' +
+      'Add a row with supplier, version and licence for each library ' +
+      '(see README, section Component manifest).</p>', [LOverview.WithoutManifestCount,
+      LOverview.ThirdPartyUnitCount]));
+    Lines.Add('<div class="table-wrap"><table><thead><tr><th>Unit prefix</th><th>Units</th>' +
+      '<th>Missing</th><th>Names</th></tr></thead><tbody>');
+    for var LGroup in LOverview.WithoutManifest do
+    begin
+      Lines.Add(Format('<tr><td>%s</td><td>%d</td><td>%s</td><td>%s</td></tr>',
+        [EscapeHtml(LGroup.Title), LGroup.Count, EscapeHtml(LGroup.Note), EscapeHtml(LGroup.NamesText)]));
+    end;
+    Lines.Add('</tbody></table></div></section>');
+  end;
 end;
 
 function THtmlReportWriter.EscapeHtml(const AValue: string): string;
@@ -304,6 +363,7 @@ begin
     if Trim(AData.ProjectInfo.Toolchain.RootDir) <> '' then
       Lines.Add('<tr><th>Toolchain Root</th><td>' + EscapeHtml(AData.ProjectInfo.Toolchain.RootDir) + '</td></tr>');
     Lines.Add('</tbody></table></div></section>');
+    AddOverview(Lines, AData);
     AddValidation(Lines, AData);
     AddArtefacts(Lines, AData);
     if AConfig.IncludeCompositionEvidence or AConfig.IncludeBuildEvidence then

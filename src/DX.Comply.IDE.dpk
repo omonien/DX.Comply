@@ -54,6 +54,7 @@ contains
   DX.Comply.CycloneDx.XmlWriter in 'DX.Comply.CycloneDx.XmlWriter.pas',
   DX.Comply.Report.Intf in 'DX.Comply.Report.Intf.pas',
   DX.Comply.Report.Support in 'DX.Comply.Report.Support.pas',
+  DX.Comply.Report.Overview in 'DX.Comply.Report.Overview.pas',
   DX.Comply.Report.MarkdownWriter in 'DX.Comply.Report.MarkdownWriter.pas',
   DX.Comply.Report.HtmlWriter in 'DX.Comply.Report.HtmlWriter.pas',
   DX.Comply.Spdx.Writer in 'DX.Comply.Spdx.Writer.pas',
