@@ -57,6 +57,9 @@ type
     FReportFormatRowPanel: TPanel;
     ReportFormatLabel: TLabel;
     FReportFormatComboBox: TComboBox;
+    FReportContentRowPanel: TPanel;
+    ReportContentLabel: TLabel;
+    FReportContentComboBox: TComboBox;
     FReportOutputRowPanel: TPanel;
     ReportOutputBasePathLabel: TLabel;
     FReportOutputBasePathEdit: TEdit;
@@ -212,6 +215,8 @@ begin
   else
     FReportFormatComboBox.ItemIndex := 0;
   end;
+  // Issue #126: the combo box items follow THumanReadableReportContent.
+  FReportContentComboBox.ItemIndex := Ord(ASettings.HumanReadableReport.Content);
   FReportOutputBasePathEdit.Text := ASettings.HumanReadableReport.OutputBasePath;
   FReportIncludeWarningsCheckBox.Checked := ASettings.HumanReadableReport.IncludeWarnings;
   FReportIncludeCompositionCheckBox.Checked := ASettings.HumanReadableReport.IncludeCompositionEvidence;
@@ -243,6 +248,10 @@ begin
   else
     Result.HumanReadableReport.Format := hrfMarkdown;
   end;
+  if FReportContentComboBox.ItemIndex in [Ord(Low(THumanReadableReportContent))..Ord(High(THumanReadableReportContent))] then
+    Result.HumanReadableReport.Content := THumanReadableReportContent(FReportContentComboBox.ItemIndex)
+  else
+    Result.HumanReadableReport.Content := hrcAll;
   Result.HumanReadableReport.OutputBasePath := Trim(FReportOutputBasePathEdit.Text);
   Result.HumanReadableReport.IncludeWarnings := FReportIncludeWarningsCheckBox.Checked;
   Result.HumanReadableReport.IncludeCompositionEvidence := FReportIncludeCompositionCheckBox.Checked;

@@ -117,6 +117,7 @@ begin
     LSettings.HumanReadableReport.IncludeWarnings := False;
     LSettings.HumanReadableReport.IncludeCompositionEvidence := False;
     LSettings.HumanReadableReport.IncludeBuildEvidence := False;
+    LSettings.HumanReadableReport.Content := hrcUnits;
 
     TDXComplyIDESettingsStore.SaveToFile(LFilePath, LSettings);
     LLoadedSettings := TDXComplyIDESettingsStore.LoadFromFile(LFilePath);
@@ -137,6 +138,7 @@ begin
     Assert.IsFalse(LLoadedSettings.HumanReadableReport.IncludeWarnings);
     Assert.IsFalse(LLoadedSettings.HumanReadableReport.IncludeCompositionEvidence);
     Assert.IsFalse(LLoadedSettings.HumanReadableReport.IncludeBuildEvidence);
+    Assert.AreEqual(NativeInt(Ord(hrcUnits)), NativeInt(Ord(LLoadedSettings.HumanReadableReport.Content)));
   finally
     if TFile.Exists(LFilePath) then
       TFile.Delete(LFilePath);

@@ -129,6 +129,12 @@ type
     /// <summary>The spdxVersion key loads from .dxcomply.json, and the CLI wins. Issue #108.</summary>
     [Test]
     procedure Config_SpdxVersion_LoadsAndMerges;
+    /// <summary>--report-content selects the report sections, default all. Issue #126.</summary>
+    [Test]
+    procedure Parse_ReportContent_SetsContent;
+    /// <summary>The report.content key loads from .dxcomply.json, and the CLI wins. Issue #126.</summary>
+    [Test]
+    procedure Config_ReportContent_LoadsAndMerges;
 
     /// <summary>Defaults are not treated as explicit overrides.</summary>
     [Test]
@@ -786,6 +792,71 @@ begin
     Assert.IsFalse(LOptions.Parse(['--project=App.dproj', '--strict=maybe']));
   finally
     LOptions.Free;
+  end;
+end;
+
+procedure TCliOptionsTests.Parse_ReportContent_SetsContent;
+begin
+  var LOptions := TCliOptions.Create;
+  try
+    Assert.IsTrue(LOptions.Parse(['--project=App.dproj']));
+    Assert.AreEqual(NativeInt(Ord(hrcAll)), NativeInt(Ord(LOptions.ToSbomConfig.HumanReadableReport.Content)));
+    Assert.IsFalse(scoReportContent in LOptions.ToSbomConfig.ExplicitOverrides);
+  finally
+    LOptions.Free;
+  end;
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsTrue(LOptions.Parse(['--project=App.dproj', '--report', '--report-content=Units']));
+    Assert.AreEqual(NativeInt(Ord(hrcUnits)), NativeInt(Ord(LOptions.ToSbomConfig.HumanReadableReport.Content)));
+    Assert.IsTrue(scoReportContent in LOptions.ToSbomConfig.ExplicitOverrides);
+    Assert.IsTrue(LOptions.ToSbomConfig.HumanReadableReport.Enabled);
+  finally
+    LOptions.Free;
+  end;
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsTrue(LOptions.Parse(['--project=App.dproj', '--report-content=overview']));
+    Assert.AreEqual(NativeInt(Ord(hrcOverview)), NativeInt(Ord(LOptions.ToSbomConfig.HumanReadableReport.Content)));
+    Assert.IsFalse(LOptions.ToSbomConfig.HumanReadableReport.Enabled,
+      '--report-content alone does not turn reports on');
+  finally
+    LOptions.Free;
+  end;
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsFalse(LOptions.Parse(['--project=App.dproj', '--report-content=hashes']));
+    Assert.IsTrue(Pos('--report-content', LOptions.ParseError) > 0);
+  finally
+    LOptions.Free;
+  end;
+end;
+
+procedure TCliOptionsTests.Config_ReportContent_LoadsAndMerges;
+begin
+  var LPath := TPath.Combine(TPath.GetTempPath, 'dxcomply-report-content-test.json');
+  TFile.WriteAllText(LPath, '{"report":{"enabled":true,"format":"html","content":"overview"}}', TEncoding.UTF8);
+  var LGen: TDxComplyGenerator := nil;
+  var LOptions := TCliOptions.Create;
+  try
+    LGen := TDxComplyGenerator.Create;
+    Assert.AreEqual(NativeInt(Ord(hrcOverview)), NativeInt(Ord(LGen.LoadConfig(LPath).HumanReadableReport.Content)));
+    FreeAndNil(LGen);
+
+    Assert.IsTrue(LOptions.Parse(['--project=App.dproj', '--report-content=all']));
+    LGen := TDxComplyGenerator.Create(LOptions.ToSbomConfig);
+    LGen.GenerateFromConfig('missing.dproj', LPath);
+    Assert.AreEqual(NativeInt(Ord(hrcAll)), NativeInt(Ord(LGen.Config.HumanReadableReport.Content)),
+      '--report-content overrides the file');
+    Assert.IsTrue(LGen.Config.HumanReadableReport.Enabled, 'the file keeps reports on');
+    Assert.AreEqual(NativeInt(Ord(hrfHtml)), NativeInt(Ord(LGen.Config.HumanReadableReport.Format)));
+  finally
+    LGen.Free;
+    LOptions.Free;
+    if TFile.Exists(LPath) then
+    begin
+      TFile.Delete(LPath);
+    end;
   end;
 end;
 

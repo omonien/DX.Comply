@@ -67,6 +67,7 @@ type
     FOutputExplicit: Boolean;
     FReportEnabled: Boolean;
     FReportFormat: THumanReadableReportFormat;
+    FReportContent: THumanReadableReportContent;
     FExplicitOverrides: TSbomConfigOverrides;
     FScanDirs: TArray<string>;
     FScanTree: Boolean;
@@ -186,6 +187,8 @@ type
     property ReportEnabled: Boolean read FReportEnabled;
     /// <summary>Effective report format when ReportEnabled is True.</summary>
     property ReportFormat: THumanReadableReportFormat read FReportFormat;
+    /// <summary>Report sections from --report-content (issue #126). Default all.</summary>
+    property ReportContent: THumanReadableReportContent read FReportContent;
     /// <summary>Extra binary directories from repeatable --scan-dir.</summary>
     property ScanDirs: TArray<string> read FScanDirs;
     /// <summary>True when --scan-tree was requested. Deprecated.</summary>
@@ -521,6 +524,16 @@ begin
         end;
         Include(FExplicitOverrides, scoScanTree);
       end
+      else if LKey = 'report-content' then
+      begin
+        if not TryParseReportContent(LValue, FReportContent) then
+        begin
+          FParseError := 'Invalid value for --report-content: ' + LValue +
+            ' (expected all, overview, or units)';
+          Exit(False);
+        end;
+        Include(FExplicitOverrides, scoReportContent);
+      end
       else if LKey = 'strict' then
       begin
         if not TryParseBool(LValue, FStrictMode) then
@@ -743,6 +756,12 @@ begin
   Writeln('                                Ignored when --output is supplied');
   Writeln('  --report[=<format>]           Generate companion human-readable report');
   Writeln('                                  markdown | html | both (default) | none');
+  Writeln('  --report-content=<content>    Sections of the report (not of the SBOM):');
+  Writeln('                                  all (default) | overview | units');
+  Writeln('                                overview: origin summary, licences and');
+  Writeln('                                third-party units without manifest.');
+  Writeln('                                units: the unit list with SHA-256 hashes.');
+  Writeln('                                File key: report.content');
   Writeln('  --ci                          CI mode: use .dxcomply.json config file');
   Writeln('  --strict[=true|false]         Write the SBOM, then exit with code 3 when');
   Writeln('                                any CRA/BSI warning was raised.');
@@ -863,6 +882,9 @@ begin
     Result.HumanReadableReport.Enabled := FReportEnabled;
     Result.HumanReadableReport.Format  := FReportFormat;
   end;
+  // Issue #126: report sections. Does not turn reports on by itself.
+  if scoReportContent in FExplicitOverrides then
+    Result.HumanReadableReport.Content := FReportContent;
 end;
 
 end.

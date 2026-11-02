@@ -54,6 +54,14 @@ Every SBOM generation follows the same pipeline, regardless of whether it was tr
 | `DX.Comply.BuildOrchestrator.pas` | Plan construction and script-based build execution (used by CLI fallback) |
 | `DX.Comply.BuildEvidence.Reader.pas` | Reads MAP files, compiler CFG/RSP files; collects evidence items |
 | `DX.Comply.MapFile.Reader.pas` | Extracts unit names from MAP segment entries (`M=Unit`) and line-number sections |
+| `DX.Comply.MapFile.LldReader.pas` | Reads the LLD linker map of ARM and LLVM targets (Android, iOS, Linux, macOS ARM): units from `.o` files, native components from `.a` archives |
+| `DX.Comply.LegacyProject.pas` | Reads Delphi 7 and other pre-2007 project data from `.dpr`, `.dpk`, `.bdsproj`, `.dof`, and `.cfg` |
+| `DX.Comply.UsesClauseParser.pas` | Reads uses clauses from Pascal sources |
+| `DX.Comply.DependencyGraph.pas` | Direct uses-clause edges between units already in the SBOM |
+| `DX.Comply.LibrarySource.pas` | Collects the source files of a library release for `--library` |
+| `DX.Comply.CraChecks.pas` | Non-fatal CRA and BSI header and component warnings, and the `--strict` result |
+| `DX.Comply.SbomHeaderConfig.pas` | Reads and writes the SBOM header keys of `.dxcomply.json` |
+| `DX.Comply.VersionInfo.pas` | Reads the DX.Comply version from the version resource |
 | `DX.Comply.UnitResolver.pas` | Resolves units to files, classifies origin (RTL/VCL/FMX/Local/ThirdParty), computes SHA-256/SHA-512 hashes |
 | `DX.Comply.HashService.pas` | SHA-256 and SHA-512 via `System.Hash` |
 | `DX.Comply.FileScanner.pas` | Lists the named project output and binaries in that directory |
@@ -63,7 +71,8 @@ Every SBOM generation follows the same pipeline, regardless of whether it was tr
 | `DX.Comply.Spdx3.Writer.pas` | SPDX 3.0.1 JSON-LD output, converted from the SPDX 2.3 document |
 | `DX.Comply.Report.HtmlWriter.pas` | HTML companion report |
 | `DX.Comply.Report.MarkdownWriter.pas` | Markdown companion report |
-| `DX.Comply.Report.Intf.pas` | Report writer interface and shared report types |
+| `DX.Comply.Report.Intf.pas` | Report writer interface and shared report types, including the report content choice |
+| `DX.Comply.Report.Overview.pas` | Origin, supplier, and licence summaries of the reports |
 | `DX.Comply.Report.Support.pas` | Common report helper functions (HTML escaping, formatting) |
 | `DX.Comply.BuildEvidence.Intf.pas` | Build evidence types and interfaces |
 | `DX.Comply.Schema.Validator.pas` | Post-generation structural check of the SBOM (not an official schema) |
@@ -72,6 +81,8 @@ Every SBOM generation follows the same pipeline, regardless of whether it was tr
 ## MAP file generation
 
 DX.Comply always performs a **Deep-Evidence analysis**, using the compiler-generated MAP file to resolve linked units (PAS/DCU) with their dependencies, SHA-256 hashes where the file could be opened, and origin classification. The MAP file is the source of truth for dependency resolution.
+
+Windows targets write the classic Delphi MAP (`DCC_MapFile=3`, Detailed). ARM and LLVM targets (Android, iOS, Linux, macOS ARM) link with LLD and write an LLD map instead. Those targets have no Detailed setting; the map is turned on with Project Options > Linker > Map file ARM > On. Android writes `lib<Project>.so.map`. DX.Comply recognises an LLD map by its header and reads it with `TLldMapReader`.
 
 When a MAP file does not yet exist, DX.Comply can optionally trigger a build with `DCC_MapFile=3` (detailed MAP) to generate one. This is an implementation detail. The analysis quality is the same regardless of how the MAP file was produced.
 

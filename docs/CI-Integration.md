@@ -163,6 +163,8 @@ A default you did not pass does not override the file. `dxcomply --ci --config-n
 
 The line printed after a successful run is the output path after that merge, including a `configName` or `platform` taken from the file.
 
+`report.content` (or `--report-content`) chooses the parts of the HTML and Markdown reports: `all` (the default), `overview` for the origin summary, licences and third-party units without manifest, or `units` for the unit list with SHA-256 hashes. The SBOM stays complete either way.
+
 `manifest` is an optional components file (see the README section "Component manifest"). A relative path is resolved from the project directory. `--manifest` wins over the file. A missing or invalid file fails the run and names the path and the reason. The same file is used for a Delphi 7 `.dpr`: matching uses the units from the MAP file.
 
 ### Multi-platform builds
