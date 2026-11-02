@@ -112,7 +112,7 @@ begin
   AddUnit('XyzGrid', 'Third party');
   var LOverview := BuildReportOverview(FData);
   // SBOM components: every artefact plus one component per manifest library.
-  Assert.AreEqual(FArtefacts.Count + 1, LOverview.TotalComponents);
+  Assert.AreEqual<Integer>(FArtefacts.Count + 1, LOverview.TotalComponents);
   Assert.AreEqual(1, FindGroup(LOverview.Origins, cDllOrigin).Count);
   Assert.AreEqual(1, FindGroup(LOverview.Origins, cRuntimePackageOrigin).Count);
   Assert.AreEqual(1, FindGroup(LOverview.Origins, cOtherFileOrigin).Count);
