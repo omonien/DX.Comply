@@ -12,6 +12,7 @@
 ///   0 - SBOM generated successfully
 ///   1 - Generation failed
 ///   2 - Invalid arguments
+///   3 - SBOM generated, but --strict is set and a CRA/BSI warning was raised
 /// </remarks>
 ///
 /// <copyright>
@@ -33,6 +34,9 @@ uses
   DX.Comply.Engine.Intf,
   DX.Comply.CLI.Options in 'DX.Comply.CLI.Options.pas',
   DX.Comply.CLI.GitTag in 'DX.Comply.CLI.GitTag.pas';
+
+const
+  cExitStrictWarnings = 3;
 
 // ---------------------------------------------------------------------------
 // Progress callback — negative progress signals an error
@@ -174,6 +178,18 @@ begin
       begin
         Writeln('SBOM generated: ', LConfig.OutputPath);
         ExitCode := 0;
+        // Issue #111: the SBOM and report are written, then strict mode fails
+        // the run on any CRA/BSI warning with its own exit code.
+        var LCraWarnings := LGenerator.CraWarnings;
+        if LConfig.StrictMode and (Length(LCraWarnings) > 0) then
+        begin
+          Writeln(Format('Strict mode: %d CRA/BSI warning(s):', [Length(LCraWarnings)]));
+          for var LWarning in LCraWarnings do
+          begin
+            Writeln('  - ', LWarning);
+          end;
+          ExitCode := cExitStrictWarnings;
+        end;
       end
       else
       begin

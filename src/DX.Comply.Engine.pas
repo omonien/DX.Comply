@@ -79,7 +79,8 @@ type
     scoLibraryMode,
     scoSourceDirs,
     scoPurl,
-    scoRepoUrl
+    scoRepoUrl,
+    scoStrictMode
   );
   /// <summary>Set of TSbomConfig fields that were set explicitly.</summary>
   TSbomConfigOverrides = set of TSbomConfigOverride;
@@ -232,6 +233,11 @@ type
     /// Context the warning texts are written for. Default swcCli.
     /// </summary>
     WarningContext: TSbomWarningContext;
+    /// <summary>
+    /// --strict or the strict key: the CLI still writes the SBOM and report,
+    /// then exits with code 3 when a CRA/BSI warning was raised (issue #111).
+    /// </summary>
+    StrictMode: Boolean;
     /// <summary>Creates a new TSbomConfig with default values.</summary>
     class function Default: TSbomConfig; static;
     /// <summary>
@@ -277,6 +283,7 @@ type
     /// </summary>
     FProjectBinaryIndex: TDictionary<string, string>;
     FProjectBinaryIndexKey: string;
+    FCraWarnings: TArray<string>;
     procedure DoProgress(const AMessage: string; const AProgress: Integer);
     function MergeFileConfig(const ACaller, AFile: TSbomConfig): TSbomConfig;
     function CreateWriter(AFormat: TSbomFormat): ISbomWriter;
@@ -474,6 +481,12 @@ type
     /// Current configuration.
     /// </summary>
     property Config: TSbomConfig read FConfig write FConfig;
+    /// <summary>
+    /// CRA/BSI warnings of the last Generate or GenerateLibrary call: header
+    /// gaps, a missing deployable, and third-party components without
+    /// supplier or licence. --strict fails the CLI when this is not empty.
+    /// </summary>
+    property CraWarnings: TArray<string> read FCraWarnings;
   end;
 
 /// <summary>
@@ -543,6 +556,7 @@ begin
   Result.Purl := '';
   Result.RepoUrl := '';
   Result.WarningContext := swcCli;
+  Result.StrictMode := False;
 end;
 
 
@@ -2182,6 +2196,11 @@ begin
         if LJson.GetValue('library') <> nil then
           Result.LibraryMode := LJson.GetValue<Boolean>('library');
 
+        if LJson.GetValue('strict') <> nil then
+        begin
+          Result.StrictMode := LJson.GetValue<Boolean>('strict');
+        end;
+
         if LJson.GetValue('sourceDirs') is TJSONArray then
         begin
           LArray := LJson.GetValue('sourceDirs') as TJSONArray;
@@ -2599,6 +2618,7 @@ begin
   LReportedWarnings := nil;
   LArtefacts := nil;
   LCraWarnings := nil;
+  FCraWarnings := nil;
   try
     LReportedWarnings := TList<string>.Create;
     LArtefacts := TArtefactList.Create;
@@ -2801,6 +2821,7 @@ begin
       LArtefacts) do
       LCraWarnings.Add(LCraText);
     ReportWarnings(LCraWarnings, LReportedWarnings, 69);
+    FCraWarnings := LCraWarnings.ToArray;
 
     DoProgress('Generating SBOM...', 70);
     FSbomWriter := CreateWriter(LFormat);
@@ -2928,6 +2949,7 @@ begin
   LValidation := TValidationResult.CreateValid;
   LReportedWarnings := TList<string>.Create;
   LManifest := Default(TComponentManifest);
+  FCraWarnings := nil;
   LManifestJson := '';
   try
     FProjectScanner.SetDelphi7Root(FConfig.Delphi7Root);
@@ -3159,7 +3181,11 @@ begin
         for LCraText in BuildCraMetadataWarnings(FConfig, LMetadata, LProjectInfo,
           LArtefacts) do
           LCraWarnings.Add(LCraText);
+        // Issue #110: third-party units without supplier or licence.
+        for LCraText in BuildThirdPartyComponentWarnings(FConfig, LManifest, LArtefacts) do
+          LCraWarnings.Add(LCraText);
         ReportWarnings(LCraWarnings, LReportedWarnings, 69);
+        FCraWarnings := LCraWarnings.ToArray;
       finally
         LCraWarnings.Free;
       end;
@@ -3274,6 +3300,10 @@ begin
     Result.Purl := ACaller.Purl;
   if scoRepoUrl in ACaller.ExplicitOverrides then
     Result.RepoUrl := ACaller.RepoUrl;
+  if scoStrictMode in ACaller.ExplicitOverrides then
+  begin
+    Result.StrictMode := ACaller.StrictMode;
+  end;
 
   Result.IncludePlatformInOutput := ACaller.IncludePlatformInOutput;
   Result.ExplicitOverrides := ACaller.ExplicitOverrides;

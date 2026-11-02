@@ -20,6 +20,7 @@ interface
 uses
   System.SysUtils,
   DUnitX.TestFramework,
+  DX.Comply.ComponentManifest,
   DX.Comply.CraChecks,
   DX.Comply.Engine,
   DX.Comply.Engine.Intf;
@@ -95,6 +96,21 @@ type
     /// </summary>
     [Test]
     procedure IsSbomHeaderWarning_ClassifiesWarnings;
+
+    /// <summary>Third-party units without a manifest are grouped by prefix. Issue #110.</summary>
+    [Test]
+    procedure ThirdParty_NoManifest_WarnsPerPrefix;
+    /// <summary>A manifest row with vendor and licence clears the warning. Issue #110.</summary>
+    [Test]
+    procedure ThirdParty_ManifestCovers_NoWarning;
+    /// <summary>A row without licence is named. Issue #110.</summary>
+    [Test]
+    procedure ThirdParty_RowWithoutLicence_Warns;
+    /// <summary>More than ten groups end in one counting line. Issue #110.</summary>
+    [Test]
+    procedure ThirdParty_ManyGroups_AreCapped;
+    [Test]
+    procedure ThirdPartyUnitPrefix_Cases;
   end;
 
 implementation
@@ -471,6 +487,96 @@ begin
   Assert.IsFalse(IsSbomHeaderWarning('Warning: ' + DeployableWarning(cOutputPath)));
   Assert.IsFalse(IsSbomHeaderWarning('Warning: No MAP file found'));
   Assert.IsFalse(IsSbomHeaderWarning(''));
+end;
+
+function ThirdPartyUnit(const AName: string; const AOrigin: string = 'Third party'): TArtefactInfo;
+begin
+  Result := Default(TArtefactInfo);
+  Result.RelativePath := AName + '.pas';
+  Result.ArtefactType := 'unit-evidence';
+  Result.Origin := AOrigin;
+end;
+
+function ParseTestManifest(const AJson: string): TComponentManifest;
+begin
+  var LError: string;
+  Assert.IsTrue(TryParseComponentManifest(AJson, 'test', Result, LError), LError);
+end;
+
+procedure TCraChecksTests.ThirdParty_NoManifest_WarnsPerPrefix;
+begin
+  var LArtefacts := TArtefactList.Create;
+  try
+    LArtefacts.Add(ThirdPartyUnit('JvComponent'));
+    LArtefacts.Add(ThirdPartyUnit('JvButtons'));
+    LArtefacts.Add(ThirdPartyUnit('Spring.Collections'));
+    LArtefacts.Add(ThirdPartyUnit('System.SysUtils', 'Embarcadero RTL'));
+    LArtefacts.Add(ThirdPartyUnit('MainForm', 'Local project'));
+    var LWarnings := BuildThirdPartyComponentWarnings(TSbomConfig.Default,
+      Default(TComponentManifest), LArtefacts);
+    Assert.AreEqual(2, Length(LWarnings));
+    Assert.IsTrue(LWarnings[0].StartsWith(cThirdPartyWarningPrefix + 'units with prefix "Jv"'), LWarnings[0]);
+    Assert.IsTrue(Pos('2 units (JvComponent, JvButtons)', LWarnings[0]) > 0, LWarnings[0]);
+    Assert.IsTrue(Pos('--manifest=<file>', LWarnings[0]) > 0, LWarnings[0]);
+    Assert.IsTrue(Pos('prefix "Spring"', LWarnings[1]) > 0, LWarnings[1]);
+    Assert.IsFalse(IsSbomHeaderWarning(LWarnings[0]), 'not a header warning');
+  finally
+    LArtefacts.Free;
+  end;
+end;
+
+procedure TCraChecksTests.ThirdParty_ManifestCovers_NoWarning;
+begin
+  var LManifest := ParseTestManifest('{"components":[{"name":"JVCL","version":"3.5",' +
+    '"vendor":"Project JEDI","licence":"MPL-1.1","units_prefix":["Jv"]}]}');
+  var LArtefacts := TArtefactList.Create;
+  try
+    LArtefacts.Add(ThirdPartyUnit('JvComponent'));
+    Assert.AreEqual(0, Length(BuildThirdPartyComponentWarnings(TSbomConfig.Default, LManifest, LArtefacts)));
+  finally
+    LArtefacts.Free;
+  end;
+end;
+
+procedure TCraChecksTests.ThirdParty_RowWithoutLicence_Warns;
+begin
+  var LManifest := ParseTestManifest('{"components":[{"name":"JVCL","version":"3.5",' +
+    '"vendor":"Project JEDI","units_prefix":["Jv"]}]}');
+  var LArtefacts := TArtefactList.Create;
+  try
+    LArtefacts.Add(ThirdPartyUnit('JvComponent'));
+    var LWarnings := BuildThirdPartyComponentWarnings(TSbomConfig.Default, LManifest, LArtefacts);
+    Assert.AreEqual(1, Length(LWarnings));
+    Assert.IsTrue(Pos('library "JVCL" in the component manifest has no licence, 1 unit (JvComponent)',
+      LWarnings[0]) > 0, LWarnings[0]);
+  finally
+    LArtefacts.Free;
+  end;
+end;
+
+procedure TCraChecksTests.ThirdParty_ManyGroups_AreCapped;
+begin
+  var LArtefacts := TArtefactList.Create;
+  try
+    for var i := 1 to cMaxComponentWarningGroups + 3 do
+    begin
+      LArtefacts.Add(ThirdPartyUnit('Lib' + IntToStr(i) + '.Core'));
+    end;
+    var LWarnings := BuildThirdPartyComponentWarnings(TSbomConfig.Default,
+      Default(TComponentManifest), LArtefacts);
+    Assert.AreEqual(cMaxComponentWarningGroups + 1, Length(LWarnings));
+    Assert.IsTrue(Pos('units in 3 more groups', LWarnings[High(LWarnings)]) > 0, LWarnings[High(LWarnings)]);
+  finally
+    LArtefacts.Free;
+  end;
+end;
+
+procedure TCraChecksTests.ThirdPartyUnitPrefix_Cases;
+begin
+  Assert.AreEqual('Jv', ThirdPartyUnitPrefix('JvComponent'));
+  Assert.AreEqual('Jcl', ThirdPartyUnitPrefix('JclBase'));
+  Assert.AreEqual('Spring', ThirdPartyUnitPrefix('Spring.Collections'));
+  Assert.AreEqual('superobject', ThirdPartyUnitPrefix('superobject'));
 end;
 
 initialization

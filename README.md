@@ -239,7 +239,7 @@ There are three ways to set them. All of them end up in the same SBOM fields.
 
 ### CRA and BSI header warnings
 
-When the product header is missing data that the EU Cyber Resilience Act and BSI TR-03183-2 expect, DX.Comply prints a warning and still writes the SBOM. The process exit code stays unchanged. The CLI prints each line as `[WARN ]` without `--verbose`. The HTML and Markdown reports list the same lines under Warnings.
+When the product header is missing data that the EU Cyber Resilience Act and BSI TR-03183-2 expect, DX.Comply prints a warning and still writes the SBOM. The process exit code stays unchanged unless `--strict` is set (see below). The CLI prints each line as `[WARN ]` without `--verbose`. The HTML and Markdown reports list the same lines under Warnings.
 
 The CLI warnings name the flag and the `.dxcomply.json` key, as listed below. In the IDE the same warnings name the **SBOM Header Data** dialog instead, because the IDE has no command line.
 
@@ -250,6 +250,18 @@ The CLI warnings name the flag and the `.dxcomply.json` key, as listed below. In
 - The version is `1.0.0.0` and it came from the project version info (the Delphi default for a new project). Pass `--version=<version>`, set `product.version`, or update the version info in the project options.
 - No distribution licence. Pass `--licence=<SPDX expression>` or set `product.licence`. An SPDX identifier, an expression, or a name is written on the primary component the same way as a manifest library, and as `licenseDeclared` and `licenseConcluded` on the SPDX package of the built program.
 - The built exe, dll, or bpl was not found, so the SBOM has no hash for it. Build the project first, or check the output directory, `--platform`, and `--config-name`.
+- Third-party units without supplier or licence (BSI TR-03183-2 sections 5.2.2 and 6.1). A unit gets both only from a [component manifest](#component-manifest) row. Units without a row are grouped by unit prefix (`Jv` for `JvComponent`, `Spring` for `Spring.Collections`), and a row that lacks `vendor` or `licence` is named on its own. Up to ten groups are listed, then one line counts the rest. Add a manifest row with `vendor` and `licence` to clear the warning.
+
+#### Strict mode
+
+`--strict`, or `"strict": true` in `.dxcomply.json` with `--ci`, makes these warnings fatal for a pipeline. The SBOM and the reports are still written. When at least one CRA/BSI warning was raised, `dxcomply.exe` prints them again under `Strict mode:` and exits with code 3. Without warnings the exit code is 0. Without `--strict` the exit codes do not change.
+
+| Exit code | Meaning |
+|-----------|---------|
+| 0 | SBOM generated |
+| 1 | Generation failed |
+| 2 | Invalid arguments |
+| 3 | SBOM generated, but `--strict` is set and at least one CRA/BSI warning was raised |
 
 ---
 
@@ -304,6 +316,7 @@ Add a `.dxcomply.json` to your project folder and pass `--ci` so the CLI loads i
   "scanDirs": ["redist"],
   "manifest": "components.json",
   "sbomCreator": "sbom@example.com",
+  "strict": false,
   "product": {
     "name": "My Application",
     "version": "2.1.0",
@@ -330,7 +343,7 @@ When `--ci` is set and the file exists, values are merged in this order:
 2. Keys present in `.dxcomply.json`.
 3. Command-line options you actually pass. Those win over the file.
 
-An option you leave off the command line does not override the file, even though that option has a default. `dxcomply --ci --config-name=Debug` uses Debug even when the file says `"configName": "Release"`. `dxcomply --ci` with no `--config-name` uses the file's `configName`, or `Release` when the key is absent. The same rule applies to `--platform`, `--format`, `--output`, `--product`, `--version`, `--supplier`, `--supplier-url`, `--licence`, `--sbom-creator`, `--report`, `--include`, `--exclude`, `--map-dir`, `--manifest`, and `--no-composition-evidence`.
+An option you leave off the command line does not override the file, even though that option has a default. `dxcomply --ci --config-name=Debug` uses Debug even when the file says `"configName": "Release"`. `dxcomply --ci` with no `--config-name` uses the file's `configName`, or `Release` when the key is absent. The same rule applies to `--platform`, `--format`, `--output`, `--product`, `--version`, `--supplier`, `--supplier-url`, `--licence`, `--sbom-creator`, `--report`, `--include`, `--exclude`, `--map-dir`, `--manifest`, `--strict`, and `--no-composition-evidence`.
 
 If you pass `--include` or `--exclude`, that list replaces the file's list. `--report` overrides the file's enabled flag and format, and leaves the file's report output path as it is.
 

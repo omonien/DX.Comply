@@ -112,6 +112,12 @@ type
     /// </summary>
     [Test]
     procedure Parse_ExplicitFlags_AreRecorded;
+    /// <summary>--strict and --strict=false set StrictMode. Issue #111.</summary>
+    [Test]
+    procedure Parse_Strict_SetsStrictMode;
+    /// <summary>The strict key loads from .dxcomply.json, and --strict=false wins. Issue #111.</summary>
+    [Test]
+    procedure Config_Strict_LoadsAndMerges;
 
     /// <summary>Defaults are not treated as explicit overrides.</summary>
     [Test]
@@ -729,6 +735,65 @@ begin
     LOptions.Free;
     if TFile.Exists(LPath) then
       TFile.Delete(LPath);
+  end;
+end;
+
+procedure TCliOptionsTests.Parse_Strict_SetsStrictMode;
+begin
+  var LOptions := TCliOptions.Create;
+  try
+    Assert.IsTrue(LOptions.Parse(['--project=App.dproj']));
+    Assert.IsFalse(LOptions.ToSbomConfig.StrictMode);
+    Assert.IsFalse(scoStrictMode in LOptions.ToSbomConfig.ExplicitOverrides);
+  finally
+    LOptions.Free;
+  end;
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsTrue(LOptions.Parse(['--project=App.dproj', '--strict']));
+    Assert.IsTrue(LOptions.ToSbomConfig.StrictMode);
+    Assert.IsTrue(scoStrictMode in LOptions.ToSbomConfig.ExplicitOverrides);
+  finally
+    LOptions.Free;
+  end;
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsTrue(LOptions.Parse(['--project=App.dproj', '--strict=false']));
+    Assert.IsFalse(LOptions.ToSbomConfig.StrictMode);
+    Assert.IsTrue(scoStrictMode in LOptions.ToSbomConfig.ExplicitOverrides);
+  finally
+    LOptions.Free;
+  end;
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsFalse(LOptions.Parse(['--project=App.dproj', '--strict=maybe']));
+  finally
+    LOptions.Free;
+  end;
+end;
+
+procedure TCliOptionsTests.Config_Strict_LoadsAndMerges;
+begin
+  var LPath := TPath.Combine(TPath.GetTempPath, 'dxcomply-strict-test.json');
+  TFile.WriteAllText(LPath, '{"strict":true}', TEncoding.UTF8);
+  var LGen: TDxComplyGenerator := nil;
+  var LOptions := TCliOptions.Create;
+  try
+    LGen := TDxComplyGenerator.Create;
+    Assert.IsTrue(LGen.LoadConfig(LPath).StrictMode);
+    FreeAndNil(LGen);
+
+    Assert.IsTrue(LOptions.Parse(['--project=App.dproj', '--strict=false']));
+    LGen := TDxComplyGenerator.Create(LOptions.ToSbomConfig);
+    LGen.GenerateFromConfig('missing.dproj', LPath);
+    Assert.IsFalse(LGen.Config.StrictMode, '--strict=false overrides the file');
+  finally
+    LGen.Free;
+    LOptions.Free;
+    if TFile.Exists(LPath) then
+    begin
+      TFile.Delete(LPath);
+    end;
   end;
 end;
 
