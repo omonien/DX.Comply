@@ -84,6 +84,11 @@ type
     Prefixes: TArray<string>;
     /// <summary>Case-insensitive exact unit names.</summary>
     ExactUnits: TArray<string>;
+    /// <summary>
+    /// Case-insensitive unit names that the prefixes of this row do not
+    /// match (units_exclude, issue #140).
+    /// </summary>
+    ExcludeUnits: TArray<string>;
     /// <summary>Freeform notes. Not written into the SBOM.</summary>
     Notes: string;
   end;
@@ -673,6 +678,7 @@ begin
 
   Result.Prefixes := ReadStringArray(AObject, 'units_prefix', LContext, AWarnings);
   Result.ExactUnits := ReadStringArray(AObject, 'units_exact', LContext, AWarnings);
+  Result.ExcludeUnits := ReadStringArray(AObject, 'units_exclude', LContext, AWarnings);
 
   if (Length(Result.Prefixes) = 0) and (Length(Result.ExactUnits) = 0) then
     AddWarning(AWarnings, LContext +
@@ -681,7 +687,8 @@ begin
   for I := 0 to High(Result.Prefixes) do
     if Length(Result.Prefixes[I]) < cMinPrefixLength then
       AddWarning(AWarnings, LContext + ': prefix "' + Result.Prefixes[I] +
-        '" is shorter than 3 characters');
+        '" is shorter than 3 characters. It is still applied. Use units_exclude ' +
+        'to leave out units of other libraries that start with it');
 end;
 
 procedure ReadComponents(AArray: TJSONArray; AWarnings: TList<string>;
@@ -955,6 +962,16 @@ begin
         Exit(I);
 end;
 
+function IsExcludedUnit(const AEntry: TComponentEntry; const AUnitName: string): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 0 to High(AEntry.ExcludeUnits) do
+    if SameText(AUnitName, AEntry.ExcludeUnits[I]) then
+      Exit(True);
+end;
+
 function FindPrefix(const AManifest: TComponentManifest; const AUnitName: string): Integer;
 var
   I, J: Integer;
@@ -967,6 +984,10 @@ begin
   LBestLength := 0;
   LLower := LowerCase(AUnitName);
   for I := 0 to High(AManifest.Components) do
+  begin
+    // units_exclude takes a unit out of this row's prefixes only.
+    if IsExcludedUnit(AManifest.Components[I], AUnitName) then
+      Continue;
     for J := 0 to High(AManifest.Components[I].Prefixes) do
       if (AManifest.Components[I].Prefixes[J] <> '') and
         (Length(AManifest.Components[I].Prefixes[J]) > LBestLength) and
@@ -975,6 +996,7 @@ begin
         Result := I;
         LBestLength := Length(AManifest.Components[I].Prefixes[J]);
       end;
+  end;
 end;
 
 function IsListedOwnCode(const AManifest: TComponentManifest; const AUnitName: string): Boolean;

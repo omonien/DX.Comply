@@ -67,6 +67,9 @@ type
     /// <summary>The longest prefix wins whatever the row order. Issue #129.</summary>
     [Test]
     procedure Match_LongestPrefixWins_RegardlessOfOrder;
+    /// <summary>units_exclude takes units out of a row's prefixes. Issue #140.</summary>
+    [Test]
+    procedure Match_UnitsExclude_SkipsRowPrefix;
     [Test]
     procedure Match_StripsKnownScopePrefix;
     [Test]
@@ -362,6 +365,26 @@ begin
     'units_exact keeps priority over a longer prefix');
 end;
 
+procedure TComponentManifestTests.Match_UnitsExclude_SkipsRowPrefix;
+var
+  LManifest: TComponentManifest;
+begin
+  LManifest := ParseManifest(
+    '{"components":[' +
+    '{"name":"Abbrevia","version":"5","vendor":"A","licence":"MPL-1.1","type":"library",' +
+    '"units_prefix":["Ab"],"units_exclude":["AboutBox","abcd"]},' +
+    '{"name":"Other","version":"1","vendor":"B","licence":"MIT","type":"library",' +
+    '"units_exact":["AboutBox"]}' +
+    ']}');
+  Assert.AreEqual(NativeInt(2), NativeInt(Length(LManifest.Components[0].ExcludeUnits)));
+  Assert.AreEqual(0, MatchManifestUnit(LManifest, 'AbZipper').ComponentIndex);
+  Assert.AreEqual(NativeInt(Ord(mmNone)),
+    NativeInt(Ord(MatchManifestUnit(LManifest, 'ABCD').Kind)),
+    'An excluded unit must not match the row (case-insensitive)');
+  Assert.AreEqual(1, MatchManifestUnit(LManifest, 'AboutBox').ComponentIndex,
+    'An excluded unit can still match another row');
+end;
+
 procedure TComponentManifestTests.Match_StripsKnownScopePrefix;
 var
   LManifest: TComponentManifest;
@@ -597,9 +620,12 @@ begin
     '"type":"library","units_prefix":["Id"]}]}');
   LFound := False;
   for I := 0 to High(LManifest.Warnings) do
-    if Pos('shorter than 3', LManifest.Warnings[I]) > 0 then
+    if (Pos('shorter than 3', LManifest.Warnings[I]) > 0) and
+      (Pos('still applied', LManifest.Warnings[I]) > 0) then
       LFound := True;
-  Assert.IsTrue(LFound, 'A 2-character prefix must produce a warning');
+  Assert.IsTrue(LFound, 'A 2-character prefix must produce a warning that says it is still applied');
+  Assert.AreEqual(0, MatchManifestUnit(LManifest, 'IdHTTP').ComponentIndex,
+    'A short prefix is still applied');
   Assert.IsTrue(LManifest.Loaded, 'The warning must not reject the file');
 end;
 
