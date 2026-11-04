@@ -43,6 +43,8 @@ type
     [Test]
     procedure WithoutManifest_EmptyWhenManifestCoversAll;
     [Test]
+    procedure WithoutManifest_GroupByFolder_SplitsPrefixByFolder;
+    [Test]
     procedure NamesText_IsCapped;
     [Test]
     procedure WithoutManifestLine_CountsAndEmptyWithoutThirdParty;
@@ -87,6 +89,12 @@ end;
 procedure TReportOverviewTests.TearDown;
 begin
   FArtefacts.Free;
+end;
+
+function SetPath(const AArtefact: TArtefactInfo; const APath: string): TArtefactInfo;
+begin
+  Result := AArtefact;
+  Result.FilePath := APath;
 end;
 
 function FindGroup(const AGroups: TArray<TReportGroup>; const ATitle: string): TReportGroup;
@@ -176,6 +184,28 @@ begin
   Assert.AreEqual('JvComponent, JvEdit', FindGroup(LOverview.WithoutManifest, 'Jv').NamesText);
   Assert.AreEqual('supplier, version, licence', FindGroup(LOverview.WithoutManifest, 'Jv').Note);
   Assert.AreEqual(1, FindGroup(LOverview.WithoutManifest, 'superobject').Count);
+end;
+
+procedure TReportOverviewTests.WithoutManifest_GroupByFolder_SplitsPrefixByFolder;
+begin
+  AddUnit('JvComponent', 'Third party');
+  AddUnit('JvEdit', 'Third party');
+  AddUnit('JvOther', 'Third party');
+  FArtefacts[0] := SetPath(FArtefacts[0], 'C:\Libs\JVCL\run\JvComponent.pas');
+  FArtefacts[1] := SetPath(FArtefacts[1], 'C:\Libs\JVCL\run\JvEdit.pas');
+  FArtefacts[2] := SetPath(FArtefacts[2], 'C:\Other\Jv\JvOther.pas');
+
+  // Default: one group per prefix.
+  var LOverview := BuildReportOverview(FData);
+  Assert.AreEqual<Integer>(1, Length(LOverview.WithoutManifest));
+  Assert.AreEqual(3, FindGroup(LOverview.WithoutManifest, 'Jv').Count);
+
+  // With folder grouping: one group per prefix and folder.
+  LOverview := BuildReportOverview(FData, True);
+  Assert.AreEqual(3, LOverview.WithoutManifestCount);
+  Assert.AreEqual<Integer>(2, Length(LOverview.WithoutManifest));
+  Assert.AreEqual(2, FindGroup(LOverview.WithoutManifest, 'Jv (C:\Libs\JVCL\run)').Count);
+  Assert.AreEqual(1, FindGroup(LOverview.WithoutManifest, 'Jv (C:\Other\Jv)').Count);
 end;
 
 procedure TReportOverviewTests.WithoutManifest_EmptyWhenManifestCoversAll;

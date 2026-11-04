@@ -83,7 +83,8 @@ type
     scoRepoUrl,
     scoStrictMode,
     scoSpdxVersion,
-    scoReportContent
+    scoReportContent,
+    scoReportGroupByFolder
   );
   /// <summary>Set of TSbomConfig fields that were set explicitly.</summary>
   TSbomConfigOverrides = set of TSbomConfigOverride;
@@ -2217,6 +2218,10 @@ begin
           if LReport.GetValue('content') <> nil then
             TryParseReportContent(LReport.GetValue<string>('content'),
               Result.HumanReadableReport.Content);
+          // Issue #132: group third-party units without manifest by folder.
+          if LReport.GetValue('groupByFolder') <> nil then
+            Result.HumanReadableReport.GroupByFolder :=
+              LReport.GetValue<Boolean>('groupByFolder');
         end;
 
         // MAP file directory override
@@ -3372,6 +3377,10 @@ begin
   if scoReportContent in ACaller.ExplicitOverrides then
   begin
     Result.HumanReadableReport.Content := ACaller.HumanReadableReport.Content;
+  end;
+  if scoReportGroupByFolder in ACaller.ExplicitOverrides then
+  begin
+    Result.HumanReadableReport.GroupByFolder := ACaller.HumanReadableReport.GroupByFolder;
   end;
   if scoSpdxVersion in ACaller.ExplicitOverrides then
   begin
