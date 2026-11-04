@@ -959,14 +959,22 @@ function FindPrefix(const AManifest: TComponentManifest; const AUnitName: string
 var
   I, J: Integer;
   LLower: string;
+  LBestLength: Integer;
 begin
+  // The longest matching prefix wins, whatever the row order, so "Neslib.Xml"
+  // beats "Neslib" (issue #129). On equal length the first row wins.
   Result := -1;
+  LBestLength := 0;
   LLower := LowerCase(AUnitName);
   for I := 0 to High(AManifest.Components) do
     for J := 0 to High(AManifest.Components[I].Prefixes) do
       if (AManifest.Components[I].Prefixes[J] <> '') and
+        (Length(AManifest.Components[I].Prefixes[J]) > LBestLength) and
         LLower.StartsWith(LowerCase(AManifest.Components[I].Prefixes[J])) then
-        Exit(I);
+      begin
+        Result := I;
+        LBestLength := Length(AManifest.Components[I].Prefixes[J]);
+      end;
 end;
 
 function IsListedOwnCode(const AManifest: TComponentManifest; const AUnitName: string): Boolean;
