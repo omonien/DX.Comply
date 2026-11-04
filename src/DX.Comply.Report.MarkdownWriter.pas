@@ -193,7 +193,7 @@ end;
 procedure TMarkdownReportWriter.AddOverview(Lines: TStrings; const AData: TComplianceReportData;
   const AConfig: THumanReadableReportConfig);
 begin
-  var LOverview := BuildReportOverview(AData);
+  var LOverview := BuildReportOverview(AData, AConfig.GroupByFolder);
 
   // Issue #113: where the components come from.
   Lines.Add('## Origin summary');

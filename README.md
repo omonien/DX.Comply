@@ -232,6 +232,8 @@ Every value keeps the project data, the structural check, the artefacts with the
 dxcomply --project=MyApp.dproj --report=html --report-content=overview --no-pause
 ```
 
+`--report-group-by-folder` adds the source folder as a second level to the section **Third-party units without manifest**. A prefix used by two libraries in different folders then shows as two groups, for example `Jv (C:\Libs\JVCL\run)` and `Jv (C:\Other\Jv)`. The default groups by unit prefix only. The `.dxcomply.json` key is `report.groupByFolder` (`true` or `false`). In the IDE, the setting is **Group third-party units without manifest by source folder** under **Tools > Options > Third Party > DX.Comply**. A `report.groupByFolder` key in the `.dxcomply.json` next to the project overrides it.
+
 After it writes a file, DX.Comply runs its own structural check of required fields and value shapes. That check is not a validation against an official schema.
 
 The checked-in example is [docs/examples/ConwaysLifeFMX.cdx.json](docs/examples/ConwaysLifeFMX.cdx.json), CycloneDX 1.6, from ConwaysLifeFMX in [Embarcadero/RADStudio13Demos](https://github.com/Embarcadero/RADStudio13Demos.git), project `Object Pascal/RTL/Parallel Library/FMX/ConwaysLifeFMX.dproj`, Release/Win32 with a map file. It replaces the earlier AlienInvasion example. New CycloneDX output uses `specVersion` 1.6. The tool's own check is structural. It is not a validation against the official schema. SPDX JSON and CycloneDX XML are not checked against official schemas inside the tool.
@@ -354,7 +356,8 @@ Add a `.dxcomply.json` to your project folder and pass `--ci` so the CLI loads i
   "report": {
     "enabled": true,
     "format": "both",
-    "content": "all"
+    "content": "all",
+    "groupByFolder": false
   }
 }
 ```
@@ -373,7 +376,7 @@ When `--ci` is set and the file exists, values are merged in this order:
 2. Keys present in `.dxcomply.json`.
 3. Command-line options you actually pass. Those win over the file.
 
-An option you leave off the command line does not override the file, even though that option has a default. `dxcomply --ci --config-name=Debug` uses Debug even when the file says `"configName": "Release"`. `dxcomply --ci` with no `--config-name` uses the file's `configName`, or `Release` when the key is absent. The same rule applies to `--platform`, `--format`, `--output`, `--product`, `--version`, `--supplier`, `--supplier-url`, `--licence`, `--sbom-creator`, `--report`, `--report-content`, `--include`, `--exclude`, `--map-dir`, `--manifest`, `--strict`, `--spdx-version`, and `--no-composition-evidence`.
+An option you leave off the command line does not override the file, even though that option has a default. `dxcomply --ci --config-name=Debug` uses Debug even when the file says `"configName": "Release"`. `dxcomply --ci` with no `--config-name` uses the file's `configName`, or `Release` when the key is absent. The same rule applies to `--platform`, `--format`, `--output`, `--product`, `--version`, `--supplier`, `--supplier-url`, `--licence`, `--sbom-creator`, `--report`, `--report-content`, `--report-group-by-folder`, `--include`, `--exclude`, `--map-dir`, `--manifest`, `--strict`, `--spdx-version`, and `--no-composition-evidence`.
 
 If you pass `--include` or `--exclude`, that list replaces the file's list. `--report` overrides the file's enabled flag and format, and leaves the file's report output path as it is. `--report-content` overrides `report.content` only.
 

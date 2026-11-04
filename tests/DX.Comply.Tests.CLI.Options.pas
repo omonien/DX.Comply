@@ -135,6 +135,9 @@ type
     /// <summary>The report.content key loads from .dxcomply.json, and the CLI wins. Issue #126.</summary>
     [Test]
     procedure Config_ReportContent_LoadsAndMerges;
+    /// <summary>--report-group-by-folder and report.groupByFolder. Issue #132.</summary>
+    [Test]
+    procedure ReportGroupByFolder_ParseAndConfig;
 
     /// <summary>Defaults are not treated as explicit overrides.</summary>
     [Test]
@@ -829,6 +832,56 @@ begin
     Assert.IsTrue(Pos('--report-content', LOptions.ParseError) > 0);
   finally
     LOptions.Free;
+  end;
+end;
+
+procedure TCliOptionsTests.ReportGroupByFolder_ParseAndConfig;
+begin
+  var LOptions := TCliOptions.Create;
+  try
+    Assert.IsTrue(LOptions.Parse(['--project=App.dproj']));
+    Assert.IsFalse(LOptions.ToSbomConfig.HumanReadableReport.GroupByFolder);
+    Assert.IsFalse(scoReportGroupByFolder in LOptions.ToSbomConfig.ExplicitOverrides);
+  finally
+    LOptions.Free;
+  end;
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsTrue(LOptions.Parse(['--project=App.dproj', '--report-group-by-folder']));
+    Assert.IsTrue(LOptions.ToSbomConfig.HumanReadableReport.GroupByFolder);
+    Assert.IsTrue(scoReportGroupByFolder in LOptions.ToSbomConfig.ExplicitOverrides);
+  finally
+    LOptions.Free;
+  end;
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsFalse(LOptions.Parse(['--project=App.dproj', '--report-group-by-folder=maybe']));
+    Assert.IsTrue(Pos('--report-group-by-folder', LOptions.ParseError) > 0);
+  finally
+    LOptions.Free;
+  end;
+
+  var LPath := TPath.Combine(TPath.GetTempPath, 'dxcomply-group-by-folder-test.json');
+  TFile.WriteAllText(LPath, '{"report":{"enabled":true,"groupByFolder":true}}', TEncoding.UTF8);
+  var LGen: TDxComplyGenerator := nil;
+  LOptions := TCliOptions.Create;
+  try
+    LGen := TDxComplyGenerator.Create;
+    Assert.IsTrue(LGen.LoadConfig(LPath).HumanReadableReport.GroupByFolder);
+    FreeAndNil(LGen);
+
+    Assert.IsTrue(LOptions.Parse(['--project=App.dproj', '--report-group-by-folder=false']));
+    LGen := TDxComplyGenerator.Create(LOptions.ToSbomConfig);
+    LGen.GenerateFromConfig('missing.dproj', LPath);
+    Assert.IsFalse(LGen.Config.HumanReadableReport.GroupByFolder,
+      '--report-group-by-folder overrides the file');
+  finally
+    LGen.Free;
+    LOptions.Free;
+    if TFile.Exists(LPath) then
+    begin
+      TFile.Delete(LPath);
+    end;
   end;
 end;
 

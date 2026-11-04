@@ -202,7 +202,7 @@ end;
 procedure THtmlReportWriter.AddOverview(Lines: TStrings; const AData: TComplianceReportData;
   const AConfig: THumanReadableReportConfig);
 begin
-  var LOverview := BuildReportOverview(AData);
+  var LOverview := BuildReportOverview(AData, AConfig.GroupByFolder);
 
   // Issue #113: where the components come from.
   Lines.Add('<section id="' + cAnchorOrigins + '"><h2>Origin summary</h2><div class="table-wrap"><table>');

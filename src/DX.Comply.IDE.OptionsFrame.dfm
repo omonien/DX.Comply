@@ -426,9 +426,24 @@
           TabOrder = 14
           WordWrap = True
         end
+        object FReportGroupByFolderCheckBox: TCheckBox
+          Left = 12
+          Top = 556
+          Width = 620
+          Height = 36
+          Align = alTop
+          AlignWithMargins = True
+          Caption = 'Group third-party units without manifest by source folder'
+          Margins.Left = 12
+          Margins.Top = 4
+          Margins.Right = 12
+          Margins.Bottom = 0
+          TabOrder = 15
+          WordWrap = True
+        end
         object FAboutRowPanel: TPanel
           Left = 12
-          Top = 552
+          Top = 596
           Width = 620
           Height = 44
           Align = alTop
@@ -436,7 +451,7 @@
           BevelOuter = bvNone
           Caption = ''
           ParentBackground = True
-          TabOrder = 15
+          TabOrder = 16
           Margins.Left = 12
           Margins.Top = 8
           Margins.Right = 12
