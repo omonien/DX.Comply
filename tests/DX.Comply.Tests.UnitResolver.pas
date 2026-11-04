@@ -144,6 +144,12 @@ type
     /// </summary>
     [Test]
     procedure Resolve_LibraryInDelphiExtrasFolder_ClassifiesAsThirdParty;
+    /// <summary>A project search path inside the Delphi folder is not project code. Issue #133.</summary>
+    [Test]
+    procedure Resolve_ProjectSearchPathBelowDelphiRoot_ClassifiesAsThirdParty;
+    /// <summary>A DCU in the DCU output folder takes the origin of its source. Issue #133.</summary>
+    [Test]
+    procedure Resolve_DcuInOutputDir_UsesOriginOfSource;
   end;
 
 implementation
@@ -920,6 +926,122 @@ begin
   finally
     if TDirectory.Exists(LTempRoot) then
       TDirectory.Delete(LTempRoot, True);
+  end;
+end;
+
+procedure TUnitResolverTests.Resolve_ProjectSearchPathBelowDelphiRoot_ClassifiesAsThirdParty;
+var
+  LBuildEvidence: TBuildEvidence;
+  LCompositionEvidence: TCompositionEvidence;
+  LEvidenceItem: TBuildEvidenceItem;
+  LLibDir: string;
+  LProjectInfo: TProjectInfo;
+  LTempDir: string;
+begin
+  LTempDir := TPath.Combine(TPath.GetTempPath, TPath.GetRandomFileName);
+  LLibDir := TPath.Combine(LTempDir, 'Delphi\Extras\CpDrv');
+  TDirectory.CreateDirectory(LLibDir);
+  TDirectory.CreateDirectory(TPath.Combine(LTempDir, 'Project'));
+  try
+    TFile.WriteAllText(TPath.Combine(LLibDir, 'CPDrv.pas'),
+      'unit CPDrv;' + sLineBreak + 'interface' + sLineBreak +
+      'implementation' + sLineBreak + 'end.');
+
+    LProjectInfo := TProjectInfo.Create;
+    LBuildEvidence := TBuildEvidence.Create;
+    try
+      LProjectInfo.ProjectDir := TPath.Combine(LTempDir, 'Project');
+      LProjectInfo.Toolchain.ProductName := 'Embarcadero Delphi';
+      LProjectInfo.Toolchain.RootDir := TPath.Combine(LTempDir, 'Delphi');
+      LProjectInfo.Toolchain.Version := '37.0';
+      LProjectInfo.ProjectSearchPaths.Add(LLibDir);
+      LBuildEvidence.SearchPaths.Add(LLibDir);
+
+      LEvidenceItem := Default(TBuildEvidenceItem);
+      LEvidenceItem.SourceKind := besMapFile;
+      LEvidenceItem.FilePath := TPath.Combine(LTempDir, 'Demo.map');
+      LEvidenceItem.UnitName := 'CPDrv';
+      LBuildEvidence.EvidenceItems.Add(LEvidenceItem);
+
+      LCompositionEvidence := FResolver.Resolve(LProjectInfo, LBuildEvidence);
+      try
+        Assert.AreEqual(NativeInt(1), NativeInt(LCompositionEvidence.Units.Count));
+        Assert.AreEqual(uokThirdParty, LCompositionEvidence.Units[0].OriginKind,
+          'A project search path inside the Delphi folder must not make a unit Local project');
+      finally
+        LCompositionEvidence.Free;
+      end;
+    finally
+      LBuildEvidence.Free;
+      LProjectInfo.Free;
+    end;
+  finally
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+procedure TUnitResolverTests.Resolve_DcuInOutputDir_UsesOriginOfSource;
+var
+  LBuildEvidence: TBuildEvidence;
+  LCompositionEvidence: TCompositionEvidence;
+  LDcuDir: string;
+  LEvidenceItem: TBuildEvidenceItem;
+  LLibDir: string;
+  LProjectDir: string;
+  LProjectInfo: TProjectInfo;
+  LTempDir: string;
+begin
+  LTempDir := TPath.Combine(TPath.GetTempPath, TPath.GetRandomFileName);
+  LProjectDir := TPath.Combine(LTempDir, 'Project');
+  LDcuDir := TPath.Combine(LProjectDir, 'Win32\Release');
+  LLibDir := TPath.Combine(LTempDir, 'Libs\DEC\Source');
+  TDirectory.CreateDirectory(LDcuDir);
+  TDirectory.CreateDirectory(LLibDir);
+  try
+    TFile.WriteAllBytes(TPath.Combine(LDcuDir, 'DECCipherBase.dcu'), TBytes.Create($01, $02));
+    TFile.WriteAllBytes(TPath.Combine(LDcuDir, 'Main.dcu'), TBytes.Create($01, $02));
+    TFile.WriteAllText(TPath.Combine(LLibDir, 'DECCipherBase.pas'),
+      'unit DECCipherBase;' + sLineBreak + 'interface' + sLineBreak +
+      'implementation' + sLineBreak + 'end.');
+
+    LProjectInfo := TProjectInfo.Create;
+    LBuildEvidence := TBuildEvidence.Create;
+    try
+      LProjectInfo.ProjectDir := LProjectDir;
+      LBuildEvidence.Paths.DcuOutputDir := LDcuDir;
+      LBuildEvidence.SearchPaths.Add(LLibDir);
+
+      LEvidenceItem := Default(TBuildEvidenceItem);
+      LEvidenceItem.SourceKind := besMapFile;
+      LEvidenceItem.FilePath := TPath.Combine(LProjectDir, 'Demo.map');
+      LEvidenceItem.UnitName := 'DECCipherBase';
+      LBuildEvidence.EvidenceItems.Add(LEvidenceItem);
+      LEvidenceItem.UnitName := 'Main';
+      LBuildEvidence.EvidenceItems.Add(LEvidenceItem);
+
+      LCompositionEvidence := FResolver.Resolve(LProjectInfo, LBuildEvidence);
+      try
+        Assert.AreEqual(NativeInt(2), NativeInt(LCompositionEvidence.Units.Count));
+        for var LUnit in LCompositionEvidence.Units do
+        begin
+          if SameText(LUnit.UnitName, 'DECCipherBase') then
+            Assert.AreEqual(uokThirdParty, LUnit.OriginKind,
+              'A DCU compiled from a third-party source stays Third party')
+          else
+            Assert.AreEqual(uokLocalProject, LUnit.OriginKind,
+              'A DCU without a source outside the output folder stays Local project');
+        end;
+      finally
+        LCompositionEvidence.Free;
+      end;
+    finally
+      LBuildEvidence.Free;
+      LProjectInfo.Free;
+    end;
+  finally
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir, True);
   end;
 end;
 
