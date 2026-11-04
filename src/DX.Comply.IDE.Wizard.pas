@@ -229,6 +229,7 @@ procedure Register;
 implementation
 
 uses
+  System.JSON,
   DX.Comply.ComponentManifest,
   DX.Comply.IDE.AboutDialog,
   DX.Comply.IDE.BuildConfirmationDialog,
@@ -239,6 +240,32 @@ uses
   DX.Comply.IDE.Resources,
   DX.Comply.IDE.SbomHeaderDialog,
   DX.Comply.SbomHeaderConfig;
+
+/// <summary>
+/// Reads report.groupByFolder from a .dxcomply.json (issue #132). False when
+/// the file or the key is missing or the file cannot be read.
+/// </summary>
+function ReadReportGroupByFolder(const AConfigPath: string): Boolean;
+begin
+  Result := False;
+  if not TFile.Exists(AConfigPath) then
+    Exit;
+  try
+    var LJson := TJSONObject.ParseJSONValue(TFile.ReadAllText(AConfigPath));
+    try
+      if LJson is TJSONObject then
+      begin
+        var LReport := TJSONObject(LJson).GetValue('report');
+        if (LReport is TJSONObject) and (TJSONObject(LReport).GetValue('groupByFolder') <> nil) then
+          Result := TJSONObject(LReport).GetValue<Boolean>('groupByFolder');
+      end;
+    finally
+      LJson.Free;
+    end;
+  except
+    Result := False;
+  end;
+end;
 
 var
   /// <summary>
@@ -730,6 +757,8 @@ begin
       TIDELogger.Warning('DX.Comply: Could not read the SBOM header data from .dxcomply.json: ' +
         LHeaderError + '. The SBOM header uses the project version info only.');
     end;
+    // Issue #132: report.groupByFolder, the same key the CLI reads.
+    LConfig.HumanReadableReport.GroupByFolder := ReadReportGroupByFolder(LConfigPath);
     if not TryPrepareDeepEvidenceBuild(LProjectPath, LSettings, LConfig, AForceDeepEvidence) then
       Exit;
 
