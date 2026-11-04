@@ -188,6 +188,8 @@ begin
     Result.HumanReadableReport.IncludeBuildEvidence := LIniFile.ReadBool(cSettingsSection, 'ReportIncludeBuildEvidence', Result.HumanReadableReport.IncludeBuildEvidence);
     // Issue #126: all, overview or units. An unknown value keeps all.
     TryParseReportContent(LIniFile.ReadString(cSettingsSection, 'ReportContent', 'all'), Result.HumanReadableReport.Content);
+    // Issue #132: group third-party units without manifest by folder.
+    Result.HumanReadableReport.GroupByFolder := LIniFile.ReadBool(cSettingsSection, 'ReportGroupByFolder', Result.HumanReadableReport.GroupByFolder);
   finally
     LIniFile.Free;
   end;
@@ -222,6 +224,7 @@ begin
     LIniFile.WriteBool(cSettingsSection, 'ReportIncludeCompositionEvidence', ASettings.HumanReadableReport.IncludeCompositionEvidence);
     LIniFile.WriteBool(cSettingsSection, 'ReportIncludeBuildEvidence', ASettings.HumanReadableReport.IncludeBuildEvidence);
     LIniFile.WriteString(cSettingsSection, 'ReportContent', ReportContentToString(ASettings.HumanReadableReport.Content));
+    LIniFile.WriteBool(cSettingsSection, 'ReportGroupByFolder', ASettings.HumanReadableReport.GroupByFolder);
     LIniFile.UpdateFile;
   finally
     LIniFile.Free;

@@ -242,12 +242,13 @@ uses
   DX.Comply.SbomHeaderConfig;
 
 /// <summary>
-/// Reads report.groupByFolder from a .dxcomply.json (issue #132). False when
-/// the file or the key is missing or the file cannot be read.
+/// Reads report.groupByFolder from a .dxcomply.json (issue #132). Returns
+/// ADefault, the IDE setting, when the file or the key is missing or the
+/// file cannot be read. The project file wins, as it does for the CLI.
 /// </summary>
-function ReadReportGroupByFolder(const AConfigPath: string): Boolean;
+function ReadReportGroupByFolder(const AConfigPath: string; ADefault: Boolean): Boolean;
 begin
-  Result := False;
+  Result := ADefault;
   if not TFile.Exists(AConfigPath) then
     Exit;
   try
@@ -263,7 +264,7 @@ begin
       LJson.Free;
     end;
   except
-    Result := False;
+    Result := ADefault;
   end;
 end;
 
@@ -758,7 +759,8 @@ begin
         LHeaderError + '. The SBOM header uses the project version info only.');
     end;
     // Issue #132: report.groupByFolder, the same key the CLI reads.
-    LConfig.HumanReadableReport.GroupByFolder := ReadReportGroupByFolder(LConfigPath);
+    LConfig.HumanReadableReport.GroupByFolder := ReadReportGroupByFolder(LConfigPath,
+      LConfig.HumanReadableReport.GroupByFolder);
     if not TryPrepareDeepEvidenceBuild(LProjectPath, LSettings, LConfig, AForceDeepEvidence) then
       Exit;
 

@@ -232,7 +232,7 @@ Every value keeps the project data, the structural check, the artefacts with the
 dxcomply --project=MyApp.dproj --report=html --report-content=overview --no-pause
 ```
 
-`--report-group-by-folder` adds the source folder as a second level to the section **Third-party units without manifest**. A prefix used by two libraries in different folders then shows as two groups, for example `Jv (C:\Libs\JVCL\run)` and `Jv (C:\Other\Jv)`. The default groups by unit prefix only. The `.dxcomply.json` key is `report.groupByFolder` (`true` or `false`). The IDE reads the same key from the `.dxcomply.json` next to the project.
+`--report-group-by-folder` adds the source folder as a second level to the section **Third-party units without manifest**. A prefix used by two libraries in different folders then shows as two groups, for example `Jv (C:\Libs\JVCL\run)` and `Jv (C:\Other\Jv)`. The default groups by unit prefix only. The `.dxcomply.json` key is `report.groupByFolder` (`true` or `false`). In the IDE, the setting is **Group third-party units without manifest by source folder** under **Tools > Options > Third Party > DX.Comply**. A `report.groupByFolder` key in the `.dxcomply.json` next to the project overrides it.
 
 After it writes a file, DX.Comply runs its own structural check of required fields and value shapes. That check is not a validation against an official schema.
 
