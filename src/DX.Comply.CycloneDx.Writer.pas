@@ -47,8 +47,12 @@ type
     function GenerateUuid: string;
     function BuildMetadata(const AMetadata: TSbomMetadata; const AProjectInfo: TProjectInfo): TJSONObject;
     function BuildProperties(const AProperties: TArray<TSbomProperty>): TJSONArray;
+    /// <summary>
+    /// Builds one component. ALicence is written as licenses when it is not
+    /// empty. Only the built program gets the product licence.
+    /// </summary>
     function BuildComponent(const AArtefact: TArtefactInfo; const AIndex: Integer;
-      AUnresolvedSource: Boolean): TJSONObject;
+      AUnresolvedSource: Boolean; const ALicence: string): TJSONObject;
     function BuildDependencies(const AArtefacts: TArtefactList; const AProjectBomRef: string): TJSONArray;
   public
     // ISbomWriter
@@ -204,7 +208,7 @@ begin
 end;
 
 function TCycloneDxJsonWriter.BuildComponent(const AArtefact: TArtefactInfo;
-  const AIndex: Integer; AUnresolvedSource: Boolean): TJSONObject;
+  const AIndex: Integer; AUnresolvedSource: Boolean; const ALicence: string): TJSONObject;
 var
   LComponent, LHashes, LRef, LRefHash: TJSONObject;
   LHashArray, LProperties, LRefs, LRefHashes: TJSONArray;
@@ -276,6 +280,10 @@ begin
 
     LComponent.AddPair('hashes', LHashArray);
   end;
+
+  // The built program is the product, so it carries the product licence,
+  // as the SPDX writer does (issue #131). Empty writes nothing.
+  AddCycloneDxLicences(LComponent, ALicence, '');
 
   // TR-03183-2 maps the deployable SHA-512 to externalReferences type
   // distribution. bom-1.6 requires a url, and no download URL is known, so
@@ -432,6 +440,7 @@ var
   LOutput: TStringList;
   LGraph: TUsesDependencyGraph;
   I: Integer;
+  LRootIndex: Integer;
 begin
   Result := False;
   if AOutputPath = '' then
@@ -463,9 +472,14 @@ begin
 
     // Components
     LComponents := TJSONArray.Create;
+    LRootIndex := FindDeliverableTargetIndex(AArtefacts, AProjectInfo.ProjectName);
     for I := 0 to AArtefacts.Count - 1 do
-      LComponents.Add(BuildComponent(AArtefacts[I], I,
-        LGraph.Status[I] = uusMissingSource));
+      if I = LRootIndex then
+        LComponents.Add(BuildComponent(AArtefacts[I], I,
+          LGraph.Status[I] = uusMissingSource, AMetadata.Licence))
+      else
+        LComponents.Add(BuildComponent(AArtefacts[I], I,
+          LGraph.Status[I] = uusMissingSource, ''));
     LRoot.AddPair('components', LComponents);
 
     // Dependencies. A component manifest groups matched units under one

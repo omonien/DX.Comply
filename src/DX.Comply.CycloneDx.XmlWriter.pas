@@ -58,10 +58,14 @@ type
     procedure AddElement(const ATag, AValue: string);
     procedure AddPropertyElements(const AProperties: TArray<TSbomProperty>);
     procedure BuildMetadata(const AMetadata: TSbomMetadata; const AProjectInfo: TProjectInfo);
+    /// <summary>
+    /// Writes one component. ALicence is written as licenses when it is not
+    /// empty. Only the built program gets the product licence.
+    /// </summary>
     procedure BuildComponent(const AArtefact: TArtefactInfo; const AIndex: Integer;
-      AUnresolvedSource: Boolean);
+      AUnresolvedSource: Boolean; const ALicence: string);
     procedure BuildComponents(const AArtefacts: TArtefactList; const AMetadata: TSbomMetadata;
-      const AGraph: TUsesDependencyGraph);
+      const AGraph: TUsesDependencyGraph; const AProjectName: string);
     procedure BuildDependencies(const AArtefacts: TArtefactList; const AProjectBomRef: string;
       const AGraph: TUsesDependencyGraph);
   public
@@ -236,7 +240,7 @@ begin
 end;
 
 procedure TCycloneDxXmlWriter.BuildComponent(const AArtefact: TArtefactInfo;
-  const AIndex: Integer; AUnresolvedSource: Boolean);
+  const AIndex: Integer; AUnresolvedSource: Boolean; const ALicence: string);
 var
   LComponentType: string;
   LBomRef: string;
@@ -274,6 +278,10 @@ begin
       AddLine('<hash alg="SHA-512">' + LowerCase(AArtefact.HashSha512) + '</hash>');
     CloseTag('hashes');
   end;
+
+  // bom-1.6 places licenses after hashes. The built program is the product
+  // and carries the product licence (issue #131). Empty writes nothing.
+  AppendCycloneDxLicencesXml(FLines, ALicence, '', FIndentLevel);
 
   // A file has no package URL of its own, so no purl element is written.
 
@@ -375,13 +383,20 @@ begin
 end;
 
 procedure TCycloneDxXmlWriter.BuildComponents(const AArtefacts: TArtefactList;
-  const AMetadata: TSbomMetadata; const AGraph: TUsesDependencyGraph);
+  const AMetadata: TSbomMetadata; const AGraph: TUsesDependencyGraph;
+  const AProjectName: string);
 var
   I: Integer;
+  LRootIndex: Integer;
 begin
   OpenTag('components');
+  LRootIndex := FindDeliverableTargetIndex(AArtefacts, AProjectName);
   for I := 0 to AArtefacts.Count - 1 do
-    BuildComponent(AArtefacts[I], I, AGraph.Status[I] = uusMissingSource);
+    if I = LRootIndex then
+      BuildComponent(AArtefacts[I], I, AGraph.Status[I] = uusMissingSource,
+        AMetadata.Licence)
+    else
+      BuildComponent(AArtefacts[I], I, AGraph.Status[I] = uusMissingSource, '');
   // Library rows from a component manifest. Element order is owned by
   // DX.Comply.ComponentManifest so this writer stays a thin hook.
   if AMetadata.ComponentManifestJson <> '' then
@@ -460,7 +475,7 @@ begin
 
     LGraph := BuildUsesDependencyGraph(AArtefacts);
     BuildMetadata(AMetadata, AProjectInfo);
-    BuildComponents(AArtefacts, AMetadata, LGraph);
+    BuildComponents(AArtefacts, AMetadata, LGraph, AProjectInfo.ProjectName);
     if AMetadata.ComponentManifestJson <> '' then
       AppendManifestDependenciesXml(FLines, AMetadata.ComponentManifestJson,
         AArtefacts, AProjectInfo.ProjectName, FIndentLevel, LGraph)
