@@ -100,11 +100,11 @@ Every unit found in the MAP file is classified by origin:
 
 | Origin | Heuristic |
 |--------|-----------|
-| Embarcadero RTL | Resolved path under Delphi root, or namespace `System.*`, `Winapi.*`, `Data.*`, etc. |
+| Embarcadero RTL | Resolved path in a folder Embarcadero ships below the Delphi root (`source`, `lib`, `include`, `bin`, `bin64`, `imports`, `ObjRepos`, `Redist`), or namespace `System.*`, `Winapi.*`, `Data.*`, etc. for an unresolved unit |
 | Embarcadero VCL | Namespace `Vcl.*` or resolved under `\source\vcl\` |
 | Embarcadero FMX | Namespace `Fmx.*` or resolved under `\source\fmx\` |
 | Local project | Resolved path under project directory, or no known Embarcadero namespace |
-| Third party | Resolved path outside both project and Delphi root |
+| Third party | Resolved path outside the project and outside the Embarcadero folders, including other folders below the Delphi root such as `Extras` |
 
 ## SBOM output structure
 
