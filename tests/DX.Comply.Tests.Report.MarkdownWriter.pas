@@ -293,8 +293,8 @@ begin
   Assert.IsTrue(Pos('| [Third party](#third-party-units-without-manifest) | 1 |', LContent) > 0);
   Assert.IsTrue(Pos('| **Total SBOM components** | **2** |', LContent) > 0);
   Assert.IsTrue(Pos('## Licences', LContent) > 0);
-  Assert.IsTrue(Pos('| Proprietary | 1 | Demo (product) |', LContent) > 0);
-  Assert.IsTrue(Pos('| No licence information | 2 |', LContent) > 0);
+  Assert.IsTrue(Pos('| Proprietary | 2 | Demo (product), ', LContent) > 0);
+  Assert.IsTrue(Pos('| No licence information | 1 |', LContent) > 0);
   Assert.IsTrue(Pos('## Third-party units without manifest', LContent) > 0);
   Assert.IsTrue(Pos('| Jv | 1 | supplier, version, licence | JvComponent |', LContent) > 0);
   Assert.IsTrue(Pos('## Origin summary', LContent) < Pos('## Artefacts', LContent),

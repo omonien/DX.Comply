@@ -119,6 +119,8 @@ type
     /// </summary>
     [Test]
     procedure Write_RootLicence_BetweenVersionAndProperties;
+    [Test]
+    procedure Write_ProductLicence_OnBuiltProgramOnly;
 
     /// <summary>Component hashes must precede purl.</summary>
     [Test]
@@ -434,6 +436,33 @@ begin
   LContent := LoadOutputContent;
   Assert.AreEqual(0, Pos('<licenses>', LContent),
     'An empty licence writes no licenses element');
+end;
+
+procedure TCycloneDxXmlWriterTests.Write_ProductLicence_OnBuiltProgramOnly;
+var
+  LContent, LComponents, LFirst, LSecond: string;
+  LStart, LSplit: Integer;
+begin
+  FMetadata.Licence := 'MIT';
+  FArtefacts.Add(MakeArtefact('TestProject.exe', 'application', 'abcd1234ef', 1024));
+  FArtefacts.Add(MakeArtefact('vendor.dll', 'library', 'abcd1234ef', 1024));
+  Assert.IsTrue(FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LContent := LoadOutputContent;
+  LStart := Pos('<components>', LContent);
+  Assert.IsTrue(LStart > 0, 'The document must contain components');
+  LComponents := Copy(LContent, LStart, MaxInt);
+  LSplit := Pos('</component>', LComponents);
+  LFirst := Copy(LComponents, 1, LSplit);
+  LSecond := Copy(LComponents, LSplit + 1, Pos('</component>',
+    Copy(LComponents, LSplit + 1, MaxInt)));
+  Assert.IsTrue(Pos('TestProject.exe', LFirst) > 0);
+  Assert.IsTrue(Pos('<licenses>', LFirst) > Pos('<hashes>', LFirst),
+    'The built program carries the licence after its hashes');
+  Assert.IsTrue(Pos('vendor.dll', LSecond) > 0);
+  Assert.AreEqual(0, Pos('<licenses>', LSecond),
+    'Other files must not get the product licence');
+  Assert.AreEqual(0, Integer(Length(CycloneDxXmlSequenceErrors(LContent))),
+    'The component licence must keep the CycloneDX 1.6 element order');
 end;
 
 procedure TCycloneDxXmlWriterTests.Write_ComponentElementOrder_HashesBeforePurl;

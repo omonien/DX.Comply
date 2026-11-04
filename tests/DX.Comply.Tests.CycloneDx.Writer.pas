@@ -206,6 +206,8 @@ type
     /// </summary>
     [Test]
     procedure Write_RootLicence_OnMetadataComponent;
+    [Test]
+    procedure Write_ProductLicence_OnBuiltProgramOnly;
   end;
 
 implementation
@@ -1060,6 +1062,33 @@ begin
     LTool := LComponents.Items[0] as TJSONObject;
     Assert.AreEqual('9.9.9-meta', LTool.GetValue<string>('version'),
       'An explicit metadata tool version must be written unchanged');
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TCycloneDxWriterTests.Write_ProductLicence_OnBuiltProgramOnly;
+var
+  LJson, LComponent: TJSONObject;
+  LComponents: TJSONArray;
+begin
+  FMetadata.Licence := 'LicenseRef-Proprietary';
+  FArtefacts.Add(MakeArtefact('TestApp.exe', 'application', 'abcd1234ef', 1024));
+  FArtefacts.Add(MakeArtefact('vendor.dll', 'library', 'abcd1234ef', 1024));
+  Assert.IsTrue(FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LJson := LoadOutputJson;
+  Assert.IsNotNull(LJson);
+  try
+    LComponents := LJson.GetValue('components') as TJSONArray;
+    Assert.IsNotNull(LComponents, 'components must be present');
+    LComponent := LComponents.Items[0] as TJSONObject;
+    Assert.AreEqual('TestApp.exe', LComponent.GetValue<string>('name'));
+    Assert.IsNotNull(LComponent.GetValue('licenses'),
+      'The built program must carry the product licence');
+    Assert.IsTrue(Pos('LicenseRef-Proprietary', LComponent.ToJSON) > 0);
+    LComponent := LComponents.Items[1] as TJSONObject;
+    Assert.IsNull(LComponent.GetValue('licenses'),
+      'Other files must not get the product licence');
   finally
     LJson.Free;
   end;
