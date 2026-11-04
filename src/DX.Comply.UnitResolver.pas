@@ -82,6 +82,12 @@ type
     /// </summary>
     function IsEmbarcaderoShippedPath(const APath, ARootDir: string): Boolean;
     /// <summary>
+    /// Finds AUnitName.pas in a build search path that is not an output
+    /// folder. Used to classify a DCU found in the DCU output folder.
+    /// </summary>
+    function FindSourceOutsideOutputDirs(const ABuildEvidence: TBuildEvidence;
+      const AUnitName: string; out ASourcePath: string): Boolean;
+    /// <summary>
     /// Resolves a unit by searching build output, project and global paths.
     /// Shared resolution logic used by both MAP-derived and uses-clause-derived evidence.
     /// </summary>
@@ -275,10 +281,14 @@ begin
   // Units resolved from a path that is explicitly listed in the project's own
   // search paths belong to the project even when they live outside the project
   // directory (e.g. sibling directories such as ..\SharedUnits\).  Issue #22.
+  // A search path inside the Delphi installation is a shared library folder,
+  // not project code (issue #133).
   if Assigned(AProjectInfo.ProjectSearchPaths) then
     for LSearchPath in AProjectInfo.ProjectSearchPaths do
       if (Trim(LSearchPath) <> '') and
-         IsPathUnderDirectory(AResolvedPath, LSearchPath) then
+         IsPathUnderDirectory(AResolvedPath, LSearchPath) and
+         not ((Trim(AProjectInfo.Toolchain.RootDir) <> '') and
+              IsPathUnderDirectory(LSearchPath, AProjectInfo.Toolchain.RootDir)) then
         Exit(uokLocalProject);
 
   // Only the folders Embarcadero ships count as Embarcadero. A library that
@@ -469,6 +479,32 @@ begin
   end;
 end;
 
+function TUnitResolver.FindSourceOutsideOutputDirs(const ABuildEvidence: TBuildEvidence;
+  const AUnitName: string; out ASourcePath: string): Boolean;
+var
+  LCandidate: string;
+  LSearchPath: string;
+begin
+  Result := False;
+  ASourcePath := '';
+  for LSearchPath in ABuildEvidence.SearchPaths do
+  begin
+    if Trim(LSearchPath) = '' then
+      Continue;
+    if IsPathUnderDirectory(LSearchPath, ABuildEvidence.Paths.OutputDir) or
+       IsPathUnderDirectory(LSearchPath, ABuildEvidence.Paths.DcuOutputDir) or
+       IsPathUnderDirectory(LSearchPath, ABuildEvidence.Paths.DcpOutputDir) or
+       IsPathUnderDirectory(LSearchPath, ABuildEvidence.Paths.BplOutputDir) then
+      Continue;
+    LCandidate := TPath.Combine(LSearchPath, AUnitName + '.pas');
+    if TFile.Exists(LCandidate) then
+    begin
+      ASourcePath := TPath.GetFullPath(LCandidate);
+      Exit(True);
+    end;
+  end;
+end;
+
 function TUnitResolver.ResolveUnitBySearchPaths(const AProjectInfo: TProjectInfo;
   const ABuildEvidence: TBuildEvidence; const AUnitName: string;
   AEvidenceSource: TBuildEvidenceSourceKind): TResolvedUnitInfo;
@@ -477,6 +513,7 @@ var
   LDirectSearchPaths: TList<string>;
   LExplicitReference: TProjectUnitReference;
   LResolvedPath: string;
+  LSourcePath: string;
   LUsedFallbackName: Boolean;
 begin
   Result := Default(TResolvedUnitInfo);
@@ -524,7 +561,15 @@ begin
          IsPathUnderDirectory(Result.ResolvedPath, ABuildEvidence.Paths.DcuOutputDir) or
          IsPathUnderDirectory(Result.ResolvedPath, ABuildEvidence.Paths.DcpOutputDir) or
          IsPathUnderDirectory(Result.ResolvedPath, ABuildEvidence.Paths.BplOutputDir) then
+      begin
+        // A DCU in the output folder was compiled from a source somewhere in
+        // the search path. That source decides the origin, so a third-party
+        // unit compiled into the project's DCU folder stays third party
+        // (issue #133). Without a source the unit counts as project code.
         Result.OriginKind := uokLocalProject;
+        if FindSourceOutsideOutputDirs(ABuildEvidence, AUnitName, LSourcePath) then
+          Result.OriginKind := DetermineOriginKind(AProjectInfo, AUnitName, LSourcePath);
+      end;
       if LUsedFallbackName then
         Result.Confidence := rcHeuristic
       else

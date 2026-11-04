@@ -103,7 +103,7 @@ Every unit found in the MAP file is classified by origin:
 | Embarcadero RTL | Resolved path in a folder Embarcadero ships below the Delphi root (`source`, `lib`, `include`, `bin`, `bin64`, `imports`, `ObjRepos`, `Redist`), or namespace `System.*`, `Winapi.*`, `Data.*`, etc. for an unresolved unit |
 | Embarcadero VCL | Namespace `Vcl.*` or resolved under `\source\vcl\` |
 | Embarcadero FMX | Namespace `Fmx.*` or resolved under `\source\fmx\` |
-| Local project | Resolved path under project directory, or no known Embarcadero namespace |
+| Local project | Resolved path under the project directory or under a project search path outside the Delphi folder, a DCU in the output folder without a source elsewhere in the search path, or no known Embarcadero namespace. A DCU in the output folder takes the origin of its `.pas` when that source is found in the search path |
 | Third party | Resolved path outside the project and outside the Embarcadero folders, including other folders below the Delphi root such as `Extras` |
 
 ## SBOM output structure
