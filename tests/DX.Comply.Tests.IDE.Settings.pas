@@ -66,6 +66,7 @@ begin
   Assert.AreEqual(0, LSettings.DelphiVersionOverride);
   Assert.IsTrue(LSettings.HumanReadableReport.Enabled);
   Assert.AreEqual(NativeInt(Ord(hrfBoth)), NativeInt(Ord(LSettings.HumanReadableReport.Format)));
+  Assert.IsFalse(LSettings.HumanReadableReport.GroupByFolder);
 end;
 
 procedure TIDESettingsTests.LoadFromMissingFile_ReturnsDefaults;
@@ -117,6 +118,7 @@ begin
     LSettings.HumanReadableReport.IncludeWarnings := False;
     LSettings.HumanReadableReport.IncludeCompositionEvidence := False;
     LSettings.HumanReadableReport.IncludeBuildEvidence := False;
+    LSettings.HumanReadableReport.GroupByFolder := True;
     LSettings.HumanReadableReport.Content := hrcUnits;
 
     TDXComplyIDESettingsStore.SaveToFile(LFilePath, LSettings);
@@ -138,6 +140,7 @@ begin
     Assert.IsFalse(LLoadedSettings.HumanReadableReport.IncludeWarnings);
     Assert.IsFalse(LLoadedSettings.HumanReadableReport.IncludeCompositionEvidence);
     Assert.IsFalse(LLoadedSettings.HumanReadableReport.IncludeBuildEvidence);
+    Assert.IsTrue(LLoadedSettings.HumanReadableReport.GroupByFolder);
     Assert.AreEqual(NativeInt(Ord(hrcUnits)), NativeInt(Ord(LLoadedSettings.HumanReadableReport.Content)));
   finally
     if TFile.Exists(LFilePath) then

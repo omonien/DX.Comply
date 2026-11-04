@@ -66,6 +66,7 @@ type
     FReportIncludeWarningsCheckBox: TCheckBox;
     FReportIncludeCompositionCheckBox: TCheckBox;
     FReportIncludeBuildEvidenceCheckBox: TCheckBox;
+    FReportGroupByFolderCheckBox: TCheckBox;
     FAboutRowPanel: TPanel;
     FAboutButton: TButton;
   private
@@ -221,6 +222,7 @@ begin
   FReportIncludeWarningsCheckBox.Checked := ASettings.HumanReadableReport.IncludeWarnings;
   FReportIncludeCompositionCheckBox.Checked := ASettings.HumanReadableReport.IncludeCompositionEvidence;
   FReportIncludeBuildEvidenceCheckBox.Checked := ASettings.HumanReadableReport.IncludeBuildEvidence;
+  FReportGroupByFolderCheckBox.Checked := ASettings.HumanReadableReport.GroupByFolder;
 end;
 
 function TFrameDXComplyOptions.SaveSettings: TDXComplyIDESettings;
@@ -256,6 +258,7 @@ begin
   Result.HumanReadableReport.IncludeWarnings := FReportIncludeWarningsCheckBox.Checked;
   Result.HumanReadableReport.IncludeCompositionEvidence := FReportIncludeCompositionCheckBox.Checked;
   Result.HumanReadableReport.IncludeBuildEvidence := FReportIncludeBuildEvidenceCheckBox.Checked;
+  Result.HumanReadableReport.GroupByFolder := FReportGroupByFolderCheckBox.Checked;
 end;
 
 function TFrameDXComplyOptions.ValidateSettings(out AMessage: string): Boolean;

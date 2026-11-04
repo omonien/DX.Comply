@@ -50,6 +50,11 @@ type
     IncludeCompositionEvidence: Boolean;
     IncludeBuildEvidence: Boolean;
     Content: THumanReadableReportContent;
+    /// <summary>
+    /// Groups third-party units without manifest by unit prefix and source
+    /// folder instead of by prefix only (issue #132). Default False.
+    /// </summary>
+    GroupByFolder: Boolean;
     class function Default: THumanReadableReportConfig; static;
   end;
 
@@ -144,6 +149,7 @@ begin
   Result.IncludeCompositionEvidence := True;
   Result.IncludeBuildEvidence := True;
   Result.Content := hrcAll;
+  Result.GroupByFolder := False;
 end;
 
 end.

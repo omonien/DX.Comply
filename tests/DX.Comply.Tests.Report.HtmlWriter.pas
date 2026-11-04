@@ -350,7 +350,7 @@ begin
   Assert.IsTrue(Pos('<a href="#third-party-units-without-manifest">Third party</a></td><td>1</td>',
     LContent) > 0);
   Assert.IsTrue(Pos('<section id="licences"><h2>Licences</h2>', LContent) > 0);
-  Assert.IsTrue(Pos('<td>Proprietary</td><td>1</td>', LContent) > 0);
+  Assert.IsTrue(Pos('<td>Proprietary</td><td>2</td>', LContent) > 0);
   Assert.IsTrue(Pos('<td>No licence information</td>', LContent) > 0);
   Assert.IsTrue(Pos('<section id="third-party-units-without-manifest">', LContent) > 0);
   Assert.IsTrue(Pos('<td>Jv</td><td>1</td><td>supplier, version, licence</td><td>JvComponent</td>',

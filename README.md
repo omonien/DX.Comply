@@ -232,6 +232,8 @@ Every value keeps the project data, the structural check, the artefacts with the
 dxcomply --project=MyApp.dproj --report=html --report-content=overview --no-pause
 ```
 
+`--report-group-by-folder` adds the source folder as a second level to the section **Third-party units without manifest**. A prefix used by two libraries in different folders then shows as two groups, for example `Jv (C:\Libs\JVCL\run)` and `Jv (C:\Other\Jv)`. The default groups by unit prefix only. The `.dxcomply.json` key is `report.groupByFolder` (`true` or `false`). In the IDE, the setting is **Group third-party units without manifest by source folder** under **Tools > Options > Third Party > DX.Comply**. A `report.groupByFolder` key in the `.dxcomply.json` next to the project overrides it.
+
 After it writes a file, DX.Comply runs its own structural check of required fields and value shapes. That check is not a validation against an official schema.
 
 The checked-in example is [docs/examples/ConwaysLifeFMX.cdx.json](docs/examples/ConwaysLifeFMX.cdx.json), CycloneDX 1.6, from ConwaysLifeFMX in [Embarcadero/RADStudio13Demos](https://github.com/Embarcadero/RADStudio13Demos.git), project `Object Pascal/RTL/Parallel Library/FMX/ConwaysLifeFMX.dproj`, Release/Win32 with a map file. It replaces the earlier AlienInvasion example. New CycloneDX output uses `specVersion` 1.6. The tool's own check is structural. It is not a validation against the official schema. SPDX JSON and CycloneDX XML are not checked against official schemas inside the tool.
@@ -273,7 +275,7 @@ The CLI warnings name the flag and the `.dxcomply.json` key, as listed below. In
 - No SBOM creator email or URL. Pass `--sbom-creator=<email-or-url>` or set `sbomCreator`.
 - No product version, or the version is `0.0.0.0`. Pass `--version=<version>`, set `product.version`, or set the version info in the project options.
 - The version is `1.0.0.0` and it came from the project version info (the Delphi default for a new project). Pass `--version=<version>`, set `product.version`, or update the version info in the project options.
-- No distribution licence. Pass `--licence=<SPDX expression>` or set `product.licence`. An SPDX identifier, an expression, or a name is written on the primary component the same way as a manifest library, and as `licenseDeclared` and `licenseConcluded` on the SPDX package of the built program.
+- No distribution licence. Pass `--licence=<SPDX expression>` or set `product.licence`. An SPDX identifier, an expression, or a name is written on the primary component the same way as a manifest library, and as `licenseDeclared` and `licenseConcluded` on the SPDX package of the built program. The CycloneDX component of the built program (the `.exe`, `.dll` or `.bpl` of the project) carries the same licence, and the licence overview of the reports lists it under the product licence.
 - The built exe, dll, or bpl was not found, so the SBOM has no hash for it. Build the project first, or check the output directory, `--platform`, and `--config-name`.
 - Third-party units without supplier or licence (BSI TR-03183-2 sections 5.2.2 and 6.1). A unit gets both only from a [component manifest](#component-manifest) row. Units without a row are grouped by unit prefix (`Jv` for `JvComponent`, `Spring` for `Spring.Collections`), and a row that lacks `vendor` or `licence` is named on its own. Up to ten groups are listed, then one line counts the rest. Add a manifest row with `vendor` and `licence` to clear the warning.
 
@@ -354,7 +356,8 @@ Add a `.dxcomply.json` to your project folder and pass `--ci` so the CLI loads i
   "report": {
     "enabled": true,
     "format": "both",
-    "content": "all"
+    "content": "all",
+    "groupByFolder": false
   }
 }
 ```
@@ -373,7 +376,7 @@ When `--ci` is set and the file exists, values are merged in this order:
 2. Keys present in `.dxcomply.json`.
 3. Command-line options you actually pass. Those win over the file.
 
-An option you leave off the command line does not override the file, even though that option has a default. `dxcomply --ci --config-name=Debug` uses Debug even when the file says `"configName": "Release"`. `dxcomply --ci` with no `--config-name` uses the file's `configName`, or `Release` when the key is absent. The same rule applies to `--platform`, `--format`, `--output`, `--product`, `--version`, `--supplier`, `--supplier-url`, `--licence`, `--sbom-creator`, `--report`, `--report-content`, `--include`, `--exclude`, `--map-dir`, `--manifest`, `--strict`, `--spdx-version`, and `--no-composition-evidence`.
+An option you leave off the command line does not override the file, even though that option has a default. `dxcomply --ci --config-name=Debug` uses Debug even when the file says `"configName": "Release"`. `dxcomply --ci` with no `--config-name` uses the file's `configName`, or `Release` when the key is absent. The same rule applies to `--platform`, `--format`, `--output`, `--product`, `--version`, `--supplier`, `--supplier-url`, `--licence`, `--sbom-creator`, `--report`, `--report-content`, `--report-group-by-folder`, `--include`, `--exclude`, `--map-dir`, `--manifest`, `--strict`, `--spdx-version`, and `--no-composition-evidence`.
 
 If you pass `--include` or `--exclude`, that list replaces the file's list. `--report` overrides the file's enabled flag and format, and leaves the file's report output path as it is. `--report-content` overrides `report.content` only.
 

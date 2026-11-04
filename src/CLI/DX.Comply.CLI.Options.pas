@@ -68,6 +68,7 @@ type
     FReportEnabled: Boolean;
     FReportFormat: THumanReadableReportFormat;
     FReportContent: THumanReadableReportContent;
+    FReportGroupByFolder: Boolean;
     FExplicitOverrides: TSbomConfigOverrides;
     FScanDirs: TArray<string>;
     FScanTree: Boolean;
@@ -189,6 +190,8 @@ type
     property ReportFormat: THumanReadableReportFormat read FReportFormat;
     /// <summary>Report sections from --report-content (issue #126). Default all.</summary>
     property ReportContent: THumanReadableReportContent read FReportContent;
+    /// <summary>--report-group-by-folder (issue #132). Default False.</summary>
+    property ReportGroupByFolder: Boolean read FReportGroupByFolder;
     /// <summary>Extra binary directories from repeatable --scan-dir.</summary>
     property ScanDirs: TArray<string> read FScanDirs;
     /// <summary>True when --scan-tree was requested. Deprecated.</summary>
@@ -392,6 +395,13 @@ begin
       Continue;
     end;
 
+    if LArg = '--report-group-by-folder' then
+    begin
+      FReportGroupByFolder := True;
+      Include(FExplicitOverrides, scoReportGroupByFolder);
+      Continue;
+    end;
+
     if LArg = '--strict' then
     begin
       FStrictMode := True;
@@ -533,6 +543,16 @@ begin
           Exit(False);
         end;
         Include(FExplicitOverrides, scoReportContent);
+      end
+      else if LKey = 'report-group-by-folder' then
+      begin
+        if not TryParseBool(LValue, FReportGroupByFolder) then
+        begin
+          FParseError := 'Invalid value for --report-group-by-folder: ' + LValue +
+            ' (expected true or false)';
+          Exit(False);
+        end;
+        Include(FExplicitOverrides, scoReportGroupByFolder);
       end
       else if LKey = 'strict' then
       begin
@@ -762,6 +782,10 @@ begin
   Writeln('                                third-party units without manifest.');
   Writeln('                                units: the unit list with SHA-256 hashes.');
   Writeln('                                File key: report.content');
+  Writeln('  --report-group-by-folder[=true|false]');
+  Writeln('                                Group third-party units without manifest');
+  Writeln('                                by unit prefix and source folder.');
+  Writeln('                                File key: report.groupByFolder');
   Writeln('  --ci                          CI mode: use .dxcomply.json config file');
   Writeln('  --strict[=true|false]         Write the SBOM, then exit with code 3 when');
   Writeln('                                any CRA/BSI warning was raised.');
@@ -885,6 +909,9 @@ begin
   // Issue #126: report sections. Does not turn reports on by itself.
   if scoReportContent in FExplicitOverrides then
     Result.HumanReadableReport.Content := FReportContent;
+  // Issue #132: folder grouping. Does not turn reports on by itself.
+  if scoReportGroupByFolder in FExplicitOverrides then
+    Result.HumanReadableReport.GroupByFolder := FReportGroupByFolder;
 end;
 
 end.

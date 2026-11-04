@@ -88,7 +88,8 @@ type
 /// <summary>
 /// Builds the overview model from the report data.
 /// </summary>
-function BuildReportOverview(const AData: TComplianceReportData): TReportOverview;
+function BuildReportOverview(const AData: TComplianceReportData;
+  AGroupByFolder: Boolean = False): TReportOverview;
 
 /// <summary>
 /// Returns a review hint for a licence that usually needs a check before it ships
@@ -308,7 +309,8 @@ begin
   Result := True;
 end;
 
-function BuildReportOverview(const AData: TComplianceReportData): TReportOverview;
+function BuildReportOverview(const AData: TComplianceReportData;
+  AGroupByFolder: Boolean = False): TReportOverview;
 begin
   Result := Default(TReportOverview);
   var LManifest: TComponentManifest;
@@ -369,13 +371,21 @@ begin
 
     if Assigned(AData.Artefacts) then
     begin
+      // The built program is the product, so it is listed under the product
+      // licence, as in the SBOM (issue #131).
+      var LDeliverable := FindDeliverableTargetIndex(AData.Artefacts,
+        AData.ProjectInfo.ProjectName);
       for var i := 0 to AData.Artefacts.Count - 1 do
       begin
         var LArtefact := AData.Artefacts[i];
         var LName := ArtefactDisplayName(LArtefact);
         LOrigins.Add(OriginTitle(LArtefact), LName);
         // Units in a manifest library are covered by the library's licence.
-        if not LGrouped.ContainsKey(i) then
+        if (i = LDeliverable) and (Trim(AData.Metadata.Licence) <> '') then
+        begin
+          LLicences.Add(Trim(AData.Metadata.Licence), LName);
+        end
+        else if not LGrouped.ContainsKey(i) then
         begin
           LLicences.Add(cNoLicenceGroupTitle, LName);
         end;
@@ -399,7 +409,22 @@ begin
           end;
           if LMatchKind = mmNone then
           begin
-            LWithout.Add(ThirdPartyUnitPrefix(ArtefactUnitName(LArtefact)), LName);
+            // Issue #132: optional second level, the source folder, so one
+            // prefix used by two libraries in different folders splits up.
+            var LGroupTitle := ThirdPartyUnitPrefix(ArtefactUnitName(LArtefact));
+            if AGroupByFolder then
+            begin
+              var LFolder := ExtractFileDir(LArtefact.FilePath);
+              if LFolder = '' then
+              begin
+                LFolder := ExtractFileDir(LArtefact.RelativePath);
+              end;
+              if LFolder <> '' then
+              begin
+                LGroupTitle := LGroupTitle + ' (' + LFolder + ')';
+              end;
+            end;
+            LWithout.Add(LGroupTitle, LName);
             Inc(Result.WithoutManifestCount);
           end;
         end;
