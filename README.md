@@ -275,7 +275,7 @@ The CLI warnings name the flag and the `.dxcomply.json` key, as listed below. In
 - No SBOM creator email or URL. Pass `--sbom-creator=<email-or-url>` or set `sbomCreator`.
 - No product version, or the version is `0.0.0.0`. Pass `--version=<version>`, set `product.version`, or set the version info in the project options.
 - The version is `1.0.0.0` and it came from the project version info (the Delphi default for a new project). Pass `--version=<version>`, set `product.version`, or update the version info in the project options.
-- No distribution licence. Pass `--licence=<SPDX expression>` or set `product.licence`. An SPDX identifier, an expression, or a name is written on the primary component the same way as a manifest library, and as `licenseDeclared` and `licenseConcluded` on the SPDX package of the built program.
+- No distribution licence. Pass `--licence=<SPDX expression>` or set `product.licence`. An SPDX identifier, an expression, or a name is written on the primary component the same way as a manifest library, and as `licenseDeclared` and `licenseConcluded` on the SPDX package of the built program. The CycloneDX component of the built program (the `.exe`, `.dll` or `.bpl` of the project) carries the same licence, and the licence overview of the reports lists it under the product licence.
 - The built exe, dll, or bpl was not found, so the SBOM has no hash for it. Build the project first, or check the output directory, `--platform`, and `--config-name`.
 - Third-party units without supplier or licence (BSI TR-03183-2 sections 5.2.2 and 6.1). A unit gets both only from a [component manifest](#component-manifest) row. Units without a row are grouped by unit prefix (`Jv` for `JvComponent`, `Spring` for `Spring.Collections`), and a row that lacks `vendor` or `licence` is named on its own. Up to ten groups are listed, then one line counts the rest. Add a manifest row with `vendor` and `licence` to clear the warning.
 
@@ -409,6 +409,16 @@ There is no required `purl` field. When it is absent, DX.Comply writes `pkg:delp
 
 A file that cannot be read (missing, not JSON, or not an object or array) stops generation. The message names the file and the reason. Missing fields, a short prefix, or an unrecognised licence name are warnings, and the SBOM is still written. A row with match rules that hits no unit is reported as a warning. The root `supplier` is the application publisher. It is used only when `--supplier` and `product.supplier` are both empty. Its URL is copied only when `--supplier-url` and `product.supplierUrl` are also empty.
 
+### Libraries that ship no metadata
+
+Most Delphi libraries ship without an SBOM or a components file. You write the rows for them yourself, in your own components file. That file belongs to your product and is versioned with it.
+
+1. Run DX.Comply once with `--report=html` and open the report. The section **Third-party units without manifest** lists the units without a row, grouped by unit prefix.
+2. Add one row per library to your components file: `name`, `version`, `vendor`, `licence`, and `units_prefix` or `units_exact` for the units in the list. Take the licence and the version from the library's licence file, its readme, or your purchase records.
+3. Run DX.Comply again with `--manifest=<file>` (or the `manifest` key in `.dxcomply.json`). The rows you added leave the list, and the units get supplier and licence in the SBOM. A row that matches no unit is reported as a warning, so a typo in a prefix shows up.
+
+Repeat until the list is empty, or until only units remain whose supplier you cannot name. With `--strict`, a CI build fails while that list is not empty.
+
 
 ---
 
@@ -472,6 +482,10 @@ CycloneDX 1.6 JSON, the default, unless your customer or toolchain asks for some
 ### The HTML report is too long. Can I leave out the unit list?
 
 Yes. `--report-content=overview` writes the origin summary, suppliers, and licences without the list of all units. `--report-content=units` writes only the unit list with SHA-256 hashes. The default `all` writes both. The SBOM always stays complete. See [Human-readable companion reports](#human-readable-companion-reports-optional-opt-in-via---reportformat).
+
+### A library I use has no SBOM and no component manifest. How do I add its supplier and licence?
+
+Add a row for it to your own components file and pass it with `--manifest`. The report section **Third-party units without manifest** shows which units still need a row. See [Libraries that ship no metadata](#libraries-that-ship-no-metadata).
 
 ### Library SBOM vs product SBOM: which one do I keep?
 

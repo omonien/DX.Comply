@@ -37,6 +37,8 @@ type
     [Test]
     procedure Licences_CopyleftHint_OnlyWhenDifferentFromProduct;
     [Test]
+    procedure Licences_BuiltProgram_UnderProductLicence;
+    [Test]
     procedure Suppliers_FromManifestVendor_UnknownOtherwise;
     [Test]
     procedure WithoutManifest_GroupedByPrefix;
@@ -145,6 +147,20 @@ begin
   Assert.AreEqual(cNoLicenceGroupTitle, LOverview.Licences[High(LOverview.Licences)].Title);
   Assert.AreEqual(1, LOverview.Licences[High(LOverview.Licences)].Count);
   Assert.AreEqual('Main', LOverview.Licences[High(LOverview.Licences)].Names[0]);
+end;
+
+procedure TReportOverviewTests.Licences_BuiltProgram_UnderProductLicence;
+begin
+  FData.Metadata.Licence := 'LicenseRef-Proprietary';
+  FData.ProjectInfo.ProjectName := 'epMCOMLib';
+  AddFile('epMCOMLib.dll', 'library');
+  AddFile('vendor.dll', 'library');
+  var LOverview := BuildReportOverview(FData);
+  var LProduct := FindGroup(LOverview.Licences, 'LicenseRef-Proprietary');
+  Assert.AreEqual(2, LProduct.Count, 'Product entry and built program');
+  var LNone := FindGroup(LOverview.Licences, cNoLicenceGroupTitle);
+  Assert.AreEqual(1, LNone.Count);
+  Assert.AreEqual('vendor.dll', LNone.Names[0]);
 end;
 
 procedure TReportOverviewTests.Licences_CopyleftHint_OnlyWhenDifferentFromProduct;

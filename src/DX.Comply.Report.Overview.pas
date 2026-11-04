@@ -371,13 +371,21 @@ begin
 
     if Assigned(AData.Artefacts) then
     begin
+      // The built program is the product, so it is listed under the product
+      // licence, as in the SBOM (issue #131).
+      var LDeliverable := FindDeliverableTargetIndex(AData.Artefacts,
+        AData.ProjectInfo.ProjectName);
       for var i := 0 to AData.Artefacts.Count - 1 do
       begin
         var LArtefact := AData.Artefacts[i];
         var LName := ArtefactDisplayName(LArtefact);
         LOrigins.Add(OriginTitle(LArtefact), LName);
         // Units in a manifest library are covered by the library's licence.
-        if not LGrouped.ContainsKey(i) then
+        if (i = LDeliverable) and (Trim(AData.Metadata.Licence) <> '') then
+        begin
+          LLicences.Add(Trim(AData.Metadata.Licence), LName);
+        end
+        else if not LGrouped.ContainsKey(i) then
         begin
           LLicences.Add(cNoLicenceGroupTitle, LName);
         end;
