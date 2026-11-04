@@ -77,6 +77,11 @@ type
     /// </summary>
     function IsPathUnderDirectory(const APath, ABaseDirectory: string): Boolean;
     /// <summary>
+    /// True when APath lies in one of the folders Embarcadero ships below the
+    /// Delphi root (source, lib, include, bin, bin64, imports, ObjRepos, Redist).
+    /// </summary>
+    function IsEmbarcaderoShippedPath(const APath, ARootDir: string): Boolean;
+    /// <summary>
     /// Resolves a unit by searching build output, project and global paths.
     /// Shared resolution logic used by both MAP-derived and uses-clause-derived evidence.
     /// </summary>
@@ -276,7 +281,10 @@ begin
          IsPathUnderDirectory(AResolvedPath, LSearchPath) then
         Exit(uokLocalProject);
 
-  if IsPathUnderDirectory(AResolvedPath, AProjectInfo.Toolchain.RootDir) then
+  // Only the folders Embarcadero ships count as Embarcadero. A library that
+  // was installed into another folder below the Delphi root, such as
+  // Extras\madExcept, is third-party code (issue #134).
+  if IsEmbarcaderoShippedPath(AResolvedPath, AProjectInfo.Toolchain.RootDir) then
   begin
     if StartsText('Vcl.', AUnitName) or (Pos('\source\vcl\', LowerCase(AResolvedPath)) > 0) then
       Exit(uokEmbarcaderoVcl);
@@ -407,6 +415,23 @@ begin
   LNormalizedPath := LowerCase(TPath.GetFullPath(APath));
   Result := StartsText(LNormalizedBase, LNormalizedPath) or
     SameText(ExcludeTrailingPathDelimiter(LNormalizedBase), LNormalizedPath);
+end;
+
+function TUnitResolver.IsEmbarcaderoShippedPath(const APath, ARootDir: string): Boolean;
+const
+  cShippedFolders: array[0..7] of string = ('source', 'lib', 'include', 'bin',
+    'bin64', 'imports', 'ObjRepos', 'Redist');
+var
+  LFolder: string;
+begin
+  Result := False;
+  if not IsPathUnderDirectory(APath, ARootDir) then
+    Exit;
+  for LFolder in cShippedFolders do
+  begin
+    if IsPathUnderDirectory(APath, TPath.Combine(ARootDir, LFolder)) then
+      Exit(True);
+  end;
 end;
 
 procedure TUnitResolver.AddMapDerivedUnits(const AProjectInfo: TProjectInfo;
