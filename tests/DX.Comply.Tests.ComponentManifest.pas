@@ -64,6 +64,9 @@ type
     procedure Match_FirstExactRowWins;
     [Test]
     procedure Match_FirstPrefixRowWins;
+    /// <summary>The longest prefix wins whatever the row order. Issue #129.</summary>
+    [Test]
+    procedure Match_LongestPrefixWins_RegardlessOfOrder;
     [Test]
     procedure Match_StripsKnownScopePrefix;
     [Test]
@@ -327,6 +330,36 @@ begin
     ']}');
   LMatch := MatchManifestUnit(LManifest, 'Spring.Collections');
   Assert.AreEqual(0, LMatch.ComponentIndex, 'The first prefix row must win');
+end;
+
+procedure TComponentManifestTests.Match_LongestPrefixWins_RegardlessOfOrder;
+var
+  LManifest: TComponentManifest;
+begin
+  LManifest := ParseManifest(
+    '{"components":[' +
+    '{"name":"Base","version":"1","vendor":"A","licence":"MIT","type":"library",' +
+    '"units_prefix":["Neslib"]},' +
+    '{"name":"Xml","version":"1","vendor":"A","licence":"MIT","type":"library",' +
+    '"units_prefix":["Neslib.Xml"]}' +
+    '],"own_code_units":["Neslib.Xml.Mine"]}');
+  Assert.AreEqual(1, MatchManifestUnit(LManifest, 'Neslib.Xml.Reader').ComponentIndex,
+    'The longer prefix must win over an earlier shorter one');
+  Assert.AreEqual(0, MatchManifestUnit(LManifest, 'Neslib.Utils').ComponentIndex);
+  Assert.AreEqual(NativeInt(Ord(mmOwnCode)),
+    NativeInt(Ord(MatchManifestUnit(LManifest, 'Neslib.Xml.Mine').Kind)),
+    'own_code_units keeps priority over any prefix');
+
+  LManifest := ParseManifest(
+    '{"components":[' +
+    '{"name":"Xml","version":"1","vendor":"A","licence":"MIT","type":"library",' +
+    '"units_prefix":["Neslib.Xml"]},' +
+    '{"name":"Base","version":"1","vendor":"A","licence":"MIT","type":"library",' +
+    '"units_prefix":["Neslib"],"units_exact":["Neslib.Xml.Special"]}' +
+    ']}');
+  Assert.AreEqual(0, MatchManifestUnit(LManifest, 'Neslib.Xml.Reader').ComponentIndex);
+  Assert.AreEqual(1, MatchManifestUnit(LManifest, 'Neslib.Xml.Special').ComponentIndex,
+    'units_exact keeps priority over a longer prefix');
 end;
 
 procedure TComponentManifestTests.Match_StripsKnownScopePrefix;
