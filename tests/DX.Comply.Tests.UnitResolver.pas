@@ -136,6 +136,14 @@ type
     /// </summary>
     [Test]
     procedure Resolve_UnitOutsideSearchPaths_ClassifiesAsThirdParty;
+
+    /// <summary>
+    /// A library installed into a folder below the Delphi root that
+    /// Embarcadero does not ship (Extras\madExcept) is Third party, not
+    /// Embarcadero RTL (issue #134).
+    /// </summary>
+    [Test]
+    procedure Resolve_LibraryInDelphiExtrasFolder_ClassifiesAsThirdParty;
   end;
 
 implementation
@@ -912,6 +920,57 @@ begin
   finally
     if TDirectory.Exists(LTempRoot) then
       TDirectory.Delete(LTempRoot, True);
+  end;
+end;
+
+procedure TUnitResolverTests.Resolve_LibraryInDelphiExtrasFolder_ClassifiesAsThirdParty;
+var
+  LBuildEvidence: TBuildEvidence;
+  LCompositionEvidence: TCompositionEvidence;
+  LEvidenceItem: TBuildEvidenceItem;
+  LExtrasDir: string;
+  LProjectInfo: TProjectInfo;
+  LTempDir: string;
+  LUnitDcuPath: string;
+begin
+  LTempDir := TPath.Combine(TPath.GetTempPath, TPath.GetRandomFileName);
+  LExtrasDir := TPath.Combine(LTempDir, 'Extras\madExcept\madExcept\BDS37\win32');
+  TDirectory.CreateDirectory(LExtrasDir);
+  try
+    LUnitDcuPath := TPath.Combine(LExtrasDir, 'madExcept.dcu');
+    TFile.WriteAllBytes(LUnitDcuPath, TBytes.Create($01, $02, $03, $04));
+
+    LProjectInfo := TProjectInfo.Create;
+    LBuildEvidence := TBuildEvidence.Create;
+    try
+      LProjectInfo.ProjectDir := TPath.Combine(LTempDir, 'Project');
+      LProjectInfo.Toolchain.ProductName := 'Embarcadero Delphi';
+      LProjectInfo.Toolchain.RootDir := LTempDir;
+      LProjectInfo.Toolchain.Version := '37.0';
+      LBuildEvidence.SearchPaths.Add(LExtrasDir);
+
+      LEvidenceItem := Default(TBuildEvidenceItem);
+      LEvidenceItem.SourceKind := besMapFile;
+      LEvidenceItem.FilePath := TPath.Combine(LTempDir, 'Demo.map');
+      LEvidenceItem.UnitName := 'madExcept';
+      LBuildEvidence.EvidenceItems.Add(LEvidenceItem);
+
+      LCompositionEvidence := FResolver.Resolve(LProjectInfo, LBuildEvidence);
+      try
+        Assert.AreEqual(NativeInt(1), NativeInt(LCompositionEvidence.Units.Count));
+        Assert.AreEqual(LUnitDcuPath, LCompositionEvidence.Units[0].ResolvedPath);
+        Assert.AreEqual(uokThirdParty, LCompositionEvidence.Units[0].OriginKind,
+          'A library below Delphi\Extras must be classified as Third party');
+      finally
+        LCompositionEvidence.Free;
+      end;
+    finally
+      LBuildEvidence.Free;
+      LProjectInfo.Free;
+    end;
+  finally
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir, True);
   end;
 end;
 

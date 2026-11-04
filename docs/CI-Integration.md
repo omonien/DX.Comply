@@ -82,8 +82,14 @@ jobs:
         with:
           name: sbom
           path: bom-*.json
-          retention-days: 3650  # 10 years, the retention period in CRA Article 13
+          retention-days: 3653  # 10 years including leap days, CRA Article 13(13)
 ```
+
+GitHub caps `retention-days` at the repository limit: 90 days for a public
+repository, at most 400 days for a private one. A higher value is cut to that
+limit with a warning. The artifact therefore does not cover the 10 years on its
+own. Also attach the SBOM to the GitHub release, or copy it to your long-term
+archive.
 
 ---
 
@@ -265,8 +271,9 @@ Practical checklist:
 
 - Generate an SBOM for **every release build** (tag-triggered pipeline).
 - Store `bom.json` alongside the release artefacts in long-term storage.
-- Set artifact `retention-days: 3650` (GitHub Actions) or `expire_in: never`
-  (GitLab CI).
+- Set artifact `retention-days: 3653` (GitHub Actions, capped at the repository
+  limit, see above) or `expire_in: never` (GitLab CI). 3653 days are 10 years
+  including leap days.
 - CycloneDX JSON (`--format=cyclonedx-json`) is the default format.
 - Archive the SBOM together with the installer or package so they remain
   associated even if the CI system is replaced.
