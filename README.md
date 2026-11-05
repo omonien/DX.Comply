@@ -240,6 +240,19 @@ The checked-in example is [docs/examples/ConwaysLifeFMX.cdx.json](docs/examples/
 
 SPDX 3.0.1 output is built from the same data as SPDX 2.3: the same packages, IDs, manifest libraries, licences and uses graph. It uses the Core, Software and SimpleLicensing profiles. Relationships with the same source and type are grouped into one `Relationship` element, and its `completeness` carries what CycloneDX writes as compositions: the built program is `incomplete`, a unit whose source was read is `complete`, and a manifest library is `complete`. The IDE expert writes CycloneDX JSON only, so the SPDX version applies to the CLI.
 
+### Generation time
+
+DX.Comply writes the generation time inside the SBOM and inside the HTML and Markdown reports. The value is UTC, `YYYY-MM-DDThh:mm:ssZ` (for example `2026-10-10T08:31:18Z`). Build mode and library mode both set it when they generate the file. The checked-in example was written by an older version and still shows a local offset.
+
+| File | Where to look |
+|---|---|
+| CycloneDX JSON and XML | `metadata.timestamp` |
+| SPDX 2.3 JSON | `creationInfo.created` |
+| SPDX 3.0.1 JSON-LD | `created` on the CreationInfo element |
+| HTML and Markdown reports | **Generated At**, in the opening table |
+
+That report row is part of the header, so it stays when `--report-content` is `overview` or `units`. The file name stays the path from `--output` (default `bom.json`). Use that option when an archive name should include a date, for example `--output=bom-2026-11-05.json`.
+
 ### BSI TR-03183-2
 
 [BSI TR-03183-2](https://www.bsi.bund.de/dok/TR-03183-en) version 2.1.0 (20 August 2025) asks for CycloneDX 1.6 or later, or SPDX 3.0.1 or later. CycloneDX output is 1.6. SPDX output is 2.3 by default, and 3.0.1 with `--spdx-version=3.0.1`. DX.Comply writes the fields it can fill from the build or from values you set. Where a unit's Pascal source was read, direct uses edges to other units already in the SBOM are written as well. A unit with no source stays a leaf. That is not a certification, and it is not full coverage of the technical guideline. The field list, including when a dependency set is complete, is in [docs/BSI-TR-03183-2.md](docs/BSI-TR-03183-2.md).
@@ -477,6 +490,10 @@ For each app that loads those DLLs, the product SBOM still lists the DLL binarie
 
 No. The manufacturer archives a machine-readable SBOM per product version with the release. A marketplace flag alone is not the technical documentation. Prefer attaching the SBOM to the release (and keeping a hash registry if you publish many artefacts). See [What to do with your SBOM](#what-to-do-with-your-sbom).
 
+### Where is the time an SBOM was generated?
+
+Inside the file. See [Generation time](#generation-time). CycloneDX JSON and XML use `metadata.timestamp`. SPDX 2.3 uses `creationInfo.created`. SPDX 3.0.1 uses `created` on the CreationInfo element. The HTML and Markdown reports show the same value as **Generated At**. Pass `--output` when the archive file name should include a date, for example `--output=bom-2026-11-05.json`.
+
 ### Which SBOM format should I pick?
 
 CycloneDX 1.6 JSON, the default, unless your customer or toolchain asks for something else. It meets the TR-03183-2 minimum and carries dependency completeness. Pick `--format=spdx-json --spdx-version=3.0.1` when SPDX is required. SPDX 2.3 is below the TR-03183-2 minimum. Use it only for tools that cannot read SPDX 3.
@@ -515,7 +532,7 @@ No internet connection is required. All processing is local.
 | [CI Integration](docs/CI-Integration.md) | Command-line usage, GitHub Actions examples, CI configuration |
 | [Legacy Support](docs/LegacySupport.md) | MAP files from older Delphi versions, and which project files the CLI accepts |
 | [Library SBOM](docs/Library-SBOM.md) | Build mode and library mode, and what each SBOM contains |
-| [FAQ](#faq) | Common questions on library mode, old DLLs, and CRA archive |
+| [FAQ](#faq) | Common questions on library mode, old DLLs, generation time, and CRA archive |
 | [Example SBOM (JSON)](docs/examples/ConwaysLifeFMX.cdx.json) | CycloneDX 1.6 from ConwaysLifeFMX in RADStudio13Demos, Release/Win32 with a map file |
 | [Component manifest sample](docs/samples/components.sample.json) | Optional components.json (supplier, licence, version, type, package URL) |
 
