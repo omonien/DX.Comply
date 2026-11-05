@@ -654,9 +654,12 @@ begin
     Exit(AOutputFile);
 
   LFile := Trim(AOutputFile);
-  // "output": "build\bom.json" and an absolute file path already name a
-  // directory. outputDir does not rewrite them.
-  if (LFile <> '') and (ExtractFilePath(LFile) <> '') then
+  // A path that already names a directory stays a file path. ExtractFilePath
+  // only sees '\', so a forward slash such as "build/custom.json" has to be
+  // checked as well. An absolute path stays as it is.
+  if (LFile <> '') and
+     ((not TPath.IsRelativePath(LFile)) or (Pos('/', LFile) > 0) or
+      (Pos('\', LFile) > 0)) then
     Exit(AOutputFile);
 
   LName := LFile;
