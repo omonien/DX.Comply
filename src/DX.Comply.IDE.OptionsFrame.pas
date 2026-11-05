@@ -60,6 +60,10 @@ type
     FReportContentRowPanel: TPanel;
     ReportContentLabel: TLabel;
     FReportContentComboBox: TComboBox;
+    FOutputDirRowPanel: TPanel;
+    OutputDirLabel: TLabel;
+    FOutputDirEdit: TEdit;
+    FBrowseOutputDirButton: TButton;
     FReportOutputRowPanel: TPanel;
     ReportOutputBasePathLabel: TLabel;
     FReportOutputBasePathEdit: TEdit;
@@ -72,6 +76,7 @@ type
   private
     FReadmeBrowser: TWebBrowser;
     procedure AboutButtonClick(Sender: TObject);
+    procedure BrowseOutputDirButtonClick(Sender: TObject);
     procedure BrowseScriptButtonClick(Sender: TObject);
     procedure InitializeReadmeBrowser;
     procedure LoadReadmeInfoPage;
@@ -125,6 +130,7 @@ begin
   inherited Create(AOwner);
   Align := alClient;
   FAboutButton.OnClick := AboutButtonClick;
+  FBrowseOutputDirButton.OnClick := BrowseOutputDirButtonClick;
   FBrowseScriptButton.OnClick := BrowseScriptButtonClick;
   FPageControl.ActivePage := FSettingsTabSheet;
   // The README browser is not created here. A TWebBrowser that navigates
@@ -151,6 +157,25 @@ end;
 procedure TFrameDXComplyOptions.AboutButtonClick(Sender: TObject);
 begin
   ShowDXComplyAboutDialog;
+end;
+
+procedure TFrameDXComplyOptions.BrowseOutputDirButtonClick(Sender: TObject);
+var
+  LDialog: TFileOpenDialog;
+  LCurrent: string;
+begin
+  LDialog := TFileOpenDialog.Create(Self);
+  try
+    LDialog.Title := 'SBOM and report directory';
+    LDialog.Options := [fdoPickFolders, fdoForceFileSystem];
+    LCurrent := Trim(FOutputDirEdit.Text);
+    if (LCurrent <> '') and TDirectory.Exists(LCurrent) then
+      LDialog.DefaultFolder := LCurrent;
+    if LDialog.Execute then
+      FOutputDirEdit.Text := LDialog.FileName;
+  finally
+    LDialog.Free;
+  end;
 end;
 
 procedure TFrameDXComplyOptions.BrowseScriptButtonClick(Sender: TObject);
@@ -218,6 +243,7 @@ begin
   end;
   // Issue #126: the combo box items follow THumanReadableReportContent.
   FReportContentComboBox.ItemIndex := Ord(ASettings.HumanReadableReport.Content);
+  FOutputDirEdit.Text := ASettings.OutputDir;
   FReportOutputBasePathEdit.Text := ASettings.HumanReadableReport.OutputBasePath;
   FReportIncludeWarningsCheckBox.Checked := ASettings.HumanReadableReport.IncludeWarnings;
   FReportIncludeCompositionCheckBox.Checked := ASettings.HumanReadableReport.IncludeCompositionEvidence;
@@ -243,6 +269,7 @@ begin
     Result.DelphiVersionOverride := StrToIntDef(LVersionText, -1);
   Result.OpenHtmlReportAfterGenerate := FOpenHtmlReportAfterGenerateCheckBox.Checked;
   Result.WarnWhenCompositionEvidenceIsEmpty := FWarnWhenCompositionEmptyCheckBox.Checked;
+  Result.OutputDir := Trim(FOutputDirEdit.Text);
   Result.HumanReadableReport.Enabled := FReportEnabledCheckBox.Checked;
   case FReportFormatComboBox.ItemIndex of
     1: Result.HumanReadableReport.Format := hrfHtml;

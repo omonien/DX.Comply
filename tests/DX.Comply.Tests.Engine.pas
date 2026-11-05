@@ -373,6 +373,46 @@ type
     [Test]
     procedure GenerateFromConfig_IncludePlatformInOutput_DecoratesMergedOutput;
 
+    /// <summary>
+    /// outputDir places a bare file name in a relative or absolute directory.
+    /// A file path that already has a directory stays put (issue #146).
+    /// </summary>
+    [Test]
+    procedure ResolveSbomOutputPath_RelativeAndAbsoluteDirectory;
+
+    /// <summary>
+    /// CLI --output is a file path and is not placed in outputDir.
+    /// </summary>
+    [Test]
+    procedure ResolveSbomOutputPath_ExplicitFileWins;
+
+    /// <summary>
+    /// Platform decoration changes the file name and keeps outputDir.
+    /// An explicit file path is not decorated.
+    /// </summary>
+    [Test]
+    procedure ResolveSbomOutputPath_PlatformDecorationKeepsDirectory;
+
+    /// <summary>
+    /// A non-empty .dxcomply.json outputDir wins over the IDE options directory.
+    /// </summary>
+    [Test]
+    procedure ChooseOutputDirectory_ProjectFileWins;
+
+    /// <summary>
+    /// GenerateFromConfig applies outputDir to a bare name, keeps a file path
+    /// that already has a directory, and lets an explicit output win.
+    /// </summary>
+    [Test]
+    procedure GenerateFromConfig_OutputDir_MergesPath;
+
+    /// <summary>
+    /// outputDir receives bom.json and the reports when report.output is empty.
+    /// The directory is created when it is missing.
+    /// </summary>
+    [Test]
+    procedure GenerateFromConfig_OutputDir_WritesSbomAndReports;
+
     /// <summary>The recursive output walk is off unless the caller opts in.</summary>
     [Test]
     procedure Config_Default_ScanTreeIsFalse;
@@ -1054,6 +1094,8 @@ begin
   LConfig := TSbomConfig.Default;
   Assert.AreEqual('bom.json', LConfig.OutputPath,
     'TSbomConfig.Default.OutputPath must be ''bom.json''');
+  Assert.AreEqual('', LConfig.OutputDir,
+    'TSbomConfig.Default.OutputDir must be empty');
 end;
 
 procedure TEngineTests.Config_Default_DeepEvidenceBuildWhenMapMissing;
@@ -2274,6 +2316,187 @@ begin
     LGen.GenerateFromConfig('missing.dproj', LPath);
     Assert.AreEqual('given.json', LGen.Config.OutputPath,
       'an explicit output path is not decorated');
+  finally
+    LGen.Free;
+  end;
+end;
+
+procedure TEngineTests.ResolveSbomOutputPath_RelativeAndAbsoluteDirectory;
+var
+  LProjectDir: string;
+begin
+  LProjectDir := 'C:\Projects\Demo';
+  Assert.AreEqual(TPath.Combine(LProjectDir, 'bom.json'),
+    TSbomConfig.ResolveSbomOutputPath('bom.json', '', LProjectDir,
+      'Win32', 'Release', False, False),
+    'an empty outputDir keeps bom.json next to the project');
+  Assert.AreEqual(TPath.Combine(TPath.Combine(LProjectDir, 'out'), 'bom.json'),
+    TSbomConfig.ResolveSbomOutputPath('bom.json', 'out', LProjectDir,
+      'Win32', 'Release', False, False),
+    'a relative outputDir is resolved from the project directory');
+  Assert.AreEqual('C:\Archive\bom.json',
+    TSbomConfig.ResolveSbomOutputPath('bom.json', 'C:\Archive', LProjectDir,
+      'Win32', 'Release', False, False),
+    'an absolute outputDir is used as given');
+  Assert.AreEqual(TPath.Combine(TPath.Combine(LProjectDir, 'out'), 'custom.json'),
+    TSbomConfig.ResolveSbomOutputPath('custom.json', 'out', LProjectDir,
+      'Win32', 'Release', False, False),
+    'a bare file name is placed in outputDir');
+  Assert.AreEqual(TPath.Combine(LProjectDir, 'build\custom.json'),
+    TSbomConfig.ResolveSbomOutputPath('build\custom.json', 'out', LProjectDir,
+      'Win32', 'Release', False, False),
+    'a file path that already has a directory is not moved');
+end;
+
+procedure TEngineTests.ResolveSbomOutputPath_ExplicitFileWins;
+var
+  LProjectDir: string;
+begin
+  LProjectDir := 'C:\Projects\Demo';
+  Assert.AreEqual(TPath.Combine(LProjectDir, 'cli.json'),
+    TSbomConfig.ResolveSbomOutputPath('cli.json', 'out', LProjectDir,
+      'Win32', 'Release', True, False),
+    'a relative --output stays relative to the project directory');
+  Assert.AreEqual('D:\Files\cli.json',
+    TSbomConfig.ResolveSbomOutputPath('D:\Files\cli.json', 'C:\Archive',
+      LProjectDir, 'Win32', 'Release', True, False),
+    'an absolute --output wins over outputDir');
+end;
+
+procedure TEngineTests.ResolveSbomOutputPath_PlatformDecorationKeepsDirectory;
+var
+  LProjectDir, LExpected: string;
+begin
+  LProjectDir := 'C:\Projects\Demo';
+  LExpected := TPath.Combine(TPath.Combine(LProjectDir, 'out'),
+    'bom.Win64.Release.json');
+  Assert.AreEqual(LExpected,
+    TSbomConfig.ResolveSbomOutputPath('bom.json', 'out', LProjectDir,
+      'Win64', 'Release', False, True),
+    'decoration changes the file name inside outputDir');
+  Assert.AreEqual('C:\Archive\bom.Win64.Debug.json',
+    TSbomConfig.ResolveSbomOutputPath('bom.json', 'C:\Archive', LProjectDir,
+      'Win64', 'Debug', False, True),
+    'decoration keeps an absolute outputDir');
+  Assert.AreEqual(TPath.Combine(LProjectDir, 'given.json'),
+    TSbomConfig.ResolveSbomOutputPath('given.json', 'out', LProjectDir,
+      'Win64', 'Release', True, True),
+    'an explicit file path is not decorated');
+end;
+
+procedure TEngineTests.ChooseOutputDirectory_ProjectFileWins;
+begin
+  Assert.AreEqual('sbom', TSbomConfig.ChooseOutputDirectory('C:\Ide', 'sbom'),
+    'a project outputDir wins over the IDE options directory');
+  Assert.AreEqual('C:\Ide', TSbomConfig.ChooseOutputDirectory('C:\Ide', ''),
+    'an empty project value keeps the IDE options directory');
+  Assert.AreEqual('C:\Ide', TSbomConfig.ChooseOutputDirectory('C:\Ide', '  '),
+    'a blank project value keeps the IDE options directory');
+  Assert.AreEqual('', TSbomConfig.ChooseOutputDirectory('', ''),
+    'both empty keeps the project folder');
+end;
+
+procedure TEngineTests.GenerateFromConfig_OutputDir_MergesPath;
+var
+  LCaller: TSbomConfig;
+  LGen: TDxComplyGenerator;
+  LPath: string;
+begin
+  LPath := TEngineTests_WriteConfig(FTempDir, '{"outputDir":" out "}');
+  LGen := TDxComplyGenerator.Create;
+  try
+    LGen.GenerateFromConfig('missing.dproj', LPath);
+    Assert.AreEqual('out', LGen.Config.OutputDir, 'outputDir must be trimmed');
+    Assert.AreEqual(TPath.Combine('out', 'bom.json'), LGen.Config.OutputPath,
+      'outputDir alone writes bom.json into that directory');
+  finally
+    LGen.Free;
+  end;
+
+  LPath := TEngineTests_WriteConfig(FTempDir,
+    '{"outputDir":"out","output":"custom.json"}');
+  LGen := TDxComplyGenerator.Create;
+  try
+    LGen.GenerateFromConfig('missing.dproj', LPath);
+    Assert.AreEqual(TPath.Combine('out', 'custom.json'), LGen.Config.OutputPath,
+      'a bare output file name is placed in outputDir');
+  finally
+    LGen.Free;
+  end;
+
+  LPath := TEngineTests_WriteConfig(FTempDir,
+    '{"outputDir":"out","output":"build/custom.json"}');
+  LGen := TDxComplyGenerator.Create;
+  try
+    LGen.GenerateFromConfig('missing.dproj', LPath);
+    Assert.AreEqual('build/custom.json', LGen.Config.OutputPath,
+      'an output value that has a directory stays that file path');
+  finally
+    LGen.Free;
+  end;
+
+  LCaller := TSbomConfig.Default;
+  LCaller.OutputPath := 'cli.json';
+  LCaller.ExplicitOverrides := [scoOutputPath];
+  LCaller.IncludePlatformInOutput := True;
+  LGen := TDxComplyGenerator.Create(LCaller);
+  try
+    LGen.GenerateFromConfig('missing.dproj', LPath);
+    Assert.AreEqual('cli.json', LGen.Config.OutputPath,
+      'explicit --output wins over outputDir and is not decorated');
+  finally
+    LGen.Free;
+  end;
+
+  LPath := TEngineTests_WriteConfig(FTempDir,
+    '{"outputDir":"out","platform":"Win64","configName":"Debug"}');
+  LCaller := TSbomConfig.Default;
+  LCaller.IncludePlatformInOutput := True;
+  LGen := TDxComplyGenerator.Create(LCaller);
+  try
+    LGen.GenerateFromConfig('missing.dproj', LPath);
+    Assert.AreEqual(TPath.Combine('out', 'bom.Win64.Debug.json'),
+      LGen.Config.OutputPath,
+      'decoration runs after the file is placed in outputDir');
+  finally
+    LGen.Free;
+  end;
+end;
+
+procedure TEngineTests.GenerateFromConfig_OutputDir_WritesSbomAndReports;
+var
+  LConfigJson: TStringList;
+  LConfigPath, LDir, LEscapedDir: string;
+  LGen: TDxComplyGenerator;
+begin
+  LDir := TPath.Combine(FTempDir, 'sbom-out');
+  LEscapedDir := StringReplace(LDir, '\', '\\', [rfReplaceAll]);
+  LConfigPath := TPath.Combine(FTempDir, 'dxcomply.outdir.json');
+  LConfigJson := TStringList.Create;
+  try
+    LConfigJson.Add('{');
+    LConfigJson.Add('  "outputDir": "' + LEscapedDir + '",');
+    LConfigJson.Add('  "report": {');
+    LConfigJson.Add('    "enabled": true,');
+    LConfigJson.Add('    "format": "both"');
+    LConfigJson.Add('  }');
+    LConfigJson.Add('}');
+    LConfigJson.SaveToFile(LConfigPath, TEncoding.UTF8);
+  finally
+    LConfigJson.Free;
+  end;
+
+  LGen := TDxComplyGenerator.Create;
+  try
+    LGen.OnProgress := OnProgress;
+    Assert.IsTrue(LGen.GenerateFromConfig(FEngineDprojPath, LConfigPath),
+      'GenerateFromConfig must write the SBOM into outputDir');
+    Assert.IsTrue(TFile.Exists(TPath.Combine(LDir, 'bom.json')),
+      'bom.json must be created in outputDir');
+    Assert.IsTrue(TFile.Exists(TPath.Combine(LDir, 'bom.report.html')),
+      'the HTML report must sit next to the SBOM when report.output is empty');
+    Assert.IsTrue(TFile.Exists(TPath.Combine(LDir, 'bom.report.md')),
+      'the Markdown report must sit next to the SBOM when report.output is empty');
   finally
     LGen.Free;
   end;

@@ -13,8 +13,8 @@
 ///   finalization    - RemoveWizard
 ///
 /// The Execute method retrieves the active project through
-/// IOTAProjectManager.GetCurrentProject, derives the output path next to
-/// the .dproj file, and delegates generation to TDxComplyGenerator.
+/// IOTAProjectManager.GetCurrentProject, resolves the SBOM path from the
+/// shared output directory, and delegates generation to TDxComplyGenerator.
 ///
 /// Progress events are routed to the IDE message window via an anonymous
 /// closure that delegates to TIDELogger.Progress.
@@ -240,6 +240,32 @@ uses
   DX.Comply.IDE.Resources,
   DX.Comply.IDE.SbomHeaderDialog,
   DX.Comply.SbomHeaderConfig;
+
+/// <summary>
+/// Reads outputDir from a .dxcomply.json (issue #146). Returns an empty
+/// string when the file or the key is missing, or the file cannot be read.
+/// The caller then keeps the IDE options directory.
+/// </summary>
+function ReadProjectOutputDir(const AConfigPath: string): string;
+var
+  LReader: TDxComplyGenerator;
+begin
+  Result := '';
+  if (AConfigPath = '') or not TFile.Exists(AConfigPath) then
+    Exit;
+  LReader := TDxComplyGenerator.Create;
+  try
+    try
+      Result := LReader.LoadConfig(AConfigPath).OutputDir;
+    except
+      on E: Exception do
+        TIDELogger.Warning('DX.Comply: Could not read outputDir from .dxcomply.json: ' +
+          E.Message + '. The directory from Tools > Options is used.');
+    end;
+  finally
+    LReader.Free;
+  end;
+end;
 
 /// <summary>
 /// Reads report.groupByFolder from a .dxcomply.json (issue #132). Returns
@@ -764,7 +790,14 @@ begin
     if not TryPrepareDeepEvidenceBuild(LProjectPath, LSettings, LConfig, AForceDeepEvidence) then
       Exit;
 
-    LOutputPath := TPath.Combine(TPath.GetDirectoryName(LProjectPath), 'bom.json');
+    // Issue #146: bom.json goes to the shared directory when one is set.
+    // The project file wins over Tools > Options. An empty directory keeps
+    // the file next to the .dproj. Reports with an empty base path follow it.
+    LOutputPath := TSbomConfig.ResolveSbomOutputPath('bom.json',
+      TSbomConfig.ChooseOutputDirectory(LSettings.OutputDir,
+        ReadProjectOutputDir(LConfigPath)),
+      TPath.GetDirectoryName(LProjectPath), LConfig.Platform, LConfig.Configuration,
+      False, LConfig.IncludePlatformInOutput);
     TIDELogger.Info('DX.Comply: Project : ' + LProjectPath);
     TIDELogger.Info('DX.Comply: Output  : ' + LOutputPath);
 

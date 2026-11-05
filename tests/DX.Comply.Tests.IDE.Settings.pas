@@ -64,6 +64,7 @@ begin
   Assert.IsTrue(LSettings.OpenHtmlReportAfterGenerate);
   Assert.IsTrue(LSettings.WarnWhenCompositionEvidenceIsEmpty);
   Assert.AreEqual(0, LSettings.DelphiVersionOverride);
+  Assert.AreEqual('', LSettings.OutputDir);
   Assert.IsTrue(LSettings.HumanReadableReport.Enabled);
   Assert.AreEqual(NativeInt(Ord(hrfBoth)), NativeInt(Ord(LSettings.HumanReadableReport.Format)));
   Assert.IsFalse(LSettings.HumanReadableReport.GroupByFolder);
@@ -78,6 +79,7 @@ begin
   LSettings := TDXComplyIDESettingsStore.LoadFromFile(LFilePath);
   Assert.AreEqual(Ord(abmAlways), Ord(LSettings.AutoBuildMode));
   Assert.AreEqual('', LSettings.BuildScriptPath);
+  Assert.AreEqual('', LSettings.OutputDir);
   Assert.AreEqual('', LSettings.HumanReadableReport.OutputBasePath);
 end;
 
@@ -112,6 +114,7 @@ begin
     LSettings.WarnWhenCompositionEvidenceIsEmpty := False;
     LSettings.BuildScriptPath := 'C:\Tools\DelphiBuildDPROJ.ps1';
     LSettings.DelphiVersionOverride := 37;
+    LSettings.OutputDir := 'C:\Archive\sbom';
     LSettings.HumanReadableReport.Enabled := True;
     LSettings.HumanReadableReport.Format := hrfBoth;
     LSettings.HumanReadableReport.OutputBasePath := 'C:\Reports\demo.report';
@@ -133,6 +136,7 @@ begin
     Assert.IsFalse(LLoadedSettings.WarnWhenCompositionEvidenceIsEmpty);
     Assert.AreEqual(LSettings.BuildScriptPath, LLoadedSettings.BuildScriptPath);
     Assert.AreEqual(37, LLoadedSettings.DelphiVersionOverride);
+    Assert.AreEqual(LSettings.OutputDir, LLoadedSettings.OutputDir);
     Assert.IsTrue(LLoadedSettings.HumanReadableReport.Enabled);
     Assert.AreEqual(NativeInt(Ord(hrfBoth)), NativeInt(Ord(LLoadedSettings.HumanReadableReport.Format)));
     Assert.AreEqual(LSettings.HumanReadableReport.OutputBasePath,
