@@ -336,7 +336,7 @@
               'Unit list with hashes only')
           end
         end
-        object FReportOutputRowPanel: TPanel
+        object FOutputDirRowPanel: TPanel
           Left = 12
           Top = 408
           Width = 620
@@ -351,6 +351,65 @@
           Margins.Top = 4
           Margins.Right = 12
           Margins.Bottom = 0
+          object FBrowseOutputDirButton: TButton
+            Left = 512
+            Top = 2
+            Width = 96
+            Height = 30
+            Align = alRight
+            AlignWithMargins = True
+            Caption = 'Browse...'
+            Margins.Left = 8
+            Margins.Top = 2
+            Margins.Right = 0
+            Margins.Bottom = 2
+            TabOrder = 0
+          end
+          object OutputDirLabel: TLabel
+            Left = 0
+            Top = 4
+            Width = 220
+            Height = 32
+            Align = alLeft
+            AlignWithMargins = True
+            AutoSize = False
+            Caption = 'SBOM and report directory'
+            Layout = tlCenter
+            Margins.Left = 0
+            Margins.Top = 4
+            Margins.Right = 8
+            Margins.Bottom = 4
+            WordWrap = True
+          end
+          object FOutputDirEdit: TEdit
+            Left = 228
+            Top = 6
+            Width = 276
+            Height = 23
+            Align = alClient
+            AlignWithMargins = True
+            Margins.Left = 0
+            Margins.Top = 6
+            Margins.Right = 0
+            Margins.Bottom = 6
+            TabOrder = 1
+          end
+        end
+        object FReportOutputRowPanel: TPanel
+          Left = 12
+          Top = 452
+          Width = 620
+          Height = 40
+          Align = alTop
+          AlignWithMargins = True
+          BevelOuter = bvNone
+          Caption = ''
+          ParentBackground = True
+          TabOrder = 12
+          Margins.Left = 12
+          Margins.Top = 4
+          Margins.Right = 12
+          Margins.Bottom = 0
           object ReportOutputBasePathLabel: TLabel
             Left = 0
             Top = 4
@@ -359,7 +418,7 @@
             Align = alLeft
             AlignWithMargins = True
             AutoSize = False
-            Caption = 'Report output base path (optional)'
+            Caption = 'Report base path (optional)'
             Layout = tlCenter
             Margins.Left = 0
             Margins.Top = 4
@@ -393,7 +452,7 @@
           Margins.Top = 4
           Margins.Right = 12
           Margins.Bottom = 0
-          TabOrder = 12
+          TabOrder = 13
           WordWrap = True
         end
         object FReportIncludeCompositionCheckBox: TCheckBox
@@ -408,7 +467,7 @@
           Margins.Top = 4
           Margins.Right = 12
           Margins.Bottom = 0
-          TabOrder = 13
+          TabOrder = 14
           WordWrap = True
         end
         object FReportIncludeBuildEvidenceCheckBox: TCheckBox
@@ -423,7 +482,7 @@
           Margins.Top = 4
           Margins.Right = 12
           Margins.Bottom = 0
-          TabOrder = 14
+          TabOrder = 15
           WordWrap = True
         end
         object FReportGroupByFolderCheckBox: TCheckBox
@@ -438,7 +497,7 @@
           Margins.Top = 4
           Margins.Right = 12
           Margins.Bottom = 0
-          TabOrder = 15
+          TabOrder = 16
           WordWrap = True
         end
         object FAboutRowPanel: TPanel
@@ -451,7 +510,7 @@
           BevelOuter = bvNone
           Caption = ''
           ParentBackground = True
-          TabOrder = 16
+          TabOrder = 17
           Margins.Left = 12
           Margins.Top = 8
           Margins.Right = 12

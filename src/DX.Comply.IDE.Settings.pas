@@ -40,6 +40,12 @@ type
     WarnWhenCompositionEvidenceIsEmpty: Boolean;
     BuildScriptPath: string;
     DelphiVersionOverride: Integer;
+    /// <summary>
+    /// Directory for bom.json and the reports when the report base path is
+    /// empty (issue #146). Empty writes bom.json next to the project.
+    /// A .dxcomply.json outputDir wins when that key is set.
+    /// </summary>
+    OutputDir: string;
     HumanReadableReport: THumanReadableReportConfig;
     class function Default: TDXComplyIDESettings; static;
   end;
@@ -98,6 +104,7 @@ begin
   Result.WarnWhenCompositionEvidenceIsEmpty := True;
   Result.BuildScriptPath := '';
   Result.DelphiVersionOverride := 0;
+  Result.OutputDir := '';
   Result.HumanReadableReport := THumanReadableReportConfig.Default;
   Result.HumanReadableReport.Enabled := True;
   Result.HumanReadableReport.Format := hrfBoth;
@@ -180,6 +187,7 @@ begin
     Result.WarnWhenCompositionEvidenceIsEmpty := LIniFile.ReadBool(cSettingsSection, 'WarnWhenCompositionEvidenceIsEmpty', Result.WarnWhenCompositionEvidenceIsEmpty);
     Result.BuildScriptPath := Trim(LIniFile.ReadString(cSettingsSection, 'BuildScriptPath', Result.BuildScriptPath));
     Result.DelphiVersionOverride := LIniFile.ReadInteger(cSettingsSection, 'DelphiVersionOverride', Result.DelphiVersionOverride);
+    Result.OutputDir := Trim(LIniFile.ReadString(cSettingsSection, 'OutputDir', Result.OutputDir));
     Result.HumanReadableReport.Enabled := LIniFile.ReadBool(cSettingsSection, 'ReportEnabled', Result.HumanReadableReport.Enabled);
     Result.HumanReadableReport.Format := StringToReportFormat(LIniFile.ReadString(cSettingsSection, 'ReportFormat', 'markdown'));
     Result.HumanReadableReport.OutputBasePath := Trim(LIniFile.ReadString(cSettingsSection, 'ReportOutputBasePath', Result.HumanReadableReport.OutputBasePath));
@@ -217,6 +225,7 @@ begin
     LIniFile.WriteBool(cSettingsSection, 'WarnWhenCompositionEvidenceIsEmpty', ASettings.WarnWhenCompositionEvidenceIsEmpty);
     LIniFile.WriteString(cSettingsSection, 'BuildScriptPath', Trim(ASettings.BuildScriptPath));
     LIniFile.WriteInteger(cSettingsSection, 'DelphiVersionOverride', ASettings.DelphiVersionOverride);
+    LIniFile.WriteString(cSettingsSection, 'OutputDir', Trim(ASettings.OutputDir));
     LIniFile.WriteBool(cSettingsSection, 'ReportEnabled', ASettings.HumanReadableReport.Enabled);
     LIniFile.WriteString(cSettingsSection, 'ReportFormat', ReportFormatToString(ASettings.HumanReadableReport.Format));
     LIniFile.WriteString(cSettingsSection, 'ReportOutputBasePath', Trim(ASettings.HumanReadableReport.OutputBasePath));

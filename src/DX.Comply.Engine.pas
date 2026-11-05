@@ -105,6 +105,13 @@ type
   TSbomConfig = record
     /// <summary>Output file path.</summary>
     OutputPath: string;
+    /// <summary>
+    /// Optional directory for the SBOM and the reports that follow it
+    /// (issue #146). Empty leaves OutputPath as the file path. A relative
+    /// directory is resolved from the project directory. The CLI --output
+    /// flag is a file path and is not placed in this directory.
+    /// </summary>
+    OutputDir: string;
     /// <summary>SBOM format.</summary>
     Format: TSbomFormat;
     /// <summary>Include patterns (glob).</summary>
@@ -256,6 +263,34 @@ type
     /// </summary>
     class function DecorateOutputFileName(const AOutputPath, APlatform,
       AConfiguration: string): string; static;
+    /// <summary>
+    /// Places a bare SBOM file name in AOutputDir when that directory is set
+    /// and the file path was not passed explicitly (issue #146).
+    /// </summary>
+    /// <remarks>
+    /// An explicit file path (CLI --output) is returned unchanged.
+    /// An empty directory returns AOutputFile unchanged, so an existing
+    /// "output": "bom.json" stays that file.
+    /// A bare file name is combined with the directory. A file path that
+    /// already contains a directory is left as it is.
+    /// The result may still be relative.
+    /// </remarks>
+    class function ApplyOutputDirectory(const AOutputFile, AOutputDir: string;
+      AOutputFileExplicit: Boolean): string; static;
+    /// <summary>
+    /// Directory used for the SBOM. A non-empty project-file value wins.
+    /// Otherwise the IDE options value is used. Both empty means the
+    /// caller keeps the project folder.
+    /// </summary>
+    class function ChooseOutputDirectory(const ASettingsDir,
+      AFileDir: string): string; static;
+    /// <summary>
+    /// Resolves the SBOM file path: directory, explicit file, platform
+    /// decoration, then the project directory for a relative result.
+    /// </summary>
+    class function ResolveSbomOutputPath(const AOutputFile, AOutputDir,
+      AProjectDir, APlatform, AConfiguration: string;
+      AOutputFileExplicit, AIncludePlatformInOutput: Boolean): string; static;
   end;
 
   /// <summary>
@@ -316,6 +351,7 @@ type
     function ReadBuildEvidence(const AProjectInfo: TProjectInfo): TBuildEvidence;
     procedure ReportWarnings(const AWarnings, AReportedWarnings: TList<string>;
       const AProgress: Integer);
+    function ResolveConfiguredOutputPath(const AOutputPath: string): string;
     function ResolveReportOutputBasePath(const ASbomOutputPath: string): string;
     function ResolveReportOutputPath(const AOutputBasePath: string;
       AFormat: THumanReadableReportFormat): string;
@@ -536,6 +572,7 @@ uses
 class function TSbomConfig.Default: TSbomConfig;
 begin
   Result.OutputPath := 'bom.json';
+  Result.OutputDir := '';
   Result.Format := sfCycloneDxJson;
   Result.Platform := 'Win32';
   Result.PlatformExplicit := False;
@@ -601,6 +638,51 @@ begin
   LSafeConfig := SanitizeSegment(AConfiguration);
   Result := LDir + LName + '.' + LSafePlatform + '.' + LSafeConfig + LExt;
 
+end;
+
+class function TSbomConfig.ApplyOutputDirectory(const AOutputFile,
+  AOutputDir: string; AOutputFileExplicit: Boolean): string;
+var
+  LDir, LFile, LName: string;
+begin
+  // --output is a file path. The directory setting does not move it.
+  if AOutputFileExplicit then
+    Exit(AOutputFile);
+
+  LDir := Trim(AOutputDir);
+  if LDir = '' then
+    Exit(AOutputFile);
+
+  LFile := Trim(AOutputFile);
+  // "output": "build\bom.json" and an absolute file path already name a
+  // directory. outputDir does not rewrite them.
+  if (LFile <> '') and (ExtractFilePath(LFile) <> '') then
+    Exit(AOutputFile);
+
+  LName := LFile;
+  if LName = '' then
+    LName := 'bom.json';
+  Result := TPath.Combine(LDir, LName);
+end;
+
+class function TSbomConfig.ChooseOutputDirectory(const ASettingsDir,
+  AFileDir: string): string;
+begin
+  // The project file wins when it sets a directory, as report.groupByFolder does.
+  Result := Trim(AFileDir);
+  if Result = '' then
+    Result := Trim(ASettingsDir);
+end;
+
+class function TSbomConfig.ResolveSbomOutputPath(const AOutputFile, AOutputDir,
+  AProjectDir, APlatform, AConfiguration: string; AOutputFileExplicit,
+  AIncludePlatformInOutput: Boolean): string;
+begin
+  Result := ApplyOutputDirectory(AOutputFile, AOutputDir, AOutputFileExplicit);
+  if AIncludePlatformInOutput and not AOutputFileExplicit and (Result <> '') then
+    Result := DecorateOutputFileName(Result, APlatform, AConfiguration);
+  if (Result <> '') and (AProjectDir <> '') and TPath.IsRelativePath(Result) then
+    Result := TPath.Combine(AProjectDir, Result);
 end;
 
 
@@ -2069,6 +2151,9 @@ begin
         // Output path
         if LJson.GetValue('output') <> nil then
           Result.OutputPath := LJson.GetValue<string>('output');
+        // outputDir is a directory. It does not replace an "output" file path.
+        if LJson.GetValue('outputDir') <> nil then
+          Result.OutputDir := Trim(LJson.GetValue<string>('outputDir'));
 
         // Format
         if LJson.GetValue('format') <> nil then
@@ -2824,10 +2909,7 @@ begin
 
     DoProgress(Format('Found %d library component(s)', [LArtefacts.Count]), 50);
 
-    if AOutputPath <> '' then
-      LOutputPath := AOutputPath
-    else
-      LOutputPath := FConfig.OutputPath;
+    LOutputPath := ResolveConfiguredOutputPath(AOutputPath);
     if TPath.IsRelativePath(LOutputPath) then
     begin
       if LHasProject and (LProjectInfo.ProjectDir <> '') then
@@ -3186,11 +3268,9 @@ begin
     try
       DoProgress(Format('Found %d artefacts', [LArtefacts.Count]), 50);
 
-      // Determine output path
-      if AOutputPath <> '' then
-        LOutputPath := AOutputPath
-      else
-        LOutputPath := FConfig.OutputPath;
+      // Determine output path. A caller path wins. Otherwise a bare file
+      // name is placed in outputDir when that directory is set.
+      LOutputPath := ResolveConfiguredOutputPath(AOutputPath);
 
       // Make output path absolute if relative
       if TPath.IsRelativePath(LOutputPath) then
@@ -3392,6 +3472,12 @@ begin
   Result.ExplicitOverrides := ACaller.ExplicitOverrides;
   Result.WarningContext := ACaller.WarningContext;
 
+  // Place a bare file name in outputDir before decoration, so the decorated
+  // name stays in that directory. An explicit --output is left as a file path.
+  if not (scoOutputPath in ACaller.ExplicitOverrides) then
+    Result.OutputPath := TSbomConfig.ApplyOutputDirectory(
+      Result.OutputPath, Result.OutputDir, False);
+
   if Result.IncludePlatformInOutput and
      not (scoOutputPath in ACaller.ExplicitOverrides) and
      (Result.OutputPath <> '') then
@@ -3438,6 +3524,18 @@ end;
 function TDxComplyGenerator.ValidateProject(const AProjectPath: string): Boolean;
 begin
   Result := FProjectScanner.Validate(AProjectPath);
+end;
+
+function TDxComplyGenerator.ResolveConfiguredOutputPath(
+  const AOutputPath: string): string;
+begin
+  // A path passed into Generate is the file to write. outputDir applies
+  // only when the caller left the path empty. An explicit --output is
+  // recorded on ExplicitOverrides and is not moved into the directory.
+  if AOutputPath <> '' then
+    Exit(AOutputPath);
+  Result := TSbomConfig.ApplyOutputDirectory(FConfig.OutputPath, FConfig.OutputDir,
+    scoOutputPath in FConfig.ExplicitOverrides);
 end;
 
 function TDxComplyGenerator.ResolveReportOutputBasePath(

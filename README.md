@@ -105,7 +105,7 @@ GetIt installs the IDE plugin only. It does not include `dxcomply.exe`. The comm
 2. **Open your project** in RAD Studio.
 3. Choose **Project > DX.Comply - SBOM > Generate SBOM...** from the main menu.
 4. In the confirmation dialog, **select the build configuration** to use for MAP generation (the active IDE configuration is pre-selected). DX.Comply compiles the project via OTA with detailed MAP output, scans all evidence, and produces the SBOM.
-5. Done. Your `bom.json`, `bom.report.html`, and `bom.report.md` are in your project folder.
+5. Done. `bom.json`, `bom.report.html`, and `bom.report.md` are in your project folder. To send all three to one folder, set **SBOM and report directory** under **Tools > Options > Third Party > DX.Comply**. The folder is created when it does not exist. Leave **Report base path** empty so the reports stay next to `bom.json`. A report base path overrides the report files only.
 
 ### Option B: Command line / CI
 
@@ -139,7 +139,7 @@ dxcomply --project=MyApp.dproj --report=both --no-pause
 dxcomply --project=MyApp.dproj --report --no-pause
 ```
 
-When building the same project for several targets, append the platform and configuration to the default filename so subsequent runs do not overwrite each other. The output file is `bom.Win64.Release.json`. With `--report` set, the HTML report is `bom.Win64.Release.report.html`.
+When building the same project for several targets, append the platform and configuration to the default filename so subsequent runs do not overwrite each other. The output file is `bom.Win64.Release.json`. With `outputDir` set, that file is written in the output directory. With `--report` set, the HTML report is `bom.Win64.Release.report.html`, next to the SBOM.
 
 ```cmd
 dxcomply --project=MyApp.dproj --platform=Win64 --config-name=Release --include-platform-in-output --no-pause
@@ -374,6 +374,18 @@ Add a `.dxcomply.json` to your project folder and pass `--ci` so the CLI loads i
   }
 }
 ```
+
+`output` is the SBOM file path. A relative path is resolved from the project directory. `outputDir` is an optional directory for that file and for the HTML and Markdown reports. It is a separate key so an existing `"output": "bom.json"` stays a file path.
+
+```json
+"outputDir": "sbom"
+```
+
+When `outputDir` is set and `output` is a file name with no directory of its own (including the default `bom.json`), the SBOM is written there. A relative `outputDir` is resolved from the project directory. An absolute `outputDir` is used as given. The directory is created when it is missing. `--output=<file>` is always a file path and wins over `outputDir`. A relative `--output` is still resolved from the project directory. An `output` value that already contains a directory, such as `build/bom.json` or `C:\Archive\bom.json`, stays that path.
+
+`--include-platform-in-output` decorates the file name (`bom.Win64.Release.json`) and keeps the file in `outputDir` when that directory is set. The flag is ignored when `--output` is set.
+
+`report.output` is an optional base path for the HTML and Markdown reports. When it is empty, the reports are written next to the SBOM. In the IDE, **SBOM and report directory** is the same directory as `outputDir`, and **Report base path** is the same override as `report.output`. An `outputDir` key in the `.dxcomply.json` next to the project wins over the IDE directory. The IDE writes `bom.json` into that directory. With `--include-platform-in-output` and no `--output`, the CLI decorates the file name and still writes it in that directory.
 
 `spdxVersion` selects the SPDX version when `format` is `spdx-json`: `2.3` (the default) or `3.0.1` (the same value as `--spdx-version`).
 

@@ -708,7 +708,13 @@ begin
   Writeln('                                  cyclonedx-json (1.6) | cyclonedx-xml (1.6) | spdx-json');
   Writeln('  --spdx-version=<version>      SPDX version for spdx-json: 2.3 (default) | 3.0.1');
   Writeln('                                File key: spdxVersion');
-  Writeln('  --output=<path>               Output file path (default: bom.json)');
+  Writeln('  --output=<path>               Output file path (default: bom.json).');
+  Writeln('                                A relative path uses the project');
+  Writeln('                                directory. This flag wins over outputDir.');
+  Writeln('                                File key output is the file path.');
+  Writeln('                                File key outputDir is a directory.');
+  Writeln('                                A bare output name is written there.');
+  Writeln('                                Reports with no report.output follow it.');
   Writeln('  --platform=<name>             Target platform (default: Win32)');
   Writeln('                                File key: platform');
   Writeln('  --config-name=<name>          Build configuration (default: Release)');
@@ -772,8 +778,10 @@ begin
   Writeln('                                for .dpr, .dpk, and .bdsproj projects.');
   Writeln('  --no-composition-evidence     Omit source/DCU units from SBOM (binary-only)');
   Writeln('  --include-platform-in-output  Append <Platform>.<Config> to the default');
-  Writeln('                                output filename (e.g. bom.Win64.Release.json)');
-  Writeln('                                Ignored when --output is supplied');
+  Writeln('                                output filename (e.g. bom.Win64.Release.json).');
+  Writeln('                                The file stays in outputDir when that');
+  Writeln('                                directory is set. Ignored when --output');
+  Writeln('                                is supplied');
   Writeln('  --report[=<format>]           Generate companion human-readable report');
   Writeln('                                  markdown | html | both (default) | none');
   Writeln('  --report-content=<content>    Sections of the report (not of the SBOM):');
