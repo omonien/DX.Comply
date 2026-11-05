@@ -412,7 +412,9 @@ Without `--ci`, the file is not read. `--config=<path>` only chooses which file 
 
 ## Component manifest
 
-An optional components file adds one library component for each matched row and fills in supplier, licence, version, type, and package URL. The format is the DelphiSBOM schema 1.0, so a file written for that tool works here unchanged. A sample is in [docs/samples/components.sample.json](docs/samples/components.sample.json).
+An optional components file adds one library component for each matched row and fills in supplier, licence, version, type, and package URL. The file shape is DX.Comply's component manifest (see the sample and the field notes below). A sample is in [docs/samples/components.sample.json](docs/samples/components.sample.json).
+
+`schema_version` `"1.0"` is the version of this DX.Comply manifest. It is not an industry standard. The SBOM itself is CycloneDX 1.6 or SPDX. A missing `schema_version`, a value that is not a string, or any string other than `"1.0"`, is a warning, and the file is still read.
 
 ```cmd
 dxcomply --project=MyApp.dproj --manifest=components.json --no-pause
