@@ -4,9 +4,10 @@
 /// </summary>
 ///
 /// <remarks>
-/// The file format is the one published by DelphiSBOM (schema 1.0): one row
-/// per library, matched by units_exact and units_prefix. Root supplier is the
-/// application publisher. The per-component author is vendor.
+/// This is DX.Comply's components.json shape (schema_version 1.0): one row
+/// per library, matched by units_exact and units_prefix. schema_version
+/// "1.0" is the version of this manifest, not an industry standard. Root
+/// supplier is the application publisher. The per-component author is vendor.
 ///
 /// Licence values are classified as an SPDX identifier, an SPDX expression,
 /// or a plain name. Package URLs for manifest libraries use pkg:delphi, which
@@ -99,7 +100,7 @@ type
   TComponentManifest = record
     /// <summary>True when parsing succeeded.</summary>
     Loaded: Boolean;
-    /// <summary>schema_version, when present.</summary>
+    /// <summary>schema_version, when present. "1.0" is this manifest's version.</summary>
     SchemaVersion: string;
     /// <summary>last_updated, when present.</summary>
     LastUpdated: string;
@@ -331,8 +332,8 @@ const
   );
 
   /// <summary>
-  /// Practical SPDX identifier subset used by DelphiSBOM, so the same licence
-  /// strings classify the same way. Anything else becomes a name.
+  /// Practical SPDX identifier subset. A listed value is classified as an
+  /// SPDX identifier. Anything else becomes a name.
   /// </summary>
   cKnownSpdxIds: array[0..71] of string = (
     '0BSD', 'AFL-3.0', 'AGPL-3.0', 'AGPL-3.0-only', 'AGPL-3.0-or-later',
