@@ -17,6 +17,10 @@
 ///
 /// Own-code units stay in the evidence. They are not dropped and they are
 /// not attached to a third-party library.
+///
+/// An optional copyright string on a row is stored as text (a year or other
+/// copyright notice). It is not used for matching and it is not written
+/// into the SBOM.
 /// </remarks>
 ///
 /// <copyright>
@@ -92,6 +96,12 @@ type
     ExcludeUnits: TArray<string>;
     /// <summary>Freeform notes. Not written into the SBOM.</summary>
     Notes: string;
+    /// <summary>
+    /// Optional copyright text, such as a year ("2020") or a free-form
+    /// notice. Not a timestamp. Not used for matching and not written
+    /// into the SBOM.
+    /// </summary>
+    Copyright: string;
   end;
 
   /// <summary>
@@ -676,6 +686,10 @@ begin
   LStatus := ReadJsonText(AObject, 'notes', Result.Notes);
   if LStatus = jtsWrongType then
     AddWarning(AWarnings, LContext + ': "notes" should be a string and was ignored');
+
+  LStatus := ReadJsonText(AObject, 'copyright', Result.Copyright);
+  if LStatus = jtsWrongType then
+    AddWarning(AWarnings, LContext + ': "copyright" should be a string and was ignored');
 
   Result.Prefixes := ReadStringArray(AObject, 'units_prefix', LContext, AWarnings);
   Result.ExactUnits := ReadStringArray(AObject, 'units_exact', LContext, AWarnings);
@@ -1727,6 +1741,7 @@ begin
   LToken := SpdxLicenceToken(AEntry, LKind);
   Result.AddPair('licenseConcluded', LToken);
   Result.AddPair('licenseDeclared', LToken);
+  // Manifest copyright is stored on the row and is not written here yet.
   Result.AddPair('copyrightText', 'NOASSERTION');
 
   LPurl := BuildDelphiPurl(AEntry.Name, AEntry.Version, AEntry.Purl);

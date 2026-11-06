@@ -5,8 +5,8 @@
 ///
 /// <remarks>
 /// Covers matching (exact beats prefix, first row wins, scope stripping,
-/// case), licence classification, PURL generation, writer output, and the
-/// CLI / config precedence for --manifest.
+/// case), licence classification, PURL generation, writer output, optional
+/// copyright text, and the CLI / config precedence for --manifest.
 /// </remarks>
 ///
 /// <copyright>
@@ -109,6 +109,12 @@ type
     procedure Parse_BareArray_IsComponents;
     [Test]
     procedure Parse_LicenseAlias_IsAccepted;
+    /// <summary>copyright is an optional string and does not affect matching. Issue #151.</summary>
+    [Test]
+    procedure Parse_Copyright_OptionalString;
+    /// <summary>A non-string copyright is ignored. Issue #151.</summary>
+    [Test]
+    procedure Parse_Copyright_WrongType_IsIgnored;
     [Test]
     procedure Parse_ShortPrefix_Warns;
     [Test]
@@ -605,6 +611,59 @@ begin
   Assert.AreEqual('Apache-2.0', LManifest.Components[0].Licence);
   Assert.AreEqual('https://www.apache.org/licenses/LICENSE-2.0',
     LManifest.Components[0].LicenceUrl);
+end;
+
+procedure TComponentManifestTests.Parse_Copyright_OptionalString;
+var
+  LWith, LWithout: TComponentManifest;
+  I: Integer;
+begin
+  LWith := ParseManifest(
+    '{"components":[' +
+    '{"name":"Neslib XML","version":"1.0","copyright":"2020",' +
+    '"vendor":"Neslib","licence":"MIT","type":"library","units_exact":["Neslib.Xml"]},' +
+    '{"name":"Other","version":"2","copyright":"Copyright (c) 2019 Example",' +
+    '"vendor":"Example","licence":"Apache-2.0","type":"library","units_prefix":["Example"]}' +
+    ']}');
+  Assert.AreEqual(NativeInt(2), NativeInt(Length(LWith.Components)));
+  Assert.AreEqual('2020', LWith.Components[0].Copyright);
+  Assert.AreEqual('Copyright (c) 2019 Example', LWith.Components[1].Copyright);
+  Assert.IsTrue(LWith.Loaded);
+  for I := 0 to High(LWith.Warnings) do
+    Assert.IsTrue(Pos('copyright', LWith.Warnings[I]) = 0, LWith.Warnings[I]);
+  Assert.AreEqual(Ord(mmLibrary), Ord(MatchManifestUnit(LWith, 'Neslib.Xml').Kind));
+  Assert.AreEqual(0, MatchManifestUnit(LWith, 'Neslib.Xml').ComponentIndex);
+  Assert.AreEqual(1, MatchManifestUnit(LWith, 'Example.Collections').ComponentIndex);
+
+  LWithout := ParseManifest(
+    '{"components":[{"name":"Neslib XML","version":"1.0",' +
+    '"vendor":"Neslib","licence":"MIT","type":"library","units_exact":["Neslib.Xml"]}]}');
+  Assert.AreEqual('', LWithout.Components[0].Copyright);
+  Assert.IsTrue(LWithout.Loaded, 'A row without copyright must stay valid');
+  Assert.AreEqual(MatchManifestUnit(LWithout, 'Neslib.Xml').ComponentIndex,
+    MatchManifestUnit(LWith, 'Neslib.Xml').ComponentIndex);
+  Assert.AreEqual(Ord(mmLibrary), Ord(MatchManifestUnit(LWithout, 'Neslib.Xml').Kind));
+end;
+
+procedure TComponentManifestTests.Parse_Copyright_WrongType_IsIgnored;
+var
+  LManifest: TComponentManifest;
+  I: Integer;
+  LFound: Boolean;
+begin
+  LManifest := ParseManifest(
+    '{"components":[{"name":"Lib","version":"1","copyright":{"year":2020},' +
+    '"vendor":"A","licence":"MIT","type":"library","units_exact":["LibUnit"]}]}');
+  Assert.AreEqual('', LManifest.Components[0].Copyright);
+  Assert.IsTrue(LManifest.Loaded);
+  LFound := False;
+  for I := 0 to High(LManifest.Warnings) do
+    if (Pos('"copyright"', LManifest.Warnings[I]) > 0) and
+      (Pos('should be a string', LManifest.Warnings[I]) > 0) then
+      LFound := True;
+  Assert.IsTrue(LFound, 'A non-string copyright must be reported and ignored');
+  Assert.AreEqual(Ord(mmLibrary), Ord(MatchManifestUnit(LManifest, 'LibUnit').Kind));
+  Assert.AreEqual(0, MatchManifestUnit(LManifest, 'LibUnit').ComponentIndex);
 end;
 
 procedure TComponentManifestTests.Parse_ShortPrefix_Warns;

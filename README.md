@@ -436,6 +436,8 @@ If `vendor` is an email address, that address is also written as the supplier co
 
 There is no required `purl` field. When it is absent, DX.Comply writes `pkg:delphi/<name>@<version>` with the name and version percent-encoded. `pkg:delphi` is not a registered package-url type. Scanned files have no package URL. Set `purl` on a row when you want a different locator.
 
+`copyright` is an optional string on each component. Use a year, such as `"2020"`, or any other copyright text. It is not a timestamp. Leave it out when you have nothing to record; the row stays valid. DX.Comply stores the text and does not use it to match units. The CycloneDX and SPDX writers do not emit it yet. The sample sets it on OmniThreadLibrary and leaves it off the other rows.
+
 A file that cannot be read (missing, not JSON, or not an object or array) stops generation. The message names the file and the reason. Missing fields, a short prefix, or an unrecognised licence name are warnings, and the SBOM is still written. A row with match rules that hits no unit is reported as a warning. The root `supplier` is the application publisher. It is used only when `--supplier` and `product.supplier` are both empty. Its URL is copied only when `--supplier-url` and `product.supplierUrl` are also empty.
 
 ### Libraries that ship no metadata
@@ -548,7 +550,7 @@ No internet connection is required. All processing is local.
 | [Library SBOM](docs/Library-SBOM.md) | Build mode and library mode, and what each SBOM contains |
 | [FAQ](#faq) | Common questions on library mode, old DLLs, generation time, and CRA archive |
 | [Example SBOM (JSON)](docs/examples/ConwaysLifeFMX.cdx.json) | CycloneDX 1.6 from ConwaysLifeFMX in RADStudio13Demos, Release/Win32 with a map file |
-| [Component manifest sample](docs/samples/components.sample.json) | Optional components.json (supplier, licence, version, type, package URL) |
+| [Component manifest sample](docs/samples/components.sample.json) | Optional components.json (supplier, licence, version, type, package URL, copyright) |
 
 ---
 
