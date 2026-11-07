@@ -48,7 +48,6 @@ uses
   DX.Comply.Engine,
   DX.Comply.Engine.Intf,
   DX.Comply.IDE.Settings,
-  DX.Comply.ProjectScanner,
   DX.Comply.IDE.Logger,
   DX.Comply.Report.Intf;
 
@@ -233,6 +232,7 @@ uses
   DX.Comply.ComponentManifest,
   DX.Comply.IDE.AboutDialog,
   DX.Comply.IDE.BuildConfirmationDialog,
+  DX.Comply.IDE.ExpectedMapFile,
   DX.Comply.IDE.Options,
   DX.Comply.IDE.OptionsFrame,
   DX.Comply.IDE.PathSupport,
@@ -1146,8 +1146,7 @@ var
   LSelectedConfiguration: string;
   LDisablePrompt: Boolean;
   LUpdatedSettings: TDXComplyIDESettings;
-  LProjectInfo: TProjectInfo;
-  LProjectScanner: IProjectScanner;
+  LExpectedMapFilePath: string;
 begin
   Result := True;
   try
@@ -1155,68 +1154,61 @@ begin
       LActiveConfiguration := AConfig.Configuration;
 
     LSelectedConfiguration := LActiveConfiguration;
+    LExpectedMapFilePath := '';
 
-    LProjectScanner := TProjectScanner.Create;
-    LProjectInfo := LProjectScanner.Scan(AProjectPath, AConfig.Platform, LActiveConfiguration);
-    try
-      if ASettings.PromptBeforeBuild then
+    if ASettings.PromptBeforeBuild then
+    begin
+      if not ShowDXComplyBuildConfirmationDialog(AProjectPath,
+        LConfigurations, LActiveConfiguration, AConfig.Platform,
+        LSelectedConfiguration, LExpectedMapFilePath, LDisablePrompt) then
       begin
-        if not ShowDXComplyBuildConfirmationDialog(AProjectPath,
-          LConfigurations, LActiveConfiguration,
-          AConfig.Platform, LProjectInfo.MapFilePath,
-          LSelectedConfiguration, LDisablePrompt) then
-        begin
-          TIDELogger.Warning('DX.Comply: SBOM generation was cancelled by the user.');
-          Result := False;
-          Exit;
-        end;
-
-        if LDisablePrompt then
-        begin
-          LUpdatedSettings := ASettings;
-          LUpdatedSettings.PromptBeforeBuild := False;
-          TDXComplyIDESettingsStore.Save(LUpdatedSettings);
-          TIDELogger.Info('DX.Comply: The build confirmation dialog was disabled in IDE settings.');
-        end;
+        TIDELogger.Warning('DX.Comply: SBOM generation was cancelled by the user.');
+        Result := False;
+        Exit;
       end;
 
-      AConfig.Configuration := LSelectedConfiguration;
-      TIDELogger.Info('DX.Comply: Deep-Evidence build prepared for ' +
-        LSelectedConfiguration + '/' + AConfig.Platform + '.');
-
-      if not SameText(LSelectedConfiguration, LActiveConfiguration) then
+      if LDisablePrompt then
       begin
-        LProjectInfo.Free;
-        LProjectInfo := LProjectScanner.Scan(AProjectPath, AConfig.Platform, LSelectedConfiguration);
+        LUpdatedSettings := ASettings;
+        LUpdatedSettings.PromptBeforeBuild := False;
+        TDXComplyIDESettingsStore.Save(LUpdatedSettings);
+        TIDELogger.Info('DX.Comply: The build confirmation dialog was disabled in IDE settings.');
       end;
+    end
+    else
+      LExpectedMapFilePath := ResolveExpectedMapFileState(AProjectPath,
+        AConfig.Platform, LSelectedConfiguration).Path;
 
-      if Trim(LProjectInfo.MapFilePath) <> '' then
-        TIDELogger.Info('DX.Comply: Expected MAP file: ' + LProjectInfo.MapFilePath);
+    AConfig.Configuration := LSelectedConfiguration;
+    TIDELogger.Info('DX.Comply: Deep-Evidence build prepared for ' +
+      LSelectedConfiguration + '/' + AConfig.Platform + '.');
 
-      if ASettings.SaveAllModifiedFilesBeforeBuild then
+    // Same path the confirmation dialog shows for this configuration and
+    // platform. The missing-MAP check after the build uses it (issue #153).
+    if Trim(LExpectedMapFilePath) <> '' then
+      TIDELogger.Info('DX.Comply: Expected MAP file: ' + LExpectedMapFilePath);
+
+    if ASettings.SaveAllModifiedFilesBeforeBuild then
+    begin
+      TIDELogger.Info('DX.Comply: Saving modified editors before the Deep-Evidence build...');
+      SaveModifiedFiles;
+    end;
+
+    if TryOTADeepEvidenceBuild(LSelectedConfiguration, LExpectedMapFilePath) then
+    begin
+      AConfig.DeepEvidenceMode := debWhenMapMissing;
+      TIDELogger.Info('DX.Comply: OTA build succeeded. Engine-level build skipped.');
+    end
+    else
+    begin
+      TIDELogger.Warning('DX.Comply: OTA build was not successful. ' +
+        'Deep-Evidence may be incomplete.');
+      if AForceDeepEvidence and not ASettings.ContinueWithoutDeepEvidenceOnBuildFailure then
       begin
-        TIDELogger.Info('DX.Comply: Saving modified editors before the Deep-Evidence build...');
-        SaveModifiedFiles;
+        Result := False;
+        Exit;
       end;
-
-      if TryOTADeepEvidenceBuild(LSelectedConfiguration, LProjectInfo.MapFilePath) then
-      begin
-        AConfig.DeepEvidenceMode := debWhenMapMissing;
-        TIDELogger.Info('DX.Comply: OTA build succeeded. Engine-level build skipped.');
-      end
-      else
-      begin
-        TIDELogger.Warning('DX.Comply: OTA build was not successful. ' +
-          'Deep-Evidence may be incomplete.');
-        if AForceDeepEvidence and not ASettings.ContinueWithoutDeepEvidenceOnBuildFailure then
-        begin
-          Result := False;
-          Exit;
-        end;
-        AConfig.DeepEvidenceMode := debWhenMapMissing;
-      end;
-    finally
-      LProjectInfo.Free;
+      AConfig.DeepEvidenceMode := debWhenMapMissing;
     end;
   except
     on E: Exception do

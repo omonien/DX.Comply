@@ -45,6 +45,7 @@ uses
   DX.Comply.Tests.Spdx3.Writer in 'DX.Comply.Tests.Spdx3.Writer.pas',
   DX.Comply.Tests.Schema.Validator in 'DX.Comply.Tests.Schema.Validator.pas',
   DX.Comply.Tests.IDE.Settings in 'DX.Comply.Tests.IDE.Settings.pas',
+  DX.Comply.Tests.IDE.ExpectedMapFile in 'DX.Comply.Tests.IDE.ExpectedMapFile.pas',
   DX.Comply.Tests.IDE.ReadmeSupport in 'DX.Comply.Tests.IDE.ReadmeSupport.pas',
   DX.Comply.Tests.IDE.UiText in 'DX.Comply.Tests.IDE.UiText.pas',
   DX.Comply.Tests.Engine in 'DX.Comply.Tests.Engine.pas',
