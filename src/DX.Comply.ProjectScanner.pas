@@ -399,13 +399,116 @@ function ExtractVerInfoKeyValue(const AVerInfoKeys, AKey: string): string;
 
 implementation
 
+/// <summary>
+/// True when AText ends in an XML entity that still lacks its ';', such as
+/// "Smith &amp" or "A &#38". Splitting VerInfo_Keys on ';' cuts there.
+/// </summary>
+function EndsWithOpenXmlEntity(const AText: string): Boolean;
+var
+  LAmpPos, I: Integer;
+  LName: string;
+begin
+  Result := False;
+  LAmpPos := LastDelimiter('&', AText);
+  if LAmpPos = 0 then
+    Exit;
+  LName := Copy(AText, LAmpPos + 1, MaxInt);
+  if (LName = 'amp') or (LName = 'lt') or (LName = 'gt') or (LName = 'quot') or
+    (LName = 'apos') then
+    Exit(True);
+  // Numeric reference: #38 or #x26.
+  if (Length(LName) < 2) or (Length(LName) > 8) or (LName[1] <> '#') then
+    Exit;
+  for I := 2 to Length(LName) do
+    if not CharInSet(LName[I], ['0'..'9', 'a'..'f', 'A'..'F', 'x', 'X']) then
+      Exit;
+  Result := True;
+end;
+
+/// <summary>
+/// Decodes the XML entities of a value taken from the raw .dproj text:
+/// the five named ones and numeric references. Unknown text stays as it is.
+/// </summary>
+function DecodeXmlEntities(const AValue: string): string;
+var
+  I, LEnd, LCode: Integer;
+  LName: string;
+begin
+  if Pos('&', AValue) = 0 then
+    Exit(AValue);
+  Result := '';
+  I := 1;
+  while I <= Length(AValue) do
+  begin
+    if AValue[I] = '&' then
+    begin
+      LEnd := Pos(';', AValue, I + 1);
+      if (LEnd > 0) and (LEnd - I <= 9) then
+      begin
+        LName := Copy(AValue, I + 1, LEnd - I - 1);
+        LCode := -1;
+        if LName = 'amp' then
+          LCode := Ord('&')
+        else if LName = 'lt' then
+          LCode := Ord('<')
+        else if LName = 'gt' then
+          LCode := Ord('>')
+        else if LName = 'quot' then
+          LCode := Ord('"')
+        else if LName = 'apos' then
+          LCode := Ord('''')
+        else if (Length(LName) > 2) and (LName[1] = '#') and CharInSet(LName[2], ['x', 'X']) then
+          LCode := StrToIntDef('$' + Copy(LName, 3, MaxInt), -1)
+        else if (Length(LName) > 1) and (LName[1] = '#') then
+          LCode := StrToIntDef(Copy(LName, 2, MaxInt), -1);
+        if (LCode > 0) and (LCode <= $FFFF) then
+        begin
+          Result := Result + Char(LCode);
+          I := LEnd + 1;
+          Continue;
+        end;
+      end;
+    end;
+    Result := Result + AValue[I];
+    Inc(I);
+  end;
+end;
+
 function ExtractVerInfoKeyValue(const AVerInfoKeys, AKey: string): string;
 var
   LPair: string;
-  LEqualPos: Integer;
+  LEqualPos, I: Integer;
+  LParts: TArray<string>;
+  LPairs: TList<string>;
 begin
   Result := '';
-  for LPair in AVerInfoKeys.Split([';']) do
+  // The value comes from the raw .dproj text, so "&" is written "&amp;".
+  // The ';' of an entity is not a separator: such pieces are joined again
+  // before the pairs are read, and the value is decoded (issue #88).
+  LParts := AVerInfoKeys.Split([';']);
+  LPairs := TList<string>.Create;
+  try
+    I := 0;
+    while I <= High(LParts) do
+    begin
+      LPair := LParts[I];
+      while (I < High(LParts)) and EndsWithOpenXmlEntity(LPair) do
+      begin
+        Inc(I);
+        LPair := LPair + ';' + LParts[I];
+      end;
+      // The last piece of the list has no following ';' to give back.
+      if (I = High(LParts)) and EndsWithOpenXmlEntity(LPair) and
+        AVerInfoKeys.EndsWith(';') then
+        LPair := LPair + ';';
+      LPairs.Add(LPair);
+      Inc(I);
+    end;
+    LParts := LPairs.ToArray;
+  finally
+    LPairs.Free;
+  end;
+  for LPair in LParts do
   begin
     LEqualPos := Pos('=', LPair);
     if LEqualPos < 2 then
@@ -414,7 +517,7 @@ begin
     end;
     if SameText(Trim(Copy(LPair, 1, LEqualPos - 1)), AKey) then
     begin
-      Result := Trim(Copy(LPair, LEqualPos + 1, MaxInt));
+      Result := Trim(DecodeXmlEntities(Copy(LPair, LEqualPos + 1, MaxInt)));
       if Pos('$(', Result) > 0 then
       begin
         Result := '';
@@ -1702,7 +1805,9 @@ begin
   // 4. Platform+Config specific (e.g., Base_Win32 + Cfg_1)
   if (FCurrentPlatform <> '') and (FConfigKey <> '') then
   begin
-    LBlocks := GetPropertyGroupContents(FConfigKey + '_' + FCurrentPlatform);
+    // The closing parenthesis keeps Cfg_1_Android from also matching the
+    // Cfg_1_Android64 group, and Cfg_1_Win64 from matching Cfg_1_Win64x.
+    LBlocks := GetPropertyGroupContents('$(' + FConfigKey + '_' + FCurrentPlatform + ')');
     for I := 0 to High(LBlocks) do
     begin
       TakeValue(AName, LBlocks[I], LValueSoFar, LFound);

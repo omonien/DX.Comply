@@ -64,6 +64,13 @@ type
     [Test]
     procedure Write_EmptyArtefacts_CreatesValidFile;
 
+    /// <summary>
+    /// JSON output starts with "{", not with a UTF-8 byte order mark
+    /// (RFC 8259 section 8.1). Strict JSON parsers reject a leading mark.
+    /// </summary>
+    [Test]
+    procedure Write_Output_HasNoByteOrderMark;
+
     /// <summary>Top-level required CycloneDX fields must be present.</summary>
     [Test]
     procedure Write_EmptyArtefacts_HasRequiredFields;
@@ -291,6 +298,17 @@ begin
   LResult := FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo);
   Assert.IsTrue(LResult, 'Write must return True on success');
   Assert.IsTrue(TFile.Exists(FOutputFile), 'Output file must exist after Write');
+end;
+
+procedure TCycloneDxWriterTests.Write_Output_HasNoByteOrderMark;
+var
+  LBytes: TBytes;
+begin
+  Assert.IsTrue(FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LBytes := TFile.ReadAllBytes(FOutputFile);
+  Assert.IsTrue(Length(LBytes) > 0, 'Output must not be empty');
+  Assert.AreEqual(NativeInt(Ord('{')), NativeInt(LBytes[0]),
+    'The file must start with "{", not with a byte order mark');
 end;
 
 procedure TCycloneDxWriterTests.Write_EmptyArtefacts_HasRequiredFields;

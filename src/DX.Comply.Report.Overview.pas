@@ -7,8 +7,9 @@
 /// The model is built from the same data the SBOM writers use: the artefact list and
 /// the component manifest stored in the SBOM metadata. Both report writers render
 /// the same model, so the Markdown and HTML reports always agree.
-/// Issues #112 (licence overview), #113 (origin and supplier summary) and #114
-/// (third-party units without manifest).
+/// Issues #112 (licence overview), #113 (origin and supplier summary), #114
+/// (third-party units without manifest) and #157 (the log line is omitted
+/// when no unit is missing).
 /// </remarks>
 ///
 /// <copyright>
@@ -100,7 +101,9 @@ function LicenceReviewHint(const ALicence, AProductLicence: string): string;
 
 /// <summary>
 /// One-line count of third-party units without a manifest row, for the CLI and
-/// the IDE log. Empty when the build has no third-party units.
+/// the IDE log. Empty when no unit is missing a row, including when the build
+/// has no third-party units. The HTML and Markdown reports leave the section
+/// out in the same case.
 /// </summary>
 function ThirdPartyWithoutManifestLine(const AArtefacts: TArtefactList;
   const AManifestJson: string): string;
@@ -505,7 +508,8 @@ begin
   LData.Artefacts := AArtefacts;
   LData.Metadata.ComponentManifestJson := AManifestJson;
   var LOverview := BuildReportOverview(LData);
-  if LOverview.ThirdPartyUnitCount = 0 then
+  // A count of zero names a report section that is not written (issue #157).
+  if LOverview.WithoutManifestCount = 0 then
     Exit;
   Result := Format('%d of %d third-party units have no component manifest row. ' +
     'The report lists them under "Third-party units without manifest".',

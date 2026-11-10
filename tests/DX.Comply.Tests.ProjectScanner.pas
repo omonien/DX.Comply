@@ -144,6 +144,13 @@ type
     procedure ExtractVerInfoKeyValue_ReadsKey;
 
     /// <summary>
+    /// The value comes from raw .dproj XML. "&amp;amp;" is one character of the
+    /// name, and its ';' does not end the value.
+    /// </summary>
+    [Test]
+    procedure ExtractVerInfoKeyValue_DecodesXmlEntities;
+
+    /// <summary>
     /// An Android application scan expects libProject.so.map and does not
     /// accept a desktop Project.map in that directory. Win32 stays
     /// Project.map. Regression for issue #89.
@@ -295,6 +302,13 @@ type
     /// </summary>
     [Test]
     procedure Scan_ThreeLevelSearchPathChain_KeepsAllLevels;
+
+    /// <summary>
+    /// The group of a platform whose name only starts with the scanned one
+    /// (Android64 for Android, Win64x for Win64) is not read.
+    /// </summary>
+    [Test]
+    procedure Scan_PlatformConfigGroup_IgnoresLongerPlatformName;
 
     /// <summary>
     /// $(DCC_UnitSearchPath) in the first group that defines it is empty
@@ -846,6 +860,29 @@ begin
   Assert.AreEqual('', ExtractVerInfoKeyValue('CompanyName=$(Company);FileVersion=1.0', 'CompanyName'));
   Assert.AreEqual('', ExtractVerInfoKeyValue('FileVersion=1.0', 'CompanyName'));
   Assert.AreEqual('', ExtractVerInfoKeyValue('', 'CompanyName'));
+end;
+
+procedure TProjectScannerTests.ExtractVerInfoKeyValue_DecodesXmlEntities;
+begin
+  Assert.AreEqual('Smith & Sons Ltd',
+    ExtractVerInfoKeyValue('CompanyName=Smith &amp; Sons Ltd;FileVersion=1.0.0.0', 'CompanyName'));
+  Assert.AreEqual('1.0.0.0',
+    ExtractVerInfoKeyValue('CompanyName=Smith &amp; Sons Ltd;FileVersion=1.0.0.0', 'FileVersion'),
+    'The key after the entity must still be found');
+  Assert.AreEqual('A & B',
+    ExtractVerInfoKeyValue('FileVersion=1.0;CompanyName=A &amp; B', 'CompanyName'),
+    'An entity in the last pair');
+  Assert.AreEqual('Tom''s "Tools" <EU>',
+    ExtractVerInfoKeyValue('CompanyName=Tom&apos;s &quot;Tools&quot; &lt;EU&gt;;ProductName=X', 'CompanyName'));
+  Assert.AreEqual('A & B',
+    ExtractVerInfoKeyValue('CompanyName=A &#38; B;ProductName=X', 'CompanyName'),
+    'A decimal character reference');
+  Assert.AreEqual('A & B',
+    ExtractVerInfoKeyValue('CompanyName=A &#x26; B;ProductName=X', 'CompanyName'),
+    'A hexadecimal character reference');
+  Assert.AreEqual('Fish & Chips',
+    ExtractVerInfoKeyValue('CompanyName=Fish & Chips;ProductName=X', 'CompanyName'),
+    'A bare ampersand stays as it is');
 end;
 
 procedure TProjectScannerTests.Scan_PlatformOutputFile_UsesPlatformName;
@@ -1926,6 +1963,35 @@ begin
       'The most specific entry must come first: ' + JoinEntries(LPaths));
     Assert.IsTrue(LPaths.IndexOf('C:\DxcWin32Dir') < LPaths.IndexOf('C:\DxcBaseDir'),
       'The platform entry must come before the base entry: ' + JoinEntries(LPaths));
+  finally
+    LProjectInfo.Free;
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_PlatformConfigGroup_IgnoresLongerPlatformName;
+var
+  LProjectInfo: TProjectInfo;
+  LDproj: string;
+begin
+  // Cfg_1_Win32Other stands for a sibling platform whose name starts with the
+  // scanned one, as Android64 does for Android and Win64x for Win64.
+  LDproj := StringReplace(
+    ThreeLevelDproj(
+      '<DCC_UnitSearchPath>C:\DxcBaseDir</DCC_UnitSearchPath>',
+      '<DCC_Define>DXCWIN32</DCC_Define>',
+      '<DCC_UnitSearchPath>C:\DxcCfgDir;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>'),
+    '  <ItemGroup>',
+    '  <PropertyGroup Condition="''$(Cfg_1_Win32Other)''!=''''">' + sLineBreak +
+    '    <DCC_UnitSearchPath>C:\DxcOtherPlatformDir;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '  <ItemGroup>', []);
+  LProjectInfo := ScanDprojWithOverrides(LDproj, []);
+  try
+    var LPaths := LProjectInfo.ProjectSearchPaths;
+    Assert.IsTrue(HasEntry(LPaths, 'C:\DxcCfgDir'),
+      'The Cfg_1_Win32 entry must be kept: ' + JoinEntries(LPaths));
+    Assert.IsFalse(HasEntry(LPaths, 'C:\DxcOtherPlatformDir'),
+      'The group of another platform must not be read: ' + JoinEntries(LPaths));
   finally
     LProjectInfo.Free;
   end;

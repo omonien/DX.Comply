@@ -76,6 +76,8 @@ type
     procedure NamesText_IsCapped;
     [Test]
     procedure WithoutManifestLine_CountsAndEmptyWithoutThirdParty;
+    [Test]
+    procedure WithoutManifestLine_OmittedWhenNoneMissing;
   end;
 
 implementation
@@ -356,6 +358,16 @@ begin
   AddUnit('XyzGrid', 'Third party');
   var LLine := ThirdPartyWithoutManifestLine(FArtefacts, cManifest);
   Assert.IsTrue(LLine.StartsWith('1 of 2 third-party units have no component manifest row.'), LLine);
+end;
+
+procedure TReportOverviewTests.WithoutManifestLine_OmittedWhenNoneMissing;
+begin
+  // Issue #157: every third-party unit has a row, so "0 of 4" must not be logged.
+  AddUnit('JvComponent', 'Third party');
+  AddUnit('JvEdit', 'Third party');
+  AddUnit('AcmButton', 'Third party');
+  AddUnit('AcmGrid', 'Third party');
+  Assert.AreEqual('', ThirdPartyWithoutManifestLine(FArtefacts, cManifest));
 end;
 
 initialization

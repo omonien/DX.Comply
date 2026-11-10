@@ -85,7 +85,8 @@ implementation
 uses
   System.SysUtils,
   System.IOUtils,
-  System.Generics.Collections;
+  System.Generics.Collections,
+  System.Generics.Defaults;
 
 const
   cNoSupplierBody =
@@ -225,7 +226,9 @@ begin
     Exit;
 
   // Key: 'p:' + prefix for units without a row, 'm:' + index for a row.
-  var LGroups := TObjectDictionary<string, TList<string>>.Create([doOwnsValues]);
+  // Unit names are not case-sensitive, so jclBase and JclSysUtils share a group.
+  var LGroups := TObjectDictionary<string, TList<string>>.Create([doOwnsValues],
+    TIStringComparer.Ordinal);
   var LOrder := TList<string>.Create;
   var LWarnings := TList<string>.Create;
   try

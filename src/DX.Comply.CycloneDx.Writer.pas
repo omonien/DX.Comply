@@ -512,6 +512,9 @@ begin
     LOutput := TStringList.Create;
     try
       LOutput.Text := LRoot.Format(2);  // Pretty print with 2-space indent
+      // RFC 8259 section 8.1: JSON text is UTF-8 without a byte order mark.
+      // Strict parsers reject a file that starts with one.
+      LOutput.WriteBOM := False;
       LOutput.SaveToFile(AOutputPath, TEncoding.UTF8);
       Result := True;
     finally

@@ -56,6 +56,13 @@ type
     [Test]
     procedure Write_EmptyArtefacts_CreatesFile;
 
+    /// <summary>
+    /// JSON output starts with "{", not with a UTF-8 byte order mark
+    /// (RFC 8259 section 8.1). Strict JSON parsers reject a leading mark.
+    /// </summary>
+    [Test]
+    procedure Write_Output_HasNoByteOrderMark;
+
     [Test]
     procedure Write_ContainsSpdxVersion;
 
@@ -245,6 +252,17 @@ procedure TSpdxWriterTests.Write_EmptyArtefacts_CreatesFile;
 begin
   Assert.IsTrue(FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
   Assert.IsTrue(TFile.Exists(FOutputFile));
+end;
+
+procedure TSpdxWriterTests.Write_Output_HasNoByteOrderMark;
+var
+  LBytes: TBytes;
+begin
+  Assert.IsTrue(FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LBytes := TFile.ReadAllBytes(FOutputFile);
+  Assert.IsTrue(Length(LBytes) > 0, 'Output must not be empty');
+  Assert.AreEqual(NativeInt(Ord('{')), NativeInt(LBytes[0]),
+    'The file must start with "{", not with a byte order mark');
 end;
 
 procedure TSpdxWriterTests.Write_ContainsSpdxVersion;

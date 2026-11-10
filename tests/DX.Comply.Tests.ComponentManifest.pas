@@ -70,6 +70,12 @@ type
     /// <summary>units_exclude takes units out of a row's prefixes. Issue #140.</summary>
     [Test]
     procedure Match_UnitsExclude_SkipsRowPrefix;
+    /// <summary>
+    /// An excluded unit written with its Delphi scope (Vcl.Skia) stays out of
+    /// the row when the prefix matches the name without the scope. Issue #140.
+    /// </summary>
+    [Test]
+    procedure Match_UnitsExclude_FullScopedName_SkipsRowPrefix;
     [Test]
     procedure Match_StripsKnownScopePrefix;
     [Test]
@@ -389,6 +395,27 @@ begin
     'An excluded unit must not match the row (case-insensitive)');
   Assert.AreEqual(1, MatchManifestUnit(LManifest, 'AboutBox').ComponentIndex,
     'An excluded unit can still match another row');
+end;
+
+procedure TComponentManifestTests.Match_UnitsExclude_FullScopedName_SkipsRowPrefix;
+var
+  LManifest: TComponentManifest;
+begin
+  LManifest := ParseManifest(
+    '{"components":[' +
+    '{"name":"Skia4Delphi","version":"6","vendor":"A","licence":"MIT","type":"library",' +
+    '"units_prefix":["Skia"],"units_exclude":["Vcl.Skia","FMX.Skia.Canvas"]}' +
+    ']}');
+  Assert.AreEqual(0, MatchManifestUnit(LManifest, 'Skia.API').ComponentIndex,
+    'A unit that is not excluded still matches');
+  Assert.AreEqual(0, MatchManifestUnit(LManifest, 'Vcl.Skia.Designtime').ComponentIndex,
+    'Another unit of the same scope still matches by its stripped name');
+  Assert.AreEqual(NativeInt(Ord(mmNone)),
+    NativeInt(Ord(MatchManifestUnit(LManifest, 'Vcl.Skia').Kind)),
+    'The full scoped name in units_exclude must keep the unit out of the row');
+  Assert.AreEqual(NativeInt(Ord(mmNone)),
+    NativeInt(Ord(MatchManifestUnit(LManifest, 'fmx.skia.canvas').Kind)),
+    'The exclusion is case-insensitive');
 end;
 
 procedure TComponentManifestTests.Match_StripsKnownScopePrefix;
