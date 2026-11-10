@@ -213,7 +213,7 @@ type
     constructor Create(ASource: TJSONObject);
     destructor Destroy; override;
     function Convert(const AArtefacts: TArtefactList; const APackageIds: TArray<string>;
-      const AProjectName: string): TJSONObject;
+      const AProjectName, AOutputFilePath: string): TJSONObject;
   end;
 
 constructor TSpdx3Converter.Create(ASource: TJSONObject);
@@ -461,7 +461,7 @@ begin
 end;
 
 function TSpdx3Converter.Convert(const AArtefacts: TArtefactList; const APackageIds: TArray<string>;
-  const AProjectName: string): TJSONObject;
+  const AProjectName, AOutputFilePath: string): TJSONObject;
 begin
   var LDocumentLocalId := JsonText(FSource, 'SPDXID');
   var LSourceInfo := FSource.GetValue('creationInfo') as TJSONObject;
@@ -547,7 +547,8 @@ begin
     end;
 
     // Completeness, the same split CycloneDX writes as compositions.
-    var LRootIndex := FindDeliverableTargetIndex(AArtefacts, AProjectName);
+    var LRootIndex := FindDeliverableTargetIndex(AArtefacts, AProjectName,
+      AOutputFilePath);
     if LRootIndex >= 0 then
     begin
       var LRootId := Id(APackageIds[LRootIndex]);
@@ -637,7 +638,8 @@ begin
     try
       var LConverter := TSpdx3Converter.Create(LSource);
       try
-        Result := LConverter.Convert(AArtefacts, LPackageIds, AProjectInfo.ProjectName);
+        Result := LConverter.Convert(AArtefacts, LPackageIds, AProjectInfo.ProjectName,
+          AProjectInfo.OutputFilePath);
       finally
         LConverter.Free;
       end;
@@ -667,6 +669,9 @@ begin
     var LOutput := TStringList.Create;
     try
       LOutput.Text := LRoot.Format(2);
+      // RFC 8259 section 8.1: JSON text is UTF-8 without a byte order mark.
+      // Strict parsers reject a file that starts with one.
+      LOutput.WriteBOM := False;
       LOutput.SaveToFile(AOutputPath, TEncoding.UTF8);
       Result := True;
     finally

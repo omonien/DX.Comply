@@ -56,6 +56,13 @@ type
     [Test]
     procedure Write_EmptyArtefacts_CreatesFile;
 
+    /// <summary>
+    /// JSON output starts with "{", not with a UTF-8 byte order mark
+    /// (RFC 8259 section 8.1). Strict JSON parsers reject a leading mark.
+    /// </summary>
+    [Test]
+    procedure Write_Output_HasNoByteOrderMark;
+
     [Test]
     procedure Write_ContainsSpdxVersion;
 
@@ -151,6 +158,13 @@ type
     /// </summary>
     [Test]
     procedure Write_RootLicence_OnDeliverablePackage;
+    /// <summary>
+    /// The project output file keeps the product licence when its type is
+    /// not application, library, or package. A second copy of that file
+    /// does too. A neighboring application stays NOASSERTION (issue #155).
+    /// </summary>
+    [Test]
+    procedure Write_ProductLicence_OnUntypedProjectExe;
   end;
 
 implementation
@@ -238,6 +252,17 @@ procedure TSpdxWriterTests.Write_EmptyArtefacts_CreatesFile;
 begin
   Assert.IsTrue(FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
   Assert.IsTrue(TFile.Exists(FOutputFile));
+end;
+
+procedure TSpdxWriterTests.Write_Output_HasNoByteOrderMark;
+var
+  LBytes: TBytes;
+begin
+  Assert.IsTrue(FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LBytes := TFile.ReadAllBytes(FOutputFile);
+  Assert.IsTrue(Length(LBytes) > 0, 'Output must not be empty');
+  Assert.AreEqual(NativeInt(Ord('{')), NativeInt(LBytes[0]),
+    'The file must start with "{", not with a byte order mark');
 end;
 
 procedure TSpdxWriterTests.Write_ContainsSpdxVersion;
@@ -858,6 +883,52 @@ begin
     Assert.AreEqual('NOASSERTION', LPackage.GetValue<string>('licenseDeclared'));
     Assert.IsNull(LJson.GetValue('hasExtractedLicensingInfos'),
       'An SPDX identifier needs no extracted licensing info');
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TSpdxWriterTests.Write_ProductLicence_OnUntypedProjectExe;
+var
+  LJson, LPackage: TJSONObject;
+  LPackages: TJSONArray;
+  I, LLicensed: Integer;
+  LName: string;
+begin
+  FProjectInfo.ProjectName := 'OtherApp';
+  FProjectInfo.OutputFilePath := 'C:\Projects\build\XmlConvert.exe';
+  FMetadata.Licence := 'Apache-2.0';
+  FArtefacts.Add(MakeArtefact('XmlConvert.exe', 'file', '', 200));
+  FArtefacts.Add(MakeArtefact('setup\XmlConvert.exe', 'file', '', 200));
+  FArtefacts.Add(MakeArtefact('OtherApp.exe', 'application', '', 100));
+  FArtefacts.Add(MakeArtefact('bit.dll', 'library', '', 100));
+  Assert.IsTrue(FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LJson := LoadOutputJson;
+  Assert.IsNotNull(LJson);
+  try
+    LPackages := LJson.GetValue('packages') as TJSONArray;
+    Assert.IsNotNull(LPackages, 'packages must be present');
+    Assert.AreEqual(NativeInt(4), NativeInt(LPackages.Count),
+      'The project executable stays in the SBOM');
+    LLicensed := 0;
+    for I := 0 to LPackages.Count - 1 do
+    begin
+      LPackage := LPackages.Items[I] as TJSONObject;
+      LName := LPackage.GetValue<string>('name');
+      if Pos('XmlConvert.exe', LName) > 0 then
+      begin
+        Assert.AreEqual('Apache-2.0', LPackage.GetValue<string>('licenseConcluded'));
+        Assert.AreEqual('Apache-2.0', LPackage.GetValue<string>('licenseDeclared'));
+        Inc(LLicensed);
+      end
+      else
+      begin
+        Assert.AreEqual('NOASSERTION', LPackage.GetValue<string>('licenseConcluded'),
+          'A neighboring binary stays NOASSERTION');
+        Assert.AreEqual('NOASSERTION', LPackage.GetValue<string>('licenseDeclared'));
+      end;
+    end;
+    Assert.AreEqual(2, LLicensed, 'Both copies of the project executable are licensed');
   finally
     LJson.Free;
   end;

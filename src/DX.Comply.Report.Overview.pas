@@ -7,8 +7,9 @@
 /// The model is built from the same data the SBOM writers use: the artefact list and
 /// the component manifest stored in the SBOM metadata. Both report writers render
 /// the same model, so the Markdown and HTML reports always agree.
-/// Issues #112 (licence overview), #113 (origin and supplier summary) and #114
-/// (third-party units without manifest). Issue #156 lists each component of a
+/// Issues #112 (licence overview), #113 (origin and supplier summary), #114
+/// (third-party units without manifest) and #157 (the log line is omitted
+/// when no unit is missing). Issue #156 lists each component of a
 /// licence group on its own row, with the manifest version and copyright.
 /// </remarks>
 ///
@@ -131,7 +132,9 @@ function LicenceReviewHint(const ALicence, AProductLicence: string): string;
 
 /// <summary>
 /// One-line count of third-party units without a manifest row, for the CLI and
-/// the IDE log. Empty when the build has no third-party units.
+/// the IDE log. Empty when no unit is missing a row, including when the build
+/// has no third-party units. The HTML and Markdown reports leave the section
+/// out in the same case.
 /// </summary>
 function ThirdPartyWithoutManifestLine(const AArtefacts: TArtefactList;
   const AManifestJson: string): string;
@@ -525,16 +528,18 @@ begin
     if Assigned(AData.Artefacts) then
     begin
       // The built program is the product, so it is listed under the product
-      // licence, as in the SBOM (issue #131).
+      // licence, as in the SBOM (issues #131 and #155). A second copy of
+      // that file is listed the same way.
       var LDeliverable := FindDeliverableTargetIndex(AData.Artefacts,
-        AData.ProjectInfo.ProjectName);
+        AData.ProjectInfo.ProjectName, AData.ProjectInfo.OutputFilePath);
       for var i := 0 to AData.Artefacts.Count - 1 do
       begin
         var LArtefact := AData.Artefacts[i];
         var LName := ArtefactDisplayName(LArtefact);
         LOrigins.Add(OriginTitle(LArtefact), LName);
         // Units in a manifest library are covered by the library's licence.
-        if (i = LDeliverable) and (Trim(AData.Metadata.Licence) <> '') then
+        if IsSameDeliverableFile(AData.Artefacts, i, LDeliverable) and
+          (Trim(AData.Metadata.Licence) <> '') then
         begin
           LLicences.Add(Trim(AData.Metadata.Licence), LName, '', '');
         end
@@ -657,7 +662,8 @@ begin
   LData.Artefacts := AArtefacts;
   LData.Metadata.ComponentManifestJson := AManifestJson;
   var LOverview := BuildReportOverview(LData);
-  if LOverview.ThirdPartyUnitCount = 0 then
+  // A count of zero names a report section that is not written (issue #157).
+  if LOverview.WithoutManifestCount = 0 then
     Exit;
   Result := Format('%d of %d third-party units have no component manifest row. ' +
     'The report lists them under "Third-party units without manifest".',

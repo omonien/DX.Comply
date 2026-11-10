@@ -72,7 +72,7 @@ type
       ASupplier, ALicence: string): TJSONObject;
     function BuildRelationships(const AArtefacts: TArtefactList;
       const APackageIds: TArray<string>;
-      const ADocumentSpdxId, AProjectName: string): TJSONArray;
+      const ADocumentSpdxId, AProjectName, AOutputFilePath: string): TJSONArray;
   public
     /// <summary>
     /// Builds the SPDX 2.3 document in memory. APackageIds holds the package
@@ -389,7 +389,7 @@ end;
 
 function TSpdxJsonWriter.BuildRelationships(const AArtefacts: TArtefactList;
   const APackageIds: TArray<string>;
-  const ADocumentSpdxId, AProjectName: string): TJSONArray;
+  const ADocumentSpdxId, AProjectName, AOutputFilePath: string): TJSONArray;
 var
   LRelationships: TJSONArray;
   LRel: TJSONObject;
@@ -415,7 +415,8 @@ begin
   // The deliverable contains linked units and depends on runtime packages
   // and external DLLs. Same parent as the CycloneDX dependencies graph.
   // Edges use the path-based package IDs, not the filename alone.
-  LTargetIndex := FindDeliverableTargetIndex(AArtefacts, AProjectName);
+  LTargetIndex := FindDeliverableTargetIndex(AArtefacts, AProjectName,
+    AOutputFilePath);
   if LTargetIndex < 0 then
     Exit(LRelationships);
 
@@ -494,12 +495,14 @@ begin
     LRoot.AddPair('creationInfo', BuildCreationInfo(AMetadata));
 
     // Packages. IDs are assigned once so relationships point at the same values.
-    // The product licence is written on the built program only.
-    LRootIndex := FindDeliverableTargetIndex(AArtefacts, AProjectInfo.ProjectName);
+    // The product licence is written on the built program. A second copy of
+    // that file gets the same licence (issue #155).
+    LRootIndex := FindDeliverableTargetIndex(AArtefacts, AProjectInfo.ProjectName,
+      AProjectInfo.OutputFilePath);
     LPackageIds := CollectPackageSpdxIds(AArtefacts);
     LPackages := TJSONArray.Create;
     for I := 0 to AArtefacts.Count - 1 do
-      if I = LRootIndex then
+      if IsSameDeliverableFile(AArtefacts, I, LRootIndex) then
         LPackages.Add(BuildPackage(AArtefacts[I], LPackageIds[I], AMetadata.Supplier,
           AMetadata.Licence))
       else
@@ -512,7 +515,7 @@ begin
     // not one of the edges the manifest moves onto a library.
     LGraph := BuildUsesDependencyGraph(AArtefacts);
     LRoot.AddPair('relationships', BuildRelationships(AArtefacts, LPackageIds,
-      LDocumentSpdxId, AProjectInfo.ProjectName));
+      LDocumentSpdxId, AProjectInfo.ProjectName, AProjectInfo.OutputFilePath));
     if AMetadata.ComponentManifestJson <> '' then
       ApplyManifestSpdx(AMetadata.ComponentManifestJson, AArtefacts, LPackages,
         LRoot.GetValue('relationships') as TJSONArray, LPackageIds,
@@ -551,6 +554,9 @@ begin
     LOutput := TStringList.Create;
     try
       LOutput.Text := LRoot.Format(2);
+      // RFC 8259 section 8.1: JSON text is UTF-8 without a byte order mark.
+      // Strict parsers reject a file that starts with one.
+      LOutput.WriteBOM := False;
       LOutput.SaveToFile(AOutputPath, TEncoding.UTF8);
       Result := True;
     finally

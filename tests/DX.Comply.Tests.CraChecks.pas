@@ -109,6 +109,9 @@ type
     /// <summary>More than ten groups end in one counting line. Issue #110.</summary>
     [Test]
     procedure ThirdParty_ManyGroups_AreCapped;
+    /// <summary>Unit names are not case-sensitive, so two spellings of a prefix share one group.</summary>
+    [Test]
+    procedure ThirdParty_PrefixGroups_IgnoreCase;
     [Test]
     procedure ThirdPartyUnitPrefix_Cases;
   end;
@@ -566,6 +569,22 @@ begin
       Default(TComponentManifest), LArtefacts);
     Assert.AreEqual<Integer>(cMaxComponentWarningGroups + 1, Length(LWarnings));
     Assert.IsTrue(Pos('units in 3 more groups', LWarnings[High(LWarnings)]) > 0, LWarnings[High(LWarnings)]);
+  finally
+    LArtefacts.Free;
+  end;
+end;
+
+procedure TCraChecksTests.ThirdParty_PrefixGroups_IgnoreCase;
+begin
+  var LArtefacts := TArtefactList.Create;
+  try
+    LArtefacts.Add(ThirdPartyUnit('Spring.Collections'));
+    LArtefacts.Add(ThirdPartyUnit('spring.Base'));
+    var LWarnings := BuildThirdPartyComponentWarnings(TSbomConfig.Default,
+      Default(TComponentManifest), LArtefacts);
+    Assert.AreEqual<Integer>(1, Length(LWarnings), 'Spring and spring are one group');
+    Assert.IsTrue(Pos('prefix "Spring"', LWarnings[0]) > 0, LWarnings[0]);
+    Assert.IsTrue(Pos('2 units (Spring.Collections, spring.Base)', LWarnings[0]) > 0, LWarnings[0]);
   finally
     LArtefacts.Free;
   end;

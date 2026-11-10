@@ -294,7 +294,8 @@ procedure AppendManifestLibrariesXml(ALines: TStrings; const AManifestJson: stri
 /// </summary>
 procedure AppendManifestDependenciesXml(ALines: TStrings; const AManifestJson: string;
   const AArtefacts: TArtefactList; const AProjectBomRef: string;
-  AIndentLevel: Integer; const AUsesGraph: TUsesDependencyGraph);
+  AIndentLevel: Integer; const AUsesGraph: TUsesDependencyGraph;
+  const AOutputFilePath: string = '');
 
 /// <summary>
 /// bom-ref values of manifest libraries that matched at least one unit.
@@ -987,7 +988,8 @@ begin
       Exit(True);
 end;
 
-function FindPrefix(const AManifest: TComponentManifest; const AUnitName: string): Integer;
+function FindPrefix(const AManifest: TComponentManifest; const AUnitName: string;
+  const AFullUnitName: string = ''): Integer;
 var
   I, J: Integer;
   LLower: string;
@@ -1000,8 +1002,11 @@ begin
   LLower := LowerCase(AUnitName);
   for I := 0 to High(AManifest.Components) do
   begin
-    // units_exclude takes a unit out of this row's prefixes only.
-    if IsExcludedUnit(AManifest.Components[I], AUnitName) then
+    // units_exclude takes a unit out of this row's prefixes only. When the
+    // name was shortened by its Delphi scope (Vcl.Skia to Skia), an entry
+    // with the full name excludes it as well.
+    if IsExcludedUnit(AManifest.Components[I], AUnitName) or
+      ((AFullUnitName <> '') and IsExcludedUnit(AManifest.Components[I], AFullUnitName)) then
       Continue;
     for J := 0 to High(AManifest.Components[I].Prefixes) do
       if (AManifest.Components[I].Prefixes[J] <> '') and
@@ -1071,7 +1076,7 @@ begin
 
   LIndex := FindPrefix(AManifest, AUnitName);
   if (LIndex < 0) and not SameText(LStripped, AUnitName) then
-    LIndex := FindPrefix(AManifest, LStripped);
+    LIndex := FindPrefix(AManifest, LStripped, AUnitName);
   if LIndex >= 0 then
   begin
     Result.Kind := mmLibrary;
@@ -1586,7 +1591,7 @@ end;
 
 procedure AppendManifestDependenciesXml(ALines: TStrings; const AManifestJson: string;
   const AArtefacts: TArtefactList; const AProjectBomRef: string; AIndentLevel: Integer;
-  const AUsesGraph: TUsesDependencyGraph);
+  const AUsesGraph: TUsesDependencyGraph; const AOutputFilePath: string);
 var
   LManifest: TComponentManifest;
   LPlan: TManifestPlan;
@@ -1616,7 +1621,8 @@ begin
 
   LTargetIndex := -1;
   if Assigned(AArtefacts) then
-    LTargetIndex := FindDeliverableTargetIndex(AArtefacts, AProjectBomRef);
+    LTargetIndex := FindDeliverableTargetIndex(AArtefacts, AProjectBomRef,
+      AOutputFilePath);
 
   AddLine(AIndentLevel, '<dependencies>');
   AddLine(AIndentLevel + 1, '<dependency ref="' + EscapeXml(AProjectBomRef) + '">');

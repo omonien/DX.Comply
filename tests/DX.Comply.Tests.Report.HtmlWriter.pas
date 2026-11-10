@@ -79,6 +79,9 @@ type
     /// </summary>
     [Test]
     procedure Write_SbomHeaderData_AppearsInProjectOverview;
+    /// <summary>A supplier URL that is not http(s) is shown as text, not as a link.</summary>
+    [Test]
+    procedure Write_SupplierUrlWithOtherScheme_IsNotALink;
     [Test]
     procedure Write_EmptySbomHeaderData_IsOmitted;
     [Test]
@@ -329,6 +332,17 @@ begin
   Assert.IsTrue(Pos('<a href="https://example.com">https://example.com</a>', LContent) > 0);
   Assert.IsTrue(Pos('<th>Licence</th><td>Proprietary</td>', LContent) > 0);
   Assert.IsTrue(Pos('<th>Product</th><td>Demo</td>', LContent) > 0);
+end;
+
+procedure THtmlReportWriterTests.Write_SupplierUrlWithOtherScheme_IsNotALink;
+begin
+  FData.Metadata.SupplierUrl := 'javascript:alert(1)';
+  var LWriter: IHumanReadableReportWriter := THtmlReportWriter.Create;
+  Assert.IsTrue(LWriter.Write(FOutputPath, FData, THumanReadableReportConfig.Default));
+  var LContent := TFile.ReadAllText(FOutputPath, TEncoding.UTF8);
+  Assert.IsTrue(Pos('<th>Supplier URL</th><td>javascript:alert(1)</td>', LContent) > 0,
+    'The value is still shown');
+  Assert.AreEqual(0, Pos('href="javascript:', LContent), 'It must not become a link');
 end;
 
 procedure THtmlReportWriterTests.Write_EmptySbomHeaderData_IsOmitted;

@@ -38,6 +38,32 @@ type
     procedure Licences_CopyleftHint_OnlyWhenDifferentFromProduct;
     [Test]
     procedure Licences_BuiltProgram_UnderProductLicence;
+    /// <summary>
+    /// The project executable stays under the product licence when it was
+    /// not stored as an application, library, or package (issue #155).
+    /// A neighboring DLL, a local unit, and a file that only shares the
+    /// product display name stay unlicensed.
+    /// </summary>
+    [Test]
+    procedure Licences_UntypedProjectExe_UnderProductLicence;
+    /// <summary>
+    /// The project output path selects the product binary, and a second
+    /// copy of that file name carries the same licence.
+    /// </summary>
+    [Test]
+    procedure Licences_OutputPathAndSecondCopy_UnderProductLicence;
+    /// <summary>
+    /// A package binary with a numeric suffix is the product. Another
+    /// package in the same list is not.
+    /// </summary>
+    [Test]
+    procedure Licences_PackageSuffix_BeatsOtherPackage;
+    /// <summary>
+    /// Android and Linux output names use a lib prefix. That file is the
+    /// product when the stem is the project name.
+    /// </summary>
+    [Test]
+    procedure Licences_LibPrefix_MatchesProject;
     [Test]
     procedure Suppliers_FromManifestVendor_UnknownOtherwise;
     [Test]
@@ -56,6 +82,8 @@ type
     /// </summary>
     [Test]
     procedure Licences_OneRowPerComponent_SortedWithVersionAndCopyright;
+    [Test]
+    procedure WithoutManifestLine_OmittedWhenNoneMissing;
   end;
 
 implementation
@@ -125,6 +153,17 @@ begin
   end;
 end;
 
+function LicenceNames(const AGroup: TLicenceGroup): string;
+begin
+  Result := '';
+  for var i := 0 to High(AGroup.Components) do
+  begin
+    if Result <> '' then
+      Result := Result + ', ';
+    Result := Result + AGroup.Components[i].Name;
+  end;
+end;
+
 procedure TReportOverviewTests.Origins_SumEqualsSbomComponentCount;
 begin
   FData.Metadata.ComponentManifestJson := cManifest;
@@ -185,6 +224,85 @@ begin
   Assert.AreEqual('vendor.dll', LNone.Components[0].Name);
   Assert.AreEqual('', LNone.Components[0].Version);
   Assert.AreEqual('', LNone.Components[0].Copyright);
+end;
+
+procedure TReportOverviewTests.Licences_UntypedProjectExe_UnderProductLicence;
+begin
+  FData.Metadata.Licence := 'Proprietary';
+  FData.Metadata.ProductName := 'Demo';
+  FData.ProjectInfo.ProjectName := 'XmlConvert';
+  AddFile('Win64/Release/XmlConvert.exe', 'file');
+  AddFile('bit.dll', 'library');
+  AddUnit('XmlConvert', 'Local project');
+  AddFile('Demo.exe', 'file');
+  var LOverview := BuildReportOverview(FData);
+  var LProduct := FindLicence(LOverview.Licences, 'Proprietary');
+  Assert.AreEqual(2, LProduct.Count, 'Product entry and project executable');
+  Assert.IsTrue(Pos('XmlConvert.exe', LicenceNames(LProduct)) > 0,
+    'The project executable is under the product licence');
+  Assert.AreEqual(0, Pos('bit.dll', LicenceNames(LProduct)),
+    'A neighboring DLL does not inherit the product licence');
+  Assert.AreEqual(0, Pos('Demo.exe', LicenceNames(LProduct)),
+    'The product display name is not a file match');
+  var LNone := FindLicence(LOverview.Licences, cNoLicenceGroupTitle);
+  Assert.AreEqual(3, LNone.Count);
+  Assert.AreEqual(0, Pos('XmlConvert.exe', LicenceNames(LNone)),
+    'The project executable is not listed as unlicensed');
+  Assert.IsTrue(Pos('bit.dll', LicenceNames(LNone)) > 0);
+  Assert.IsTrue(Pos('Demo.exe', LicenceNames(LNone)) > 0);
+end;
+
+procedure TReportOverviewTests.Licences_OutputPathAndSecondCopy_UnderProductLicence;
+begin
+  FData.Metadata.Licence := 'Proprietary';
+  FData.Metadata.ProductName := 'XmlConvert';
+  FData.ProjectInfo.ProjectName := 'OtherApp';
+  FData.ProjectInfo.OutputFilePath := 'C:\Build\XmlConvert.exe';
+  AddFile('XmlConvert.exe', 'file');
+  FArtefacts[0] := SetPath(FArtefacts[0], 'C:\Build\XmlConvert.exe');
+  AddFile('setup\XmlConvert.exe', 'file');
+  FArtefacts[1] := SetPath(FArtefacts[1], 'C:\Build\setup\XmlConvert.exe');
+  AddFile('OtherApp.exe', 'application');
+  var LOverview := BuildReportOverview(FData);
+  var LProduct := FindLicence(LOverview.Licences, 'Proprietary');
+  Assert.AreEqual(3, LProduct.Count,
+    'Product entry and both copies of the output file');
+  Assert.IsTrue(Pos('XmlConvert.exe', LicenceNames(LProduct)) > 0);
+  var LNone := FindLicence(LOverview.Licences, cNoLicenceGroupTitle);
+  Assert.AreEqual(1, LNone.Count);
+  Assert.AreEqual('OtherApp.exe', LNone.Components[0].Name);
+end;
+
+procedure TReportOverviewTests.Licences_PackageSuffix_BeatsOtherPackage;
+begin
+  FData.Metadata.Licence := 'Proprietary';
+  FData.Metadata.ProductName := 'MyPkg';
+  FData.ProjectInfo.ProjectName := 'MyPkg';
+  AddFile('MyPkg290.bpl', 'file');
+  AddFile('other.bpl', 'package');
+  var LOverview := BuildReportOverview(FData);
+  var LProduct := FindLicence(LOverview.Licences, 'Proprietary');
+  Assert.IsTrue(Pos('MyPkg290.bpl', LicenceNames(LProduct)) > 0,
+    'The suffixed package is the product binary');
+  var LNone := FindLicence(LOverview.Licences, cNoLicenceGroupTitle);
+  Assert.AreEqual(1, LNone.Count);
+  Assert.AreEqual('other.bpl', LNone.Components[0].Name);
+end;
+
+procedure TReportOverviewTests.Licences_LibPrefix_MatchesProject;
+begin
+  FData.Metadata.Licence := 'MIT';
+  FData.Metadata.ProductName := 'Demo';
+  FData.ProjectInfo.ProjectName := 'Demo';
+  AddFile('libDemo.so', 'file');
+  AddFile('vendor.dll', 'library');
+  var LOverview := BuildReportOverview(FData);
+  var LProduct := FindLicence(LOverview.Licences, 'MIT');
+  Assert.IsTrue(Pos('libDemo.so', LicenceNames(LProduct)) > 0,
+    'A lib-prefixed binary of the project is the product');
+  var LNone := FindLicence(LOverview.Licences, cNoLicenceGroupTitle);
+  Assert.AreEqual(1, LNone.Count);
+  Assert.AreEqual('vendor.dll', LNone.Components[0].Name);
 end;
 
 procedure TReportOverviewTests.Licences_CopyleftHint_OnlyWhenDifferentFromProduct;
@@ -343,6 +461,16 @@ begin
   AddUnit('XyzGrid', 'Third party');
   var LLine := ThirdPartyWithoutManifestLine(FArtefacts, cManifest);
   Assert.IsTrue(LLine.StartsWith('1 of 2 third-party units have no component manifest row.'), LLine);
+end;
+
+procedure TReportOverviewTests.WithoutManifestLine_OmittedWhenNoneMissing;
+begin
+  // Issue #157: every third-party unit has a row, so "0 of 4" must not be logged.
+  AddUnit('JvComponent', 'Third party');
+  AddUnit('JvEdit', 'Third party');
+  AddUnit('AcmButton', 'Third party');
+  AddUnit('AcmGrid', 'Third party');
+  Assert.AreEqual('', ThirdPartyWithoutManifestLine(FArtefacts, cManifest));
 end;
 
 initialization

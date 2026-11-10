@@ -53,7 +53,8 @@ type
     /// </summary>
     function BuildComponent(const AArtefact: TArtefactInfo; const AIndex: Integer;
       AUnresolvedSource: Boolean; const ALicence: string): TJSONObject;
-    function BuildDependencies(const AArtefacts: TArtefactList; const AProjectBomRef: string): TJSONArray;
+    function BuildDependencies(const AArtefacts: TArtefactList;
+      const AProjectBomRef, AOutputFilePath: string): TJSONArray;
   public
     // ISbomWriter
     function Write(const AOutputPath: string;
@@ -379,7 +380,7 @@ begin
 end;
 
 function TCycloneDxJsonWriter.BuildDependencies(const AArtefacts: TArtefactList;
-  const AProjectBomRef: string): TJSONArray;
+  const AProjectBomRef, AOutputFilePath: string): TJSONArray;
 var
   LDependsOn: TJSONArray;
   LDep: TJSONObject;
@@ -391,7 +392,8 @@ begin
 
   // Project -> deliverable (exe/dll/bpl). When the output has no deliverable,
   // keep a single edge list so components are not dropped from the graph.
-  LTargetIndex := FindDeliverableTargetIndex(AArtefacts, AProjectBomRef);
+  LTargetIndex := FindDeliverableTargetIndex(AArtefacts, AProjectBomRef,
+    AOutputFilePath);
 
   LDep := TJSONObject.Create;
   LDep.AddPair('ref', AProjectBomRef);
@@ -472,9 +474,10 @@ begin
 
     // Components
     LComponents := TJSONArray.Create;
-    LRootIndex := FindDeliverableTargetIndex(AArtefacts, AProjectInfo.ProjectName);
+    LRootIndex := FindDeliverableTargetIndex(AArtefacts, AProjectInfo.ProjectName,
+      AProjectInfo.OutputFilePath);
     for I := 0 to AArtefacts.Count - 1 do
-      if I = LRootIndex then
+      if IsSameDeliverableFile(AArtefacts, I, LRootIndex) then
         LComponents.Add(BuildComponent(AArtefacts[I], I,
           LGraph.Status[I] = uusMissingSource, AMetadata.Licence))
       else
@@ -485,7 +488,8 @@ begin
     // Dependencies. A component manifest groups matched units under one
     // library and links those units from that library. Uses edges are added
     // after that rewrite so they are not folded into the program.
-    LDependencies := BuildDependencies(AArtefacts, AProjectInfo.ProjectName);
+    LDependencies := BuildDependencies(AArtefacts, AProjectInfo.ProjectName,
+      AProjectInfo.OutputFilePath);
     if AMetadata.ComponentManifestJson <> '' then
       ApplyManifestCycloneDxJson(AMetadata.ComponentManifestJson, AArtefacts,
         LComponents, LDependencies, AProjectInfo.ProjectName);
@@ -508,6 +512,9 @@ begin
     LOutput := TStringList.Create;
     try
       LOutput.Text := LRoot.Format(2);  // Pretty print with 2-space indent
+      // RFC 8259 section 8.1: JSON text is UTF-8 without a byte order mark.
+      // Strict parsers reject a file that starts with one.
+      LOutput.WriteBOM := False;
       LOutput.SaveToFile(AOutputPath, TEncoding.UTF8);
       Result := True;
     finally

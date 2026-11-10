@@ -203,6 +203,8 @@ DX.Comply produces **one machine-readable SBOM** and, if you ask for them, one o
 | **SPDX JSON** | 2.3 | SPDX 2.3 JSON, the SPDX default |
 | **SPDX JSON-LD** | 3.0.1 | `--format=spdx-json --spdx-version=3.0.1`, or the file key `"spdxVersion": "3.0.1"` |
 
+The JSON formats are written as UTF-8 without a byte order mark, as RFC 8259 asks, so strict JSON parsers read them.
+
 ### Human-readable companion reports (optional, opt-in via `--report=<format>`)
 
 | Report | Description |
@@ -216,7 +218,7 @@ Both reports open with three overview sections built from the same data as the S
 
 - **Origin summary.** Component counts per origin (Embarcadero RTL/VCL/FMX, local project, third party, component manifest libraries, DLLs, runtime packages, other files), with links to the detail sections. The total equals the number of components in the SBOM. Third-party units are also counted per supplier from the component manifest, the rest as unknown supplier.
 - **Licences.** Components grouped by the licence declared in the SBOM, plus a group for components without licence information. Each component is its own row, sorted by name without regard to case. Version and copyright are their own columns. The copyright is the optional `copyright` field of the component manifest, and the cell is empty when that field is not set. The declared licence, the component count and the review note are shown once for the group. Copyleft licences that differ from the product licence get a review hint. The hint is not legal advice.
-- **Third-party units without manifest.** Third-party units that no component manifest row matches, grouped by unit prefix, with the fields they are missing. The section is left out when the manifest covers every third-party unit. The CLI and the IDE log print the same count as one line.
+- **Third-party units without manifest.** Third-party units that no component manifest row matches, grouped by unit prefix, with the fields they are missing. The section is left out when the manifest covers every third-party unit. The CLI and the IDE log print the same count as one line only when at least one unit is missing.
 
 The licence table lists one component per row. The declared licence, the component count and the note are filled on the first row of that licence. In the HTML report those three cells span the rows of the group. Later rows leave them empty:
 
@@ -295,13 +297,13 @@ The CLI warnings name the flag and the `.dxcomply.json` key, as listed below. In
 - No SBOM creator email or URL. Pass `--sbom-creator=<email-or-url>` or set `sbomCreator`.
 - No product version, or the version is `0.0.0.0`. Pass `--version=<version>`, set `product.version`, or set the version info in the project options.
 - The version is `1.0.0.0` and it came from the project version info (the Delphi default for a new project). Pass `--version=<version>`, set `product.version`, or update the version info in the project options.
-- No distribution licence. Pass `--licence=<SPDX expression>` or set `product.licence`. An SPDX identifier, an expression, or a name is written on the primary component the same way as a manifest library, and as `licenseDeclared` and `licenseConcluded` on the SPDX package of the built program. The CycloneDX component of the built program (the `.exe`, `.dll` or `.bpl` of the project) carries the same licence, and the licence overview of the reports lists it under the product licence.
+- No distribution licence. Pass `--licence=<SPDX expression>` or set `product.licence`. An SPDX identifier, an expression, or a name is written on the primary component the same way as a manifest library, and as `licenseDeclared` and `licenseConcluded` on the SPDX package of the built program. The CycloneDX component of the built program (the `.exe`, `.dll` or `.bpl` of the project) carries the same licence, and the licence overview of the reports lists it under the product licence. That file is the project output path, or a binary whose name is the project name (a numeric suffix and a `lib` or `bpl` prefix still match), including when the scan did not mark it as an application, library, or package. A neighboring binary such as `bit.dll` stays without that licence. A second copy of the project binary carries the same licence and stays in the SBOM. The CLI and the IDE use the same rule.
 - The built exe, dll, or bpl was not found, so the SBOM has no hash for it. Build the project first, or check the output directory, `--platform`, and `--config-name`.
 - Third-party units without supplier or licence (BSI TR-03183-2 sections 5.2.2 and 6.1). A unit gets both only from a [component manifest](#component-manifest) row. Units without a row are grouped by unit prefix (`Jv` for `JvComponent`, `Spring` for `Spring.Collections`), and a row that lacks `vendor` or `licence` is named on its own. Up to ten groups are listed, then one line counts the rest. Add a manifest row with `vendor` and `licence` to clear the warning.
 
 #### Strict mode
 
-`--strict`, or `"strict": true` in `.dxcomply.json` with `--ci`, makes these warnings fatal for a pipeline. The SBOM and the reports are still written. When at least one CRA/BSI warning was raised, `dxcomply.exe` prints them again under `Strict mode:` and exits with code 3. Without warnings the exit code is 0. Without `--strict` the exit codes do not change.
+`--strict`, or `"strict": true` in `.dxcomply.json` with `--ci`, makes these warnings fatal for a pipeline. The SBOM and the reports are still written. When at least one CRA/BSI warning was raised, `dxcomply.exe` prints them again under `Strict mode:` and exits with code 3. Without warnings the exit code is 0. Without `--strict` the exit codes do not change. `--no-composition-evidence` leaves the units out of the SBOM, but the check for third-party units without supplier or licence still runs on the units the build links, so `--strict` fails for them in that mode too.
 
 | Exit code | Meaning |
 |-----------|---------|
@@ -314,7 +316,7 @@ The CLI warnings name the flag and the `.dxcomply.json` key, as listed below. In
 
 ## Which binaries are listed
 
-The SBOM lists the binary the `.dproj` builds (exe, dll, or bpl, including `DllSuffix` and the active configuration/platform output path). If that file is on disk it is hashed. Other `.exe`, `.dll`, `.bpl`, and `.dcp` files in the same output directory are listed too, for example a plugin DLL next to the exe.
+The SBOM lists the binary the `.dproj` builds (exe, dll, or bpl, including `DllSuffix` and the active configuration/platform output path). If that file is on disk it is hashed. Other `.exe`, `.dll`, `.bpl`, and `.dcp` files in the same output directory are listed too, for example a plugin DLL next to the exe. The project binary is attributed to the product licence in the SBOM and in the licence overview. Other binaries in that directory stay separate components and do not inherit the product licence.
 
 Subfolders are not walked. `setup\`, `tools\`, and old build directories stay out of the SBOM, so the document is smaller than in previous versions: unrelated binaries are no longer listed. Runtime packages from the project, and DLLs referenced in source, are still listed even when those files were not found by the scan.
 
@@ -394,7 +396,7 @@ When `outputDir` is set and `output` is a file name with no directory of its own
 
 `report.output` is an optional base path for the HTML and Markdown reports. When it is empty, the reports are written next to the SBOM. In the IDE, **SBOM and report directory** is the same directory as `outputDir`, and **Report base path** is the same override as `report.output`. An `outputDir` key in the `.dxcomply.json` next to the project wins over the IDE directory. The IDE writes `bom.json` into that directory. With `--include-platform-in-output` and no `--output`, the CLI decorates the file name and still writes it in that directory.
 
-`spdxVersion` selects the SPDX version when `format` is `spdx-json`: `2.3` (the default) or `3.0.1` (the same value as `--spdx-version`).
+`spdxVersion` selects the SPDX version when `format` is `spdx-json`: `2.3` (the default) or `3.0.1` (the same value as `--spdx-version`). Any other value, such as `3.0`, gives a warning, and SPDX 2.3 is written.
 
 `configName` is the build configuration (the same value as `--config-name`). `platform` matches `--platform`. Use these when the project is not built as `Release|Win32`.
 
@@ -431,7 +433,7 @@ The same path can live in `.dxcomply.json` as `"manifest"`. A relative path is r
 
 The units come from the MAP file, including a Delphi 7 `.dpr` with its `.dof` and `.cfg`. Each row matches those units by `units_exact` and/or `units_prefix` (case-insensitive). The unit name is tried as written and again with one known scope prefix removed (`System.`, `Vcl.`, `Winapi.`, and the other Delphi scopes). An exact hit beats `own_code_units`, those beat a prefix, and a library prefix beats `own_code_prefixes`. Among prefixes the longest matching prefix wins, whatever the order of the rows, so a row with `Neslib.Xml` gets `Neslib.Xml.Reader` even when a row with `Neslib` comes first. On equal length, and for exact names, the first matching row wins.
 
-`units_exclude` lists unit names that the prefixes of that row do not match. This helps with a short prefix: `"units_prefix": ["Ab"], "units_exclude": ["AboutBox"]` gives every `Ab*` unit to the row except `AboutBox`, which can still match another row or stay unmatched. A prefix shorter than 3 characters gets a warning, but it is still applied.
+`units_exclude` lists unit names that the prefixes of that row do not match. This helps with a short prefix: `"units_prefix": ["Ab"], "units_exclude": ["AboutBox"]` gives every `Ab*` unit to the row except `AboutBox`, which can still match another row or stay unmatched. For a unit with a Delphi scope, write the name either way: `Vcl.Skia` and `Skia` both keep the unit `Vcl.Skia` out of a row with the prefix `Skia`. A prefix shorter than 3 characters gets a warning, but it is still applied.
 
 `own_code_units` and `own_code_prefixes` mark the project's own units. Those units stay in the evidence. They are not dropped, and they are not attributed to a third-party library. Unmatched units stay as they are: one component each, linked from the program that was built.
 
