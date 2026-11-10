@@ -19,8 +19,8 @@
 /// not attached to a third-party library.
 ///
 /// An optional copyright string on a row is stored as text (a year or other
-/// copyright notice). It is not used for matching and it is not written
-/// into the SBOM.
+/// copyright notice). It is not used for matching. The human-readable
+/// licence summary shows it. It is not written into the SBOM.
 /// </remarks>
 ///
 /// <copyright>
@@ -98,8 +98,8 @@ type
     Notes: string;
     /// <summary>
     /// Optional copyright text, such as a year ("2020") or a free-form
-    /// notice. Not a timestamp. Not used for matching and not written
-    /// into the SBOM.
+    /// notice. Not a timestamp. Not used for matching. Shown in the
+    /// human-readable licence summary. Not written into the SBOM.
     /// </summary>
     Copyright: string;
   end;

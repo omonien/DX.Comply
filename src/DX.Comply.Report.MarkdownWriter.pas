@@ -222,16 +222,29 @@ begin
     Lines.Add('');
   end;
 
-  // Issue #112: licences as declared in the SBOM.
+  // Issue #112, #156: one row per component. The licence, the count and the
+  // note are written on the first row of the group. Later rows leave those
+  // cells empty so the group stays readable in Markdown, which has no rowspan.
   Lines.Add('## Licences');
   Lines.Add('Licences as declared in the SBOM. Review hints are not legal advice.');
   Lines.Add('');
-  Lines.Add('| Declared licence | Components | Names | Note |');
-  Lines.Add('| --- | ---: | --- | --- |');
+  Lines.Add('| Declared licence | Components | Name | Version | Copyright | Note |');
+  Lines.Add('| --- | ---: | --- | --- | --- | --- |');
   for var LGroup in LOverview.Licences do
   begin
-    Lines.Add(Format('| %s | %d | %s | %s |', [EscapeMarkdown(LGroup.Title), LGroup.Count,
-      EscapeMarkdown(LGroup.NamesText), EscapeMarkdown(LGroup.Note)]));
+    for var i := 0 to High(LGroup.Components) do
+    begin
+      var LComponent := LGroup.Components[i];
+      if i = 0 then
+        Lines.Add(Format('| %s | %d | %s | %s | %s | %s |', [
+          EscapeMarkdown(LGroup.Title), LGroup.Count,
+          EscapeMarkdown(LComponent.Name), EscapeMarkdown(LComponent.Version),
+          EscapeMarkdown(LComponent.Copyright), EscapeMarkdown(LGroup.Note)]))
+      else
+        Lines.Add(Format('| | | %s | %s | %s | |', [
+          EscapeMarkdown(LComponent.Name), EscapeMarkdown(LComponent.Version),
+          EscapeMarkdown(LComponent.Copyright)]));
+    end;
   end;
   Lines.Add('');
 

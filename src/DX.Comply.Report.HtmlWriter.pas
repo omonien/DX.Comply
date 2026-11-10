@@ -230,15 +230,34 @@ begin
   end;
   Lines.Add('</section>');
 
-  // Issue #112: licences as declared in the SBOM.
+  // Issue #112, #156: one row per component. The licence, the count and the
+  // note span the rows of the group, matching the Markdown table where those
+  // cells are filled on the first row only.
   Lines.Add('<section id="' + cAnchorLicences + '"><h2>Licences</h2>');
   Lines.Add('<p>Licences as declared in the SBOM. Review hints are not legal advice.</p>');
-  Lines.Add('<div class="table-wrap"><table><thead><tr><th>Declared licence</th><th>Components</th>' +
-    '<th>Names</th><th>Note</th></tr></thead><tbody>');
+  Lines.Add('<div class="table-wrap"><table>');
+  Lines.Add('<colgroup><col style="width:16%"><col style="width:11%"><col style="width:24%">' +
+    '<col style="width:12%"><col style="width:18%"><col style="width:19%"></colgroup>');
+  Lines.Add('<thead><tr><th>Declared licence</th><th>Components</th><th>Name</th>' +
+    '<th>Version</th><th>Copyright</th><th>Note</th></tr></thead><tbody>');
   for var LGroup in LOverview.Licences do
   begin
-    Lines.Add(Format('<tr><td>%s</td><td>%d</td><td>%s</td><td>%s</td></tr>',
-      [EscapeHtml(LGroup.Title), LGroup.Count, EscapeHtml(LGroup.NamesText), EscapeHtml(LGroup.Note)]));
+    var LSpan := '';
+    if LGroup.Count > 1 then
+      LSpan := Format(' rowspan="%d"', [LGroup.Count]);
+    for var i := 0 to High(LGroup.Components) do
+    begin
+      var LComponent := LGroup.Components[i];
+      if i = 0 then
+        Lines.Add(Format('<tr><td%s>%s</td><td%s>%d</td><td>%s</td><td>%s</td><td>%s</td><td%s>%s</td></tr>',
+          [LSpan, EscapeHtml(LGroup.Title), LSpan, LGroup.Count,
+          EscapeHtml(LComponent.Name), EscapeHtml(LComponent.Version),
+          EscapeHtml(LComponent.Copyright), LSpan, EscapeHtml(LGroup.Note)]))
+      else
+        Lines.Add(Format('<tr><td>%s</td><td>%s</td><td>%s</td></tr>', [
+          EscapeHtml(LComponent.Name), EscapeHtml(LComponent.Version),
+          EscapeHtml(LComponent.Copyright)]));
+    end;
   end;
   Lines.Add('</tbody></table></div></section>');
 

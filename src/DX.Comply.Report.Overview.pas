@@ -8,7 +8,8 @@
 /// the component manifest stored in the SBOM metadata. Both report writers render
 /// the same model, so the Markdown and HTML reports always agree.
 /// Issues #112 (licence overview), #113 (origin and supplier summary) and #114
-/// (third-party units without manifest).
+/// (third-party units without manifest). Issue #156 lists each component of a
+/// licence group on its own row, with the manifest version and copyright.
 /// </remarks>
 ///
 /// <copyright>
@@ -64,11 +65,41 @@ type
   end;
 
   /// <summary>
+  /// One component in a licence group. Version and copyright come from the
+  /// component manifest and are empty when that row does not set them.
+  /// </summary>
+  TLicenceComponent = record
+    /// <summary>Component name, without the version.</summary>
+    Name: string;
+    /// <summary>Manifest version. Empty for the product, files and units.</summary>
+    Version: string;
+    /// <summary>Manifest copyright text. Empty when the field is not set.</summary>
+    Copyright: string;
+  end;
+
+  /// <summary>
+  /// One declared licence and its components. Components are sorted by name,
+  /// case-insensitive, then by version.
+  /// </summary>
+  TLicenceGroup = record
+    /// <summary>Declared licence, or the no-licence title.</summary>
+    Title: string;
+    /// <summary>Review hint for this licence, or empty.</summary>
+    Note: string;
+    /// <summary>One entry per component.</summary>
+    Components: TArray<TLicenceComponent>;
+    function Count: Integer;
+  end;
+
+  /// <summary>
   /// Licence, origin and supplier summaries for one report.
   /// </summary>
   TReportOverview = record
-    /// <summary>Groups per licence, sorted by title. The no-licence group is last.</summary>
-    Licences: TArray<TReportGroup>;
+    /// <summary>
+    /// Groups per licence, sorted by title. The no-licence group is last.
+    /// Each group lists one component per row.
+    /// </summary>
+    Licences: TArray<TLicenceGroup>;
     /// <summary>Counts per origin class. The sum equals TotalComponents.</summary>
     Origins: TArray<TReportGroup>;
     /// <summary>Third-party units per supplier, from the component manifest.</summary>
@@ -144,6 +175,13 @@ begin
   end;
 end;
 
+{ TLicenceGroup }
+
+function TLicenceGroup.Count: Integer;
+begin
+  Result := Length(Components);
+end;
+
 type
   TGroupBuilder = class
   private
@@ -204,6 +242,118 @@ begin
     Result[i] := Default(TReportGroup);
     Result[i].Title := FTitles[LKeys[i]];
     Result[i].Names := FGroups[LKeys[i]].ToArray;
+  end;
+end;
+
+type
+  /// <summary>
+  /// Sort key for a licence component. Index keeps equal names and versions in
+  /// the order they were added, so the sort does not shuffle them.
+  /// </summary>
+  TLicenceSortItem = record
+    Component: TLicenceComponent;
+    Index: Integer;
+  end;
+
+  /// <summary>
+  /// Groups licence rows by title. The same title with different case is one
+  /// group, and the first spelling is kept. Components stay in add order until
+  /// ToArray sorts them.
+  /// </summary>
+  TLicenceGroupBuilder = class
+  private
+    FGroups: TObjectDictionary<string, TList<TLicenceComponent>>;
+    FTitles: TDictionary<string, string>;
+    FOrder: TList<string>;
+  public
+    constructor Create;
+    destructor Destroy; override;
+    procedure Add(const ATitle, AName, AVersion, ACopyright: string);
+    function ToArray: TArray<TLicenceGroup>;
+  end;
+
+procedure SortLicenceComponents(var AComponents: TArray<TLicenceComponent>);
+var
+  LItems: TArray<TLicenceSortItem>;
+  i: Integer;
+begin
+  SetLength(LItems, Length(AComponents));
+  for i := 0 to High(AComponents) do
+  begin
+    LItems[i].Component := AComponents[i];
+    LItems[i].Index := i;
+  end;
+  TArray.Sort<TLicenceSortItem>(LItems, TComparer<TLicenceSortItem>.Construct(
+    function(const ALeft, ARight: TLicenceSortItem): Integer
+    begin
+      Result := CompareText(ALeft.Component.Name, ARight.Component.Name);
+      if Result = 0 then
+        Result := CompareText(ALeft.Component.Version, ARight.Component.Version);
+      if Result = 0 then
+      begin
+        if ALeft.Index < ARight.Index then
+          Result := -1
+        else if ALeft.Index > ARight.Index then
+          Result := 1
+        else
+          Result := 0;
+      end;
+    end));
+  for i := 0 to High(AComponents) do
+    AComponents[i] := LItems[i].Component;
+end;
+
+constructor TLicenceGroupBuilder.Create;
+begin
+  inherited Create;
+  FGroups := TObjectDictionary<string, TList<TLicenceComponent>>.Create([doOwnsValues]);
+  FTitles := TDictionary<string, string>.Create;
+  FOrder := TList<string>.Create;
+end;
+
+destructor TLicenceGroupBuilder.Destroy;
+begin
+  FOrder.Free;
+  FTitles.Free;
+  FGroups.Free;
+  inherited;
+end;
+
+procedure TLicenceGroupBuilder.Add(const ATitle, AName, AVersion, ACopyright: string);
+var
+  LKey: string;
+  LList: TList<TLicenceComponent>;
+  LItem: TLicenceComponent;
+begin
+  LKey := AnsiUpperCase(ATitle);
+  if not FGroups.TryGetValue(LKey, LList) then
+  begin
+    LList := TList<TLicenceComponent>.Create;
+    FGroups.Add(LKey, LList);
+    FTitles.Add(LKey, ATitle);
+    FOrder.Add(LKey);
+  end;
+  LItem := Default(TLicenceComponent);
+  LItem.Name := Trim(AName);
+  LItem.Version := Trim(AVersion);
+  LItem.Copyright := Trim(ACopyright);
+  LList.Add(LItem);
+end;
+
+function TLicenceGroupBuilder.ToArray: TArray<TLicenceGroup>;
+var
+  LKeys: TArray<string>;
+  i: Integer;
+begin
+  LKeys := FOrder.ToArray;
+  TArray.Sort<string>(LKeys);
+  SetLength(Result, Length(LKeys));
+  for i := 0 to High(LKeys) do
+  begin
+    Result[i] := Default(TLicenceGroup);
+    Result[i].Title := FTitles[LKeys[i]];
+    Result[i].Components := FGroups[LKeys[i]].ToArray;
+    SortLicenceComponents(Result[i].Components);
   end;
 end;
 
@@ -318,7 +468,7 @@ begin
   Result.ManifestUsed := LoadManifest(AData.Metadata.ComponentManifestJson, AData.Artefacts,
     LManifest, LPlan);
 
-  var LLicences := TGroupBuilder.Create;
+  var LLicences := TLicenceGroupBuilder.Create;
   var LOrigins := TGroupBuilder.Create;
   var LSuppliers := TGroupBuilder.Create;
   var LWithout := TGroupBuilder.Create;
@@ -342,29 +492,32 @@ begin
     end;
     if Trim(AData.Metadata.Licence) <> '' then
     begin
-      LLicences.Add(Trim(AData.Metadata.Licence), LProductName + ' (product)');
+      LLicences.Add(Trim(AData.Metadata.Licence), LProductName + ' (product)', '', '');
     end
     else
     begin
-      LLicences.Add(cNoLicenceGroupTitle, LProductName + ' (product)');
+      LLicences.Add(cNoLicenceGroupTitle, LProductName + ' (product)', '', '');
     end;
 
-    // Manifest libraries carry the licence of their row.
+    // Manifest libraries carry the licence of their row. The origin summary
+    // still names the library with its version. The licence table keeps the
+    // version, and the optional copyright, in their own columns (issue #156).
     for var LLib in LPlan.Libraries do
     begin
       var LEntry := LManifest.Components[LLib.ComponentIndex];
+      var LVersion := Trim(LEntry.Version);
       var LName := LEntry.Name;
-      if Trim(LEntry.Version) <> '' then
+      if LVersion <> '' then
       begin
-        LName := LName + ' ' + Trim(LEntry.Version);
+        LName := LName + ' ' + LVersion;
       end;
       if Trim(LEntry.Licence) <> '' then
       begin
-        LLicences.Add(Trim(LEntry.Licence), LName);
+        LLicences.Add(Trim(LEntry.Licence), LEntry.Name, LVersion, LEntry.Copyright);
       end
       else
       begin
-        LLicences.Add(cNoLicenceGroupTitle, LName);
+        LLicences.Add(cNoLicenceGroupTitle, LEntry.Name, LVersion, LEntry.Copyright);
       end;
       LOrigins.Add(cManifestLibraryOrigin, LName);
     end;
@@ -383,11 +536,11 @@ begin
         // Units in a manifest library are covered by the library's licence.
         if (i = LDeliverable) and (Trim(AData.Metadata.Licence) <> '') then
         begin
-          LLicences.Add(Trim(AData.Metadata.Licence), LName);
+          LLicences.Add(Trim(AData.Metadata.Licence), LName, '', '');
         end
         else if not LGrouped.ContainsKey(i) then
         begin
-          LLicences.Add(cNoLicenceGroupTitle, LName);
+          LLicences.Add(cNoLicenceGroupTitle, LName, '', '');
         end;
         if IsThirdPartyUnit(LArtefact) then
         begin
@@ -432,10 +585,11 @@ begin
     end;
 
     // Licences: sorted, the no-licence group last, with review hints.
-    var LAll := LLicences.ToArray(True);
-    var LList := TList<TReportGroup>.Create;
+    // Components inside a group are already sorted by name.
+    var LAll := LLicences.ToArray;
+    var LList := TList<TLicenceGroup>.Create;
     try
-      var LNoLicence := Default(TReportGroup);
+      var LNoLicence := Default(TLicenceGroup);
       for var LGroup in LAll do
       begin
         if SameText(LGroup.Title, cNoLicenceGroupTitle) then
