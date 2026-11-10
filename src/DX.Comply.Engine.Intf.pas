@@ -30,6 +30,12 @@ type
   TArtefactInfo = record
     /// <summary>Full path to the file.</summary>
     FilePath: string;
+    /// <summary>
+    /// Pascal source of a unit-evidence artefact, when the resolver found
+    /// one. Component-manifest folder rules use this path. Empty when the
+    /// unit is known only by name, or only as a DCU in an output folder.
+    /// </summary>
+    SourcePath: string;
     /// <summary>Relative path from the project root.</summary>
     RelativePath: string;
     /// <summary>File size in bytes.</summary>

@@ -123,6 +123,15 @@ type
     EvidenceSources: TArray<TBuildEvidenceSourceKind>;
     Warnings: TArray<string>;
     /// <summary>
+    /// Pascal source used for manifest folder rules. The resolved .pas when
+    /// that file was found, including when the linked file is a DCU in an
+    /// output directory and the .pas is on the search path. A DCU that lives
+    /// outside an output directory keeps its own path, so a package folder of
+    /// compiled units still matches. Empty when the unit is only a name, or
+    /// when the only file is a DCU in an output directory.
+    /// </summary>
+    SourcePath: string;
+    /// <summary>
     /// Unit names from the uses clauses of ResolvedPath, when that file is a
     /// .pas that was read. Empty for a DCU or a missing file.
     /// </summary>

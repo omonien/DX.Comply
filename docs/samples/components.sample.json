@@ -17,7 +17,8 @@
       "type": "library",
       "units_prefix": ["Otl"],
       "units_exact": ["GpLists", "GpStuff"],
-      "notes": "High-performance threading library for Delphi"
+      "units_folder": ["third-party/OmniThreadLibrary"],
+      "notes": "High-performance threading library for Delphi. units_folder is optional and includes subfolders. Replace the path or remove it. A missing folder is a warning."
     },
     {
       "name": "Spring4D",
@@ -53,5 +54,6 @@
     }
   ],
   "own_code_units": ["MainForm", "AppSettings"],
-  "own_code_prefixes": ["app"]
+  "own_code_prefixes": ["app"],
+  "own_code_folders": ["src"]
 }

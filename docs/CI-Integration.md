@@ -171,7 +171,7 @@ The line printed after a successful run is the output path after that merge, inc
 
 `report.content` (or `--report-content`) chooses the parts of the HTML and Markdown reports: `all` (the default), `overview` for the origin summary, licences and third-party units without manifest, or `units` for the unit list with SHA-256 hashes. The SBOM stays complete either way.
 
-`manifest` is an optional components file (see the README section "Component manifest"). A relative path is resolved from the project directory. `--manifest` wins over the file. A missing or invalid file fails the run and names the path and the reason. The same file is used for a Delphi 7 `.dpr`: matching uses the units from the MAP file.
+`manifest` is an optional components file (see the README section "Component manifest"). A relative path is resolved from the project directory. `--manifest` wins over the file. A missing or invalid file fails the run and names the path and the reason. The same file is used for a Delphi 7 `.dpr`: matching uses the units from the MAP file. Folder entries inside the file (`units_folder`, `own_code_folders`) are resolved from the directory of that file. A folder that is not on disk is a warning, and the rule is still applied.
 
 ### Multi-platform builds
 

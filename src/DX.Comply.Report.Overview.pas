@@ -563,7 +563,8 @@ begin
           var LMatchKind := mmNone;
           if Result.ManifestUsed then
           begin
-            LMatchKind := MatchManifestUnit(LManifest, ArtefactUnitName(LArtefact)).Kind;
+            LMatchKind := MatchManifestUnit(LManifest, ArtefactUnitName(LArtefact),
+              ArtefactFolderPath(LArtefact)).Kind;
           end;
           if LMatchKind = mmNone then
           begin

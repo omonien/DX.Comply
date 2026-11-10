@@ -993,6 +993,7 @@ begin
 
     LArtefact := Default(TArtefactInfo);
     LArtefact.FilePath := LResolvedUnit.ResolvedPath;
+    LArtefact.SourcePath := LResolvedUnit.SourcePath;
     LArtefact.RelativePath := TPath.GetFileName(LResolvedUnit.ResolvedPath);
     LArtefact.Hash := LResolvedUnit.SecondaryHashSha256;
     LArtefact.HashSha512 := LResolvedUnit.PrimaryHashSha512;
