@@ -146,6 +146,20 @@ type
     /// </summary>
     [Test]
     procedure EnsureDeepEvidenceBuild_CreatePlanRaises_EnrichesResult;
+
+    /// <summary>UTF-8 build output keeps its non-ASCII characters.</summary>
+    [Test]
+    procedure DecodeBuildOutput_Utf8_IsDecoded;
+
+    /// <summary>
+    /// Build output in the console code page, such as a German umlaut in
+    /// cp850, is not valid UTF-8. It is decoded instead of raising.
+    /// </summary>
+    [Test]
+    procedure DecodeBuildOutput_OemBytes_DoNotRaise;
+
+    [Test]
+    procedure DecodeBuildOutput_Empty_ReturnsEmpty;
   end;
 
 implementation
@@ -664,6 +678,32 @@ begin
   finally
     LProjectInfo.Free;
   end;
+end;
+
+procedure TBuildOrchestratorTests.DecodeBuildOutput_Utf8_IsDecoded;
+begin
+  // "ausgef" + u umlaut (C3 BC in UTF-8) + "hrt"
+  Assert.AreEqual('ausgef' + #$00FC + 'hrt',
+    DecodeBuildOutput(TEncoding.ASCII.GetBytes('ausgef') + TBytes.Create($C3, $BC) +
+      TEncoding.ASCII.GetBytes('hrt')));
+end;
+
+procedure TBuildOrchestratorTests.DecodeBuildOutput_OemBytes_DoNotRaise;
+var
+  LText: string;
+begin
+  // $81 is u umlaut in cp850 and cp437. Alone it is not valid UTF-8.
+  LText := DecodeBuildOutput(TEncoding.ASCII.GetBytes('Build ausgef') + TBytes.Create($81) +
+    TEncoding.ASCII.GetBytes('hrt. 0 Fehler'));
+  // The character for $81 depends on the console code page of the machine,
+  // so only the text around it is compared.
+  Assert.IsTrue(LText.StartsWith('Build ausgef'), LText);
+  Assert.IsTrue(LText.EndsWith('. 0 Fehler'), LText);
+end;
+
+procedure TBuildOrchestratorTests.DecodeBuildOutput_Empty_ReturnsEmpty;
+begin
+  Assert.AreEqual('', DecodeBuildOutput(nil));
 end;
 
 initialization

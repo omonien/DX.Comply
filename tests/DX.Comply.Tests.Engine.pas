@@ -257,6 +257,21 @@ type
     [Test]
     procedure ResolveDll_SystemDirectoryUnchangedWithProjectDir;
     /// <summary>
+    /// With one copy per platform in the project tree, the copy whose PE
+    /// header names the target platform is returned.
+    /// </summary>
+    [Test]
+    procedure ResolveDll_PlatformCopies_TargetPlatformWins;
+    /// <summary>A copy for the target platform beats a copy for another platform under Installer.</summary>
+    [Test]
+    procedure ResolveDll_PlatformCopyBeatsInstallerOfOtherPlatform;
+    /// <summary>Without a platform the Installer order is the one used before.</summary>
+    [Test]
+    procedure ResolveDll_NoPlatform_KeepsInstallerOrder;
+    /// <summary>A single copy for another platform is still found.</summary>
+    [Test]
+    procedure ResolveDll_OnlyOtherPlatformCopy_IsStillFound;
+    /// <summary>
     /// A referenced DLL that lives only under Installer\Dateien gets a PE
     /// version and hashes. An unrelated DLL in that folder is not added.
     /// </summary>
@@ -342,6 +357,20 @@ type
     /// <summary>configName and platform keys are stored on the loaded config.</summary>
     [Test]
     procedure LoadConfig_ConfigNameAndPlatform;
+
+    /// <summary>
+    /// An spdxVersion the tool does not write is reported, and SPDX 2.3 is
+    /// used. A supported value gives no warning.
+    /// </summary>
+    [Test]
+    procedure LoadConfig_UnsupportedSpdxVersion_Warns;
+
+    /// <summary>
+    /// With composition evidence off, the third-party check still sees the
+    /// resolved units, so --strict cannot pass because they are hidden.
+    /// </summary>
+    [Test]
+    procedure ThirdPartyCheck_NoCompositionEvidence_StillSeesResolvedUnits;
 
     /// <summary>A JSON array root must not raise and must keep defaults.</summary>
     [Test]
@@ -568,6 +597,7 @@ uses
   Winapi.Windows,
   System.DateUtils,
   System.RegularExpressions,
+  DX.Comply.BuildEvidence.Intf,
   DX.Comply.Tests.Paths;
 
 { TEngineTests }
@@ -1858,6 +1888,99 @@ begin
   Assert.IsTrue(SameText(TPath.GetFullPath(LExpected), LResult), LResult);
 end;
 
+/// <summary>
+/// Writes a file with a minimal PE header: "MZ", the header offset at $3C,
+/// "PE", and the COFF machine field. $014C is x86, $8664 is x64.
+/// </summary>
+function MakeFakePe(const ADir, AName: string; AMachine: Word): string;
+var
+  LBytes: TBytes;
+begin
+  TDirectory.CreateDirectory(ADir);
+  Result := TPath.Combine(ADir, AName);
+  SetLength(LBytes, 128);
+  FillChar(LBytes[0], Length(LBytes), 0);
+  LBytes[0] := Ord('M');
+  LBytes[1] := Ord('Z');
+  LBytes[$3C] := $40;
+  LBytes[$40] := Ord('P');
+  LBytes[$41] := Ord('E');
+  LBytes[$44] := Lo(AMachine);
+  LBytes[$45] := Hi(AMachine);
+  TFile.WriteAllBytes(Result, LBytes);
+end;
+
+procedure TEngineTests.ResolveDll_PlatformCopies_TargetPlatformWins;
+var
+  LRoot, LOut, LWin32, LWin64, LResult: string;
+  LSource: TDllLocationSource;
+begin
+  LRoot := TPath.Combine(FTempDir, 'proj');
+  LOut := TPath.Combine(TPath.Combine(LRoot, 'Debug'), 'Win32');
+  TDirectory.CreateDirectory(LOut);
+  LWin32 := MakeFakePe(TPath.Combine(TPath.Combine(LRoot, 'lib'), 'Win32'), 'vendor.dll', $014C);
+  LWin64 := MakeFakePe(TPath.Combine(TPath.Combine(LRoot, 'lib'), 'Win64'), 'vendor.dll', $8664);
+
+  LResult := TDxComplyGenerator.ResolveExternalDllFile('vendor.dll', LOut, LRoot,
+    'Win64', [], LSource);
+  Assert.AreEqual(Ord(dlsProjectTree), Ord(LSource));
+  Assert.IsTrue(SameText(TPath.GetFullPath(LWin64), LResult),
+    'Win64 must take the x64 copy: ' + LResult);
+
+  LResult := TDxComplyGenerator.ResolveExternalDllFile('vendor.dll', LOut, LRoot,
+    'Win32', [], LSource);
+  Assert.AreEqual(Ord(dlsProjectTree), Ord(LSource));
+  Assert.IsTrue(SameText(TPath.GetFullPath(LWin32), LResult),
+    'Win32 must take the x86 copy: ' + LResult);
+end;
+
+procedure TEngineTests.ResolveDll_PlatformCopyBeatsInstallerOfOtherPlatform;
+var
+  LRoot, LOut, LExpected, LResult: string;
+  LSource: TDllLocationSource;
+begin
+  LRoot := TPath.Combine(FTempDir, 'proj');
+  LOut := TPath.Combine(TPath.Combine(LRoot, 'Debug'), 'Win64');
+  TDirectory.CreateDirectory(LOut);
+  MakeFakePe(TPath.Combine(LRoot, 'Installer'), 'vendor.dll', $014C);
+  LExpected := MakeFakePe(TPath.Combine(TPath.Combine(LRoot, 'redist'), 'x64'), 'vendor.dll', $8664);
+  LResult := TDxComplyGenerator.ResolveExternalDllFile('vendor.dll', LOut, LRoot,
+    'Win64', [], LSource);
+  Assert.AreEqual(Ord(dlsProjectTree), Ord(LSource));
+  Assert.IsTrue(SameText(TPath.GetFullPath(LExpected), LResult), LResult);
+end;
+
+procedure TEngineTests.ResolveDll_NoPlatform_KeepsInstallerOrder;
+var
+  LRoot, LOut, LExpected, LResult: string;
+  LSource: TDllLocationSource;
+begin
+  LRoot := TPath.Combine(FTempDir, 'proj');
+  LOut := TPath.Combine(TPath.Combine(LRoot, 'Debug'), 'Win64');
+  TDirectory.CreateDirectory(LOut);
+  LExpected := MakeFakePe(TPath.Combine(LRoot, 'Installer'), 'vendor.dll', $014C);
+  MakeFakePe(TPath.Combine(TPath.Combine(LRoot, 'redist'), 'x64'), 'vendor.dll', $8664);
+  LResult := TDxComplyGenerator.ResolveExternalDllFile('vendor.dll', LOut, LRoot,
+    [], LSource);
+  Assert.AreEqual(Ord(dlsProjectTree), Ord(LSource));
+  Assert.IsTrue(SameText(TPath.GetFullPath(LExpected), LResult), LResult);
+end;
+
+procedure TEngineTests.ResolveDll_OnlyOtherPlatformCopy_IsStillFound;
+var
+  LRoot, LOut, LExpected, LResult: string;
+  LSource: TDllLocationSource;
+begin
+  LRoot := TPath.Combine(FTempDir, 'proj');
+  LOut := TPath.Combine(TPath.Combine(LRoot, 'Debug'), 'Win64');
+  TDirectory.CreateDirectory(LOut);
+  LExpected := MakeFakePe(TPath.Combine(LRoot, 'redist'), 'vendor.dll', $014C);
+  LResult := TDxComplyGenerator.ResolveExternalDllFile('vendor.dll', LOut, LRoot,
+    'Win64', [], LSource);
+  Assert.AreEqual(Ord(dlsProjectTree), Ord(LSource));
+  Assert.IsTrue(SameText(TPath.GetFullPath(LExpected), LResult), LResult);
+end;
+
 procedure TEngineTests.Generate_DllOnlyInInstaller_HasVersionAndHash;
 var
   LProject, LDll, LDecoy, LLocation: string;
@@ -2169,6 +2292,94 @@ begin
     Assert.AreEqual(Ord(hrfHtml), Ord(LConfig.HumanReadableReport.Format));
   finally
     LGen.Free;
+  end;
+end;
+
+procedure TEngineTests.LoadConfig_UnsupportedSpdxVersion_Warns;
+var
+  LGen: TDxComplyGenerator;
+  LConfig: TSbomConfig;
+  LPath: string;
+begin
+  LGen := TDxComplyGenerator.Create;
+  try
+    LGen.OnProgress := OnProgress;
+
+    LPath := TEngineTests_WriteConfig(FTempDir, '{"format":"spdx-json","spdxVersion":"3.0"}');
+    FProgressMessages.Clear;
+    LConfig := LGen.LoadConfig(LPath);
+    Assert.AreEqual(Ord(sfSpdxJson), Ord(LConfig.Format), 'An unknown version writes SPDX 2.3');
+    Assert.IsTrue(Pos('Warning: spdxVersion "3.0"', FProgressMessages.Text) > 0,
+      'The unsupported value must be reported: ' + FProgressMessages.Text);
+
+    LPath := TEngineTests_WriteConfig(FTempDir, '{"format":"spdx-json","spdxVersion":"3.0.1"}');
+    FProgressMessages.Clear;
+    LConfig := LGen.LoadConfig(LPath);
+    Assert.AreEqual(Ord(sfSpdx3Json), Ord(LConfig.Format));
+    Assert.AreEqual(0, Pos('spdxVersion', FProgressMessages.Text),
+      'A supported value gives no warning: ' + FProgressMessages.Text);
+  finally
+    LGen.Free;
+  end;
+end;
+
+procedure TEngineTests.ThirdPartyCheck_NoCompositionEvidence_StillSeesResolvedUnits;
+var
+  LGen: TDxComplyGenerator;
+  LConfig: TSbomConfig;
+  LEvidence: TCompositionEvidence;
+  LUnit: TResolvedUnitInfo;
+  LArtefacts, LChecked: TArtefactList;
+  LUnitPath: string;
+begin
+  LUnitPath := TPath.Combine(FTempDir, 'JvComponent.pas');
+  TFile.WriteAllText(LUnitPath, 'unit JvComponent; interface implementation end.', TEncoding.UTF8);
+
+  LEvidence := TCompositionEvidence.Create;
+  LArtefacts := TArtefactList.Create;
+  try
+    LUnit := Default(TResolvedUnitInfo);
+    LUnit.UnitName := 'JvComponent';
+    LUnit.ResolvedPath := LUnitPath;
+    LUnit.OriginKind := uokThirdParty;
+    LEvidence.Units.Add(LUnit);
+
+    LConfig := TSbomConfig.Default;
+    LConfig.IncludeCompositionEvidence := False;
+    LGen := TDxComplyGenerator.Create(LConfig);
+    try
+      LChecked := LGen.ThirdPartyCheckArtefacts(LEvidence, LArtefacts);
+      try
+        Assert.AreEqual(NativeInt(1), NativeInt(LChecked.Count),
+          'The resolved unit must be part of the check');
+        Assert.AreEqual('unit-evidence', LChecked[0].ArtefactType);
+        Assert.AreEqual('Third party', LChecked[0].Origin);
+        Assert.AreEqual(NativeInt(0), NativeInt(LArtefacts.Count),
+          'The SBOM artefact list itself stays without units');
+      finally
+        LChecked.Free;
+      end;
+    finally
+      LGen.Free;
+    end;
+
+    // With composition evidence on, the units are already SBOM artefacts
+    // and must not be added a second time.
+    LConfig.IncludeCompositionEvidence := True;
+    LGen := TDxComplyGenerator.Create(LConfig);
+    try
+      LChecked := LGen.ThirdPartyCheckArtefacts(LEvidence, LArtefacts);
+      try
+        Assert.AreEqual(NativeInt(0), NativeInt(LChecked.Count));
+      finally
+        LChecked.Free;
+      end;
+    finally
+      LGen.Free;
+    end;
+  finally
+    LArtefacts.Free;
+    LEvidence.Free;
   end;
 end;
 
