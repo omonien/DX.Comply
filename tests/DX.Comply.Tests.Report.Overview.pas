@@ -38,6 +38,32 @@ type
     procedure Licences_CopyleftHint_OnlyWhenDifferentFromProduct;
     [Test]
     procedure Licences_BuiltProgram_UnderProductLicence;
+    /// <summary>
+    /// The project executable stays under the product licence when it was
+    /// not stored as an application, library, or package (issue #155).
+    /// A neighboring DLL, a local unit, and a file that only shares the
+    /// product display name stay unlicensed.
+    /// </summary>
+    [Test]
+    procedure Licences_UntypedProjectExe_UnderProductLicence;
+    /// <summary>
+    /// The project output path selects the product binary, and a second
+    /// copy of that file name carries the same licence.
+    /// </summary>
+    [Test]
+    procedure Licences_OutputPathAndSecondCopy_UnderProductLicence;
+    /// <summary>
+    /// A package binary with a numeric suffix is the product. Another
+    /// package in the same list is not.
+    /// </summary>
+    [Test]
+    procedure Licences_PackageSuffix_BeatsOtherPackage;
+    /// <summary>
+    /// Android and Linux output names use a lib prefix. That file is the
+    /// product when the stem is the project name.
+    /// </summary>
+    [Test]
+    procedure Licences_LibPrefix_MatchesProject;
     [Test]
     procedure Suppliers_FromManifestVendor_UnknownOtherwise;
     [Test]
@@ -158,6 +184,85 @@ begin
   var LOverview := BuildReportOverview(FData);
   var LProduct := FindGroup(LOverview.Licences, 'LicenseRef-Proprietary');
   Assert.AreEqual(2, LProduct.Count, 'Product entry and built program');
+  var LNone := FindGroup(LOverview.Licences, cNoLicenceGroupTitle);
+  Assert.AreEqual(1, LNone.Count);
+  Assert.AreEqual('vendor.dll', LNone.Names[0]);
+end;
+
+procedure TReportOverviewTests.Licences_UntypedProjectExe_UnderProductLicence;
+begin
+  FData.Metadata.Licence := 'Proprietary';
+  FData.Metadata.ProductName := 'Demo';
+  FData.ProjectInfo.ProjectName := 'XmlConvert';
+  AddFile('Win64/Release/XmlConvert.exe', 'file');
+  AddFile('bit.dll', 'library');
+  AddUnit('XmlConvert', 'Local project');
+  AddFile('Demo.exe', 'file');
+  var LOverview := BuildReportOverview(FData);
+  var LProduct := FindGroup(LOverview.Licences, 'Proprietary');
+  Assert.AreEqual(2, LProduct.Count, 'Product entry and project executable');
+  Assert.IsTrue(Pos('XmlConvert.exe', LProduct.NamesText) > 0,
+    'The project executable is under the product licence');
+  Assert.AreEqual(0, Pos('bit.dll', LProduct.NamesText),
+    'A neighboring DLL does not inherit the product licence');
+  Assert.AreEqual(0, Pos('Demo.exe', LProduct.NamesText),
+    'The product display name is not a file match');
+  var LNone := FindGroup(LOverview.Licences, cNoLicenceGroupTitle);
+  Assert.AreEqual(3, LNone.Count);
+  Assert.AreEqual(0, Pos('XmlConvert.exe', LNone.NamesText),
+    'The project executable is not listed as unlicensed');
+  Assert.IsTrue(Pos('bit.dll', LNone.NamesText) > 0);
+  Assert.IsTrue(Pos('Demo.exe', LNone.NamesText) > 0);
+end;
+
+procedure TReportOverviewTests.Licences_OutputPathAndSecondCopy_UnderProductLicence;
+begin
+  FData.Metadata.Licence := 'Proprietary';
+  FData.Metadata.ProductName := 'XmlConvert';
+  FData.ProjectInfo.ProjectName := 'OtherApp';
+  FData.ProjectInfo.OutputFilePath := 'C:\Build\XmlConvert.exe';
+  AddFile('XmlConvert.exe', 'file');
+  FArtefacts[0] := SetPath(FArtefacts[0], 'C:\Build\XmlConvert.exe');
+  AddFile('setup\XmlConvert.exe', 'file');
+  FArtefacts[1] := SetPath(FArtefacts[1], 'C:\Build\setup\XmlConvert.exe');
+  AddFile('OtherApp.exe', 'application');
+  var LOverview := BuildReportOverview(FData);
+  var LProduct := FindGroup(LOverview.Licences, 'Proprietary');
+  Assert.AreEqual(3, LProduct.Count,
+    'Product entry and both copies of the output file');
+  Assert.IsTrue(Pos('XmlConvert.exe', LProduct.NamesText) > 0);
+  var LNone := FindGroup(LOverview.Licences, cNoLicenceGroupTitle);
+  Assert.AreEqual(1, LNone.Count);
+  Assert.AreEqual('OtherApp.exe', LNone.Names[0]);
+end;
+
+procedure TReportOverviewTests.Licences_PackageSuffix_BeatsOtherPackage;
+begin
+  FData.Metadata.Licence := 'Proprietary';
+  FData.Metadata.ProductName := 'MyPkg';
+  FData.ProjectInfo.ProjectName := 'MyPkg';
+  AddFile('MyPkg290.bpl', 'file');
+  AddFile('other.bpl', 'package');
+  var LOverview := BuildReportOverview(FData);
+  var LProduct := FindGroup(LOverview.Licences, 'Proprietary');
+  Assert.IsTrue(Pos('MyPkg290.bpl', LProduct.NamesText) > 0,
+    'The suffixed package is the product binary');
+  var LNone := FindGroup(LOverview.Licences, cNoLicenceGroupTitle);
+  Assert.AreEqual(1, LNone.Count);
+  Assert.AreEqual('other.bpl', LNone.Names[0]);
+end;
+
+procedure TReportOverviewTests.Licences_LibPrefix_MatchesProject;
+begin
+  FData.Metadata.Licence := 'MIT';
+  FData.Metadata.ProductName := 'Demo';
+  FData.ProjectInfo.ProjectName := 'Demo';
+  AddFile('libDemo.so', 'file');
+  AddFile('vendor.dll', 'library');
+  var LOverview := BuildReportOverview(FData);
+  var LProduct := FindGroup(LOverview.Licences, 'MIT');
+  Assert.IsTrue(Pos('libDemo.so', LProduct.NamesText) > 0,
+    'A lib-prefixed binary of the project is the product');
   var LNone := FindGroup(LOverview.Licences, cNoLicenceGroupTitle);
   Assert.AreEqual(1, LNone.Count);
   Assert.AreEqual('vendor.dll', LNone.Names[0]);

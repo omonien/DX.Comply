@@ -372,16 +372,18 @@ begin
     if Assigned(AData.Artefacts) then
     begin
       // The built program is the product, so it is listed under the product
-      // licence, as in the SBOM (issue #131).
+      // licence, as in the SBOM (issues #131 and #155). A second copy of
+      // that file is listed the same way.
       var LDeliverable := FindDeliverableTargetIndex(AData.Artefacts,
-        AData.ProjectInfo.ProjectName);
+        AData.ProjectInfo.ProjectName, AData.ProjectInfo.OutputFilePath);
       for var i := 0 to AData.Artefacts.Count - 1 do
       begin
         var LArtefact := AData.Artefacts[i];
         var LName := ArtefactDisplayName(LArtefact);
         LOrigins.Add(OriginTitle(LArtefact), LName);
         // Units in a manifest library are covered by the library's licence.
-        if (i = LDeliverable) and (Trim(AData.Metadata.Licence) <> '') then
+        if IsSameDeliverableFile(AData.Artefacts, i, LDeliverable) and
+          (Trim(AData.Metadata.Licence) <> '') then
         begin
           LLicences.Add(Trim(AData.Metadata.Licence), LName);
         end

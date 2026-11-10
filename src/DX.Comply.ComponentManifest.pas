@@ -294,7 +294,8 @@ procedure AppendManifestLibrariesXml(ALines: TStrings; const AManifestJson: stri
 /// </summary>
 procedure AppendManifestDependenciesXml(ALines: TStrings; const AManifestJson: string;
   const AArtefacts: TArtefactList; const AProjectBomRef: string;
-  AIndentLevel: Integer; const AUsesGraph: TUsesDependencyGraph);
+  AIndentLevel: Integer; const AUsesGraph: TUsesDependencyGraph;
+  const AOutputFilePath: string = '');
 
 /// <summary>
 /// bom-ref values of manifest libraries that matched at least one unit.
@@ -1586,7 +1587,7 @@ end;
 
 procedure AppendManifestDependenciesXml(ALines: TStrings; const AManifestJson: string;
   const AArtefacts: TArtefactList; const AProjectBomRef: string; AIndentLevel: Integer;
-  const AUsesGraph: TUsesDependencyGraph);
+  const AUsesGraph: TUsesDependencyGraph; const AOutputFilePath: string);
 var
   LManifest: TComponentManifest;
   LPlan: TManifestPlan;
@@ -1616,7 +1617,8 @@ begin
 
   LTargetIndex := -1;
   if Assigned(AArtefacts) then
-    LTargetIndex := FindDeliverableTargetIndex(AArtefacts, AProjectBomRef);
+    LTargetIndex := FindDeliverableTargetIndex(AArtefacts, AProjectBomRef,
+      AOutputFilePath);
 
   AddLine(AIndentLevel, '<dependencies>');
   AddLine(AIndentLevel + 1, '<dependency ref="' + EscapeXml(AProjectBomRef) + '">');
