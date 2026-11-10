@@ -121,6 +121,13 @@ type
     procedure Write_RootLicence_BetweenVersionAndProperties;
     [Test]
     procedure Write_ProductLicence_OnBuiltProgramOnly;
+    /// <summary>
+    /// The project output file keeps the product licence when its type is
+    /// not application, library, or package. A second copy of that file
+    /// does too. A neighboring application does not (issue #155).
+    /// </summary>
+    [Test]
+    procedure Write_ProductLicence_OnUntypedProjectExe;
 
     /// <summary>Component hashes must precede purl.</summary>
     [Test]
@@ -461,6 +468,50 @@ begin
   Assert.IsTrue(Pos('vendor.dll', LSecond) > 0);
   Assert.AreEqual(0, Pos('<licenses>', LSecond),
     'Other files must not get the product licence');
+  Assert.AreEqual(0, Integer(Length(CycloneDxXmlSequenceErrors(LContent))),
+    'The component licence must keep the CycloneDX 1.6 element order');
+end;
+
+procedure TCycloneDxXmlWriterTests.Write_ProductLicence_OnUntypedProjectExe;
+var
+  LContent, LComponents, LRest, LChunk: string;
+  LStart, LAt, LLicensed: Integer;
+begin
+  FProjectInfo.ProjectName := 'OtherApp';
+  FProjectInfo.OutputFilePath := 'C:\Projects\build\XmlConvert.exe';
+  FMetadata.Licence := 'MIT';
+  FArtefacts.Add(MakeArtefact('XmlConvert.exe', 'file', 'abcd1234ef', 1024));
+  FArtefacts.Add(MakeArtefact('setup\XmlConvert.exe', 'file', 'abcd1234ef', 2048));
+  FArtefacts.Add(MakeArtefact('OtherApp.exe', 'application', 'abcd1234ef', 512));
+  FArtefacts.Add(MakeArtefact('bit.dll', 'library', 'abcd1234ef', 256));
+  Assert.IsTrue(FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LContent := LoadOutputContent;
+  LStart := Pos('<components>', LContent);
+  Assert.IsTrue(LStart > 0, 'The document must contain components');
+  LComponents := Copy(LContent, LStart, Pos('</components>', LContent) - LStart);
+  Assert.IsTrue(Pos('XmlConvert.exe', LComponents) > 0);
+  Assert.IsTrue(Pos('OtherApp.exe', LComponents) > 0);
+  Assert.IsTrue(Pos('bit.dll', LComponents) > 0);
+  LRest := LComponents;
+  LLicensed := 0;
+  while True do
+  begin
+    LAt := Pos('</component>', LRest);
+    if LAt = 0 then
+      Break;
+    LChunk := Copy(LRest, 1, LAt);
+    LRest := Copy(LRest, LAt + Length('</component>'), MaxInt);
+    if Pos('XmlConvert.exe', LChunk) > 0 then
+    begin
+      Assert.IsTrue(Pos('<licenses>', LChunk) > Pos('<hashes>', LChunk),
+        'The project executable carries the licence after its hashes');
+      Inc(LLicensed);
+    end;
+    if (Pos('OtherApp.exe', LChunk) > 0) or (Pos('bit.dll', LChunk) > 0) then
+      Assert.AreEqual(0, Pos('<licenses>', LChunk),
+        'A neighboring binary must not get the product licence');
+  end;
+  Assert.AreEqual(2, LLicensed, 'Both copies of the project executable are licensed');
   Assert.AreEqual(0, Integer(Length(CycloneDxXmlSequenceErrors(LContent))),
     'The component licence must keep the CycloneDX 1.6 element order');
 end;

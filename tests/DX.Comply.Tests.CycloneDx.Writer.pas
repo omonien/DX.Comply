@@ -215,6 +215,13 @@ type
     procedure Write_RootLicence_OnMetadataComponent;
     [Test]
     procedure Write_ProductLicence_OnBuiltProgramOnly;
+    /// <summary>
+    /// The project output file keeps the product licence when its type is
+    /// not application, library, or package. A second copy of that file
+    /// does too. A neighboring application does not (issue #155).
+    /// </summary>
+    [Test]
+    procedure Write_ProductLicence_OnUntypedProjectExe;
   end;
 
 implementation
@@ -1107,6 +1114,65 @@ begin
     LComponent := LComponents.Items[1] as TJSONObject;
     Assert.IsNull(LComponent.GetValue('licenses'),
       'Other files must not get the product licence');
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TCycloneDxWriterTests.Write_ProductLicence_OnUntypedProjectExe;
+var
+  LJson, LDep, LComponent: TJSONObject;
+  LComponents, LDeps, LDependsOn: TJSONArray;
+  I, LLicensed: Integer;
+  LName: string;
+begin
+  FProjectInfo.ProjectName := 'OtherApp';
+  FProjectInfo.OutputFilePath := TPath.Combine(TPath.GetTempPath, 'XmlConvert.exe');
+  FMetadata.Licence := 'LicenseRef-Proprietary';
+  FArtefacts.Add(MakeArtefact('XmlConvert.exe', 'file', 'abcd1234ef', 1024));
+  FArtefacts.Add(MakeArtefact('setup\XmlConvert.exe', 'file', 'abcd1234ef', 2048));
+  FArtefacts.Add(MakeArtefact('OtherApp.exe', 'application', 'abcd1234ef', 512));
+  FArtefacts.Add(MakeArtefact('bit.dll', 'library', 'abcd1234ef', 256));
+  Assert.IsTrue(FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LJson := LoadOutputJson;
+  Assert.IsNotNull(LJson);
+  try
+    LComponents := LJson.GetValue('components') as TJSONArray;
+    Assert.IsNotNull(LComponents, 'components must be present');
+    Assert.AreEqual(NativeInt(4), NativeInt(LComponents.Count),
+      'The project executable stays in the SBOM');
+    LLicensed := 0;
+    for I := 0 to LComponents.Count - 1 do
+    begin
+      LComponent := LComponents.Items[I] as TJSONObject;
+      LName := LComponent.GetValue<string>('name');
+      if Pos('XmlConvert.exe', LName) > 0 then
+      begin
+        Assert.IsNotNull(LComponent.GetValue('licenses'),
+          'The project executable must carry the product licence');
+        Assert.IsTrue(Pos('LicenseRef-Proprietary', LComponent.ToJSON) > 0);
+        Inc(LLicensed);
+      end
+      else
+        Assert.IsNull(LComponent.GetValue('licenses'),
+          'A neighboring binary must not get the product licence');
+    end;
+    Assert.AreEqual(2, LLicensed, 'Both copies of the project executable are licensed');
+
+    LDeps := LJson.GetValue('dependencies') as TJSONArray;
+    Assert.IsNotNull(LDeps, 'dependencies array must be present');
+    LDependsOn := nil;
+    for I := 0 to LDeps.Count - 1 do
+    begin
+      LDep := LDeps.Items[I] as TJSONObject;
+      if LDep.GetValue<string>('ref') = 'OtherApp' then
+        LDependsOn := LDep.GetValue('dependsOn') as TJSONArray;
+    end;
+    Assert.IsNotNull(LDependsOn, 'the project dependency entry must exist');
+    Assert.AreEqual(NativeInt(1), NativeInt(LDependsOn.Count),
+      'the project must depend only on the deliverable');
+    Assert.AreEqual('comp-0', LDependsOn.Items[0].Value,
+      'the project must depend on the output file, not a neighboring exe');
   finally
     LJson.Free;
   end;

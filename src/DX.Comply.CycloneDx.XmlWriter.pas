@@ -65,9 +65,9 @@ type
     procedure BuildComponent(const AArtefact: TArtefactInfo; const AIndex: Integer;
       AUnresolvedSource: Boolean; const ALicence: string);
     procedure BuildComponents(const AArtefacts: TArtefactList; const AMetadata: TSbomMetadata;
-      const AGraph: TUsesDependencyGraph; const AProjectName: string);
-    procedure BuildDependencies(const AArtefacts: TArtefactList; const AProjectBomRef: string;
-      const AGraph: TUsesDependencyGraph);
+      const AGraph: TUsesDependencyGraph; const AProjectName, AOutputFilePath: string);
+    procedure BuildDependencies(const AArtefacts: TArtefactList;
+      const AProjectBomRef, AOutputFilePath: string; const AGraph: TUsesDependencyGraph);
   public
     function Write(const AOutputPath: string;
       const AMetadata: TSbomMetadata;
@@ -384,15 +384,15 @@ end;
 
 procedure TCycloneDxXmlWriter.BuildComponents(const AArtefacts: TArtefactList;
   const AMetadata: TSbomMetadata; const AGraph: TUsesDependencyGraph;
-  const AProjectName: string);
+  const AProjectName, AOutputFilePath: string);
 var
   I: Integer;
   LRootIndex: Integer;
 begin
   OpenTag('components');
-  LRootIndex := FindDeliverableTargetIndex(AArtefacts, AProjectName);
+  LRootIndex := FindDeliverableTargetIndex(AArtefacts, AProjectName, AOutputFilePath);
   for I := 0 to AArtefacts.Count - 1 do
-    if I = LRootIndex then
+    if IsSameDeliverableFile(AArtefacts, I, LRootIndex) then
       BuildComponent(AArtefacts[I], I, AGraph.Status[I] = uusMissingSource,
         AMetadata.Licence)
     else
@@ -406,7 +406,7 @@ begin
 end;
 
 procedure TCycloneDxXmlWriter.BuildDependencies(const AArtefacts: TArtefactList;
-  const AProjectBomRef: string; const AGraph: TUsesDependencyGraph);
+  const AProjectBomRef, AOutputFilePath: string; const AGraph: TUsesDependencyGraph);
 var
   I: Integer;
   LGroup: Integer;
@@ -415,7 +415,8 @@ begin
   // Same shape as the JSON writer: project -> deliverable, and the
   // deliverable depends on runtime packages, external DLLs and linked units.
   OpenTag('dependencies');
-  LTargetIndex := FindDeliverableTargetIndex(AArtefacts, AProjectBomRef);
+  LTargetIndex := FindDeliverableTargetIndex(AArtefacts, AProjectBomRef,
+    AOutputFilePath);
 
   OpenTag('dependency', 'ref="' + EscapeXml(AProjectBomRef) + '"');
   if LTargetIndex >= 0 then
@@ -475,12 +476,15 @@ begin
 
     LGraph := BuildUsesDependencyGraph(AArtefacts);
     BuildMetadata(AMetadata, AProjectInfo);
-    BuildComponents(AArtefacts, AMetadata, LGraph, AProjectInfo.ProjectName);
+    BuildComponents(AArtefacts, AMetadata, LGraph, AProjectInfo.ProjectName,
+      AProjectInfo.OutputFilePath);
     if AMetadata.ComponentManifestJson <> '' then
       AppendManifestDependenciesXml(FLines, AMetadata.ComponentManifestJson,
-        AArtefacts, AProjectInfo.ProjectName, FIndentLevel, LGraph)
+        AArtefacts, AProjectInfo.ProjectName, FIndentLevel, LGraph,
+        AProjectInfo.OutputFilePath)
     else
-      BuildDependencies(AArtefacts, AProjectInfo.ProjectName, LGraph);
+      BuildDependencies(AArtefacts, AProjectInfo.ProjectName,
+        AProjectInfo.OutputFilePath, LGraph);
 
     if AMetadata.LibraryCompositions then
     begin

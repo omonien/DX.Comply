@@ -489,14 +489,25 @@ type
   end;
 
 /// <summary>
-/// Index of the built exe, dll or bpl inside AArtefacts, or -1 when the
-/// list has no deliverable. An exe is preferred over a dll or bpl, and a
-/// file whose name matches AProjectName is preferred over other files of
-/// the same kind. Runtime packages and source-scanned DLL references are
-/// not deliverables.
+/// Index of the built program inside AArtefacts, or -1 when the list has
+/// none. An exe is preferred over a dll or bpl. A file whose name is
+/// AProjectName is preferred, including a lib or bpl prefix and a numeric
+/// package suffix. AOutputFilePath wins when that file is in the list.
+/// A binary is still a candidate when its artefact type is not application,
+/// package, or library, so the project's own executable is not left as an
+/// unlicensed component (issue #155). Runtime packages and unit evidence
+/// are not deliverables. Pass an empty output path when it is unknown.
 /// </summary>
 function FindDeliverableTargetIndex(const AArtefacts: TArtefactList;
-  const AProjectName: string): Integer;
+  const AProjectName: string; const AOutputFilePath: string = ''): Integer;
+
+/// <summary>
+/// True when AIndex is ADeliverableIndex, or when both artefacts share
+/// that file name. A second copy of the project binary then carries the
+/// same licence. The dependency root stays the single best index.
+/// </summary>
+function IsSameDeliverableFile(const AArtefacts: TArtefactList;
+  AIndex, ADeliverableIndex: Integer): Boolean;
 
 /// <summary>
 /// Grouping order for a dependency edge: 0 runtime package, 1 external
@@ -749,13 +760,172 @@ begin
     Result := -1;
 end;
 
+function ArtefactFileName(const AArtefact: TArtefactInfo): string;
+begin
+  // Same last-segment rule as the SBOM file name, so '/' and '\' both match.
+  Result := BsiComponentFileName(AArtefact.RelativePath);
+  if Result = '' then
+    Result := BsiComponentFileName(AArtefact.FilePath);
+end;
+
+function ArtefactStem(const AFileName: string): string;
+var
+  LDot: Integer;
+begin
+  LDot := LastDelimiter('.', AFileName);
+  if LDot <= 1 then
+    Result := AFileName
+  else
+    Result := Copy(AFileName, 1, LDot - 1);
+end;
+
+function ArtefactExtension(const AFileName: string): string;
+var
+  LDot: Integer;
+begin
+  LDot := LastDelimiter('.', AFileName);
+  if LDot <= 1 then
+    Result := ''
+  else
+    Result := Copy(AFileName, LDot, MaxInt);
+end;
+
+function IsAllDigits(const AValue: string): Boolean;
+var
+  LChar: Char;
+begin
+  Result := AValue <> '';
+  for LChar in AValue do
+    if not CharInSet(LChar, ['0'..'9']) then
+      Exit(False);
+end;
+
+function StemMatchesProject(const AStem, AProjectName: string): Boolean;
+var
+  LStem: string;
+  LRest: string;
+begin
+  Result := False;
+  if (AStem = '') or (AProjectName = '') then
+    Exit;
+  if SameText(AStem, AProjectName) then
+    Exit(True);
+
+  // Android output is lib<Project>.so. Linux packages are bpl<Project>.so.
+  // Strip that prefix only when the project name does not already use it.
+  LStem := AStem;
+  if not StartsText('lib', AProjectName) and StartsText('lib', LStem) and
+    (Length(LStem) > 3) then
+    LStem := Copy(LStem, 4, MaxInt)
+  else if not StartsText('bpl', AProjectName) and StartsText('bpl', LStem) and
+    (Length(LStem) > 3) then
+    LStem := Copy(LStem, 4, MaxInt);
+
+  if SameText(LStem, AProjectName) then
+    Exit(True);
+
+  // DllSuffix appends digits, for example MyPkg290.bpl for project MyPkg.
+  if StartsText(AProjectName, LStem) and (Length(LStem) > Length(AProjectName)) then
+  begin
+    LRest := Copy(LStem, Length(AProjectName) + 1, MaxInt);
+    Result := IsAllDigits(LRest);
+  end;
+end;
+
+function IsShippableBinaryExtension(const AExtension: string): Boolean;
+begin
+  // An empty extension is a Linux or macOS application.
+  Result := SameText(AExtension, '.exe') or SameText(AExtension, '.dll') or
+    SameText(AExtension, '.bpl') or SameText(AExtension, '.so') or
+    SameText(AExtension, '.dylib') or SameText(AExtension, '.a') or
+    (AExtension = '');
+end;
+
+function ExtensionKindScore(const AExtension: string): Integer;
+begin
+  if SameText(AExtension, '.exe') or (AExtension = '') then
+    Result := 300
+  else if SameText(AExtension, '.bpl') then
+    Result := 200
+  else if SameText(AExtension, '.dll') or SameText(AExtension, '.so') or
+    SameText(AExtension, '.dylib') or SameText(AExtension, '.a') then
+    Result := 100
+  else
+    Result := -1;
+end;
+
+function IsBlockedDeliverableType(const AArtefactType: string): Boolean;
+begin
+  // Units, runtime packages, and framework packages are not the product
+  // binary, even when a stem happens to match the project name.
+  Result := SameText(AArtefactType, 'unit-evidence') or
+    SameText(AArtefactType, 'runtime-package') or
+    SameText(AArtefactType, 'framework') or
+    SameText(AArtefactType, 'required-package');
+end;
+
+function OutputPathMatchScore(const AArtefact: TArtefactInfo;
+  const AOutputFilePath: string): Integer;
+var
+  LOutputName: string;
+  LFileName: string;
+begin
+  Result := -1;
+  if AOutputFilePath = '' then
+    Exit;
+  // The path from the project file is the dependency root. Another copy
+  // of that file name is still the product, but it ranks just below.
+  if SameText(AArtefact.FilePath, AOutputFilePath) or
+    SameText(AArtefact.RelativePath, AOutputFilePath) then
+    Exit(1000);
+  LOutputName := BsiComponentFileName(AOutputFilePath);
+  if LOutputName = '' then
+    Exit;
+  LFileName := ArtefactFileName(AArtefact);
+  if (LFileName <> '') and SameText(LFileName, LOutputName) then
+    Result := 900;
+end;
+
+function DeliverableScore(const AArtefact: TArtefactInfo;
+  const AProjectName, AOutputFilePath: string): Integer;
+var
+  LFileName: string;
+  LStem: string;
+  LExt: string;
+  LTypeScore: Integer;
+  LPathScore: Integer;
+begin
+  Result := -1;
+  if IsBlockedDeliverableType(AArtefact.ArtefactType) then
+    Exit;
+
+  LFileName := ArtefactFileName(AArtefact);
+  LStem := ArtefactStem(LFileName);
+  LExt := ArtefactExtension(LFileName);
+
+  LPathScore := OutputPathMatchScore(AArtefact, AOutputFilePath);
+  if LPathScore >= 0 then
+    Exit(LPathScore);
+
+  LTypeScore := TargetKindScore(AArtefact.ArtefactType);
+  if LTypeScore >= 0 then
+    Result := LTypeScore
+  else if StemMatchesProject(LStem, AProjectName) and
+    IsShippableBinaryExtension(LExt) then
+    Result := ExtensionKindScore(LExt)
+  else
+    Exit;
+
+  if StemMatchesProject(LStem, AProjectName) then
+    Inc(Result, 10);
+end;
+
 function FindDeliverableTargetIndex(const AArtefacts: TArtefactList;
-  const AProjectName: string): Integer;
+  const AProjectName: string; const AOutputFilePath: string): Integer;
 var
   I: Integer;
   LScore: Integer;
   LBest: Integer;
-  LName: string;
 begin
   Result := -1;
   LBest := -1;
@@ -764,20 +934,33 @@ begin
 
   for I := 0 to AArtefacts.Count - 1 do
   begin
-    LScore := TargetKindScore(AArtefacts[I].ArtefactType);
-    if LScore < 0 then
-      Continue;
-
-    LName := TPath.GetFileNameWithoutExtension(AArtefacts[I].RelativePath);
-    if (AProjectName <> '') and SameText(LName, AProjectName) then
-      Inc(LScore, 10);
-
+    LScore := DeliverableScore(AArtefacts[I], AProjectName, AOutputFilePath);
     if LScore > LBest then
     begin
       LBest := LScore;
       Result := I;
     end;
   end;
+end;
+
+function IsSameDeliverableFile(const AArtefacts: TArtefactList;
+  AIndex, ADeliverableIndex: Integer): Boolean;
+var
+  LWinner: string;
+  LName: string;
+begin
+  Result := False;
+  if not Assigned(AArtefacts) or (ADeliverableIndex < 0) or
+    (ADeliverableIndex >= AArtefacts.Count) or (AIndex < 0) or
+    (AIndex >= AArtefacts.Count) then
+    Exit;
+  if AIndex = ADeliverableIndex then
+    Exit(True);
+  LWinner := ArtefactFileName(AArtefacts[ADeliverableIndex]);
+  if LWinner = '' then
+    Exit;
+  LName := ArtefactFileName(AArtefacts[AIndex]);
+  Result := (LName <> '') and SameText(LName, LWinner);
 end;
 
 function ArtefactDependencyGroup(const AArtefact: TArtefactInfo): Integer;
