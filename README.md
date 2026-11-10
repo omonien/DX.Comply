@@ -217,8 +217,15 @@ The JSON formats are written as UTF-8 without a byte order mark, as RFC 8259 ask
 Both reports open with three overview sections built from the same data as the SBOM:
 
 - **Origin summary.** Component counts per origin (Embarcadero RTL/VCL/FMX, local project, third party, component manifest libraries, DLLs, runtime packages, other files), with links to the detail sections. The total equals the number of components in the SBOM. Third-party units are also counted per supplier from the component manifest, the rest as unknown supplier.
-- **Licences.** Components grouped by the licence declared in the SBOM, plus a group for components without licence information. Copyleft licences that differ from the product licence get a review hint. The hint is not legal advice.
+- **Licences.** Components grouped by the licence declared in the SBOM, plus a group for components without licence information. Each component is its own row, sorted by name without regard to case. Version and copyright are their own columns. The copyright is the optional `copyright` field of the component manifest, and the cell is empty when that field is not set. The declared licence, the component count and the review note are shown once for the group. Copyleft licences that differ from the product licence get a review hint. The hint is not legal advice.
 - **Third-party units without manifest.** Third-party units that no component manifest row matches, grouped by unit prefix, with the fields they are missing. The section is left out when the manifest covers every third-party unit. The CLI and the IDE log print the same count as one line only when at least one unit is missing.
+
+The licence table lists one component per row. The declared licence, the component count and the note are filled on the first row of that licence. In the HTML report those three cells span the rows of the group. Later rows leave them empty:
+
+| Declared licence | Components | Name | Version | Copyright | Note |
+| --- | ---: | --- | --- | --- | --- |
+| Apache-2.0 | 2 | Logger Pro | 2.1.2 | 2020 | |
+| | | Spring4D | 2.0 | | |
 
 `--report-content` chooses which of these parts a report contains. It changes the HTML and Markdown reports only. The SBOM always lists every component.
 
@@ -438,7 +445,7 @@ If `vendor` is an email address, that address is also written as the supplier co
 
 There is no required `purl` field. When it is absent, DX.Comply writes `pkg:delphi/<name>@<version>` with the name and version percent-encoded. `pkg:delphi` is not a registered package-url type. Scanned files have no package URL. Set `purl` on a row when you want a different locator.
 
-`copyright` is an optional string on each component. Use a year, such as `"2020"`, or any other copyright text. It is not a timestamp. Leave it out when you have nothing to record; the row stays valid. DX.Comply stores the text and does not use it to match units. The CycloneDX and SPDX writers do not emit it yet. The sample sets it on OmniThreadLibrary and leaves it off the other rows.
+`copyright` is an optional string on each component. Use a year, such as `"2020"`, or any other copyright text. It is not a timestamp. Leave it out when you have nothing to record; the row stays valid. DX.Comply stores the text and does not use it to match units. The HTML and Markdown licence summary shows it, and leaves the Copyright cell empty when the field is absent. The CycloneDX and SPDX writers do not emit it yet. The sample sets it on OmniThreadLibrary and leaves it off the other rows, so a report that matches those rows shows `2020` for OmniThreadLibrary and an empty Copyright cell for Spring4D, SynEdit and TMS VCL UI Pack.
 
 A file that cannot be read (missing, not JSON, or not an object or array) stops generation. The message names the file and the reason. Missing fields, a short prefix, or an unrecognised licence name are warnings, and the SBOM is still written. A row with match rules that hits no unit is reported as a warning. The root `supplier` is the application publisher. It is used only when `--supplier` and `product.supplier` are both empty. Its URL is copied only when `--supplier-url` and `product.supplierUrl` are also empty.
 

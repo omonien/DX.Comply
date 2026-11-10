@@ -78,6 +78,12 @@ type
     /// <summary>Content units writes the unit list without the overview sections. Issue #126.</summary>
     [Test]
     procedure Write_ContentUnits_OmitsOverview;
+    /// <summary>
+    /// The licence table has one row per component, sorted by name, with
+    /// version and copyright columns. Issue #156.
+    /// </summary>
+    [Test]
+    procedure Write_LicenceTable_OneRowPerComponent;
   end;
 
 implementation
@@ -307,8 +313,11 @@ begin
   Assert.IsTrue(Pos('| [Third party](#third-party-units-without-manifest) | 1 |', LContent) > 0);
   Assert.IsTrue(Pos('| **Total SBOM components** | **2** |', LContent) > 0);
   Assert.IsTrue(Pos('## Licences', LContent) > 0);
-  Assert.IsTrue(Pos('| Proprietary | 2 | Demo (product), ', LContent) > 0);
-  Assert.IsTrue(Pos('| No licence information | 1 |', LContent) > 0);
+  Assert.IsTrue(Pos('| Declared licence | Components | Name | Version | Copyright | Note |', LContent) > 0);
+  Assert.AreEqual(0, Pos('| Declared licence | Components | Names | Note |', LContent));
+  Assert.IsTrue(Pos('| Proprietary | 2 | Demo (product) |  |  |  |', LContent) > 0);
+  Assert.IsTrue(Pos('| | | Demo.exe |  |  | |', LContent) > 0);
+  Assert.IsTrue(Pos('| No licence information | 1 | JvComponent |  |  |  |', LContent) > 0);
   Assert.IsTrue(Pos('## Third-party units without manifest', LContent) > 0);
   Assert.IsTrue(Pos('| Jv | 1 | supplier, version, licence | JvComponent |', LContent) > 0);
   Assert.IsTrue(Pos('## Origin summary', LContent) < Pos('## Artefacts', LContent),
@@ -324,6 +333,8 @@ begin
   var LContent := TFile.ReadAllText(FOutputPath, TEncoding.UTF8);
   Assert.IsTrue(Pos('## Origin summary', LContent) > 0);
   Assert.IsTrue(Pos('## Licences', LContent) > 0);
+  Assert.IsTrue(Pos('| Declared licence | Components | Name | Version | Copyright | Note |', LContent) > 0,
+    'overview content still includes the licence table');
   Assert.AreEqual(0, Pos('## Unit Evidence', LContent));
   Assert.AreEqual(0, Pos('#unit-evidence', LContent), 'no link to a missing section');
   Assert.IsTrue(Pos('ABCDEF0123456789', LContent) > 0, 'the artefact hashes stay');
@@ -340,6 +351,54 @@ begin
   Assert.IsTrue(Pos('Demo.Main', LContent) > 0);
   Assert.AreEqual(0, Pos('## Origin summary', LContent));
   Assert.AreEqual(0, Pos('## Licences', LContent));
+  Assert.AreEqual(0, Pos('| Copyright |', LContent), 'units content has no licence table');
+end;
+
+procedure TMarkdownReportWriterTests.Write_LicenceTable_OneRowPerComponent;
+const
+  cRows = '{"components":[' +
+    '{"name":"SVG Icon Image List","version":"4.8.1","licence":"Apache-2.0","units_prefix":["Svg"]},' +
+    '{"name":"Logger Pro","version":"2.1.2","licence":"Apache-2.0","copyright":"2020 | 2021","units_prefix":["Logger"]},' +
+    '{"name":"delphi Event Bus","version":"2.1","licence":"apache-2.0","copyright":"A & B","units_prefix":["Event"]},' +
+    '{"name":"VSoft Command Line Parser","version":"0.1.9","licence":"Apache-2.0","copyright":"   ","units_prefix":["VSoft"]},' +
+    '{"name":"NoVersion Lib","licence":"Apache-2.0","copyright":"1999","units_prefix":["NvLib"]},' +
+    '{"name":"JVCL","version":"3.5","licence":"MPL-1.1","units_prefix":["Jv"]}]}';
+  procedure AddUnit(const AName: string);
+  var
+    LUnit: TArtefactInfo;
+  begin
+    LUnit := Default(TArtefactInfo);
+    LUnit.RelativePath := AName + '.pas';
+    LUnit.ArtefactType := 'unit-evidence';
+    LUnit.Origin := 'Third party';
+    FArtefacts.Add(LUnit);
+  end;
+begin
+  FData.Metadata.ComponentManifestJson := cRows;
+  FData.Metadata.Licence := 'Proprietary';
+  AddUnit('SvgIcons');
+  AddUnit('LoggerMain');
+  AddUnit('EventBus');
+  AddUnit('VSoftParser');
+  AddUnit('NvLibCore');
+  AddUnit('JvComponent');
+  var LWriter: IHumanReadableReportWriter := TMarkdownReportWriter.Create;
+  Assert.IsTrue(LWriter.Write(FOutputPath, FData, THumanReadableReportConfig.Default));
+  var LContent := TFile.ReadAllText(FOutputPath, TEncoding.UTF8);
+  Assert.IsTrue(Pos('| Declared licence | Components | Name | Version | Copyright | Note |', LContent) > 0);
+  Assert.AreEqual(0, Pos('Logger Pro 2.1.2', LContent), 'the version is not glued to the name');
+  var LEvent := Pos('| Apache-2.0 | 5 | delphi Event Bus | 2.1 | A & B |  |', LContent);
+  var LLogger := Pos('| | | Logger Pro | 2.1.2 | 2020 \| 2021 | |', LContent);
+  var LNoVersion := Pos('| | | NoVersion Lib |  | 1999 | |', LContent);
+  var LSvg := Pos('| | | SVG Icon Image List | 4.8.1 |  | |', LContent);
+  var LVsoft := Pos('| | | VSoft Command Line Parser | 0.1.9 |  | |', LContent);
+  Assert.IsTrue(LEvent > 0, 'first row of the group carries the licence and the count');
+  Assert.IsTrue((LEvent < LLogger) and (LLogger < LNoVersion) and (LNoVersion < LSvg) and (LSvg < LVsoft),
+    'components are sorted by name without regard to case');
+  Assert.IsTrue(Pos('| MPL-1.1 | 1 | JVCL | 3.5 |  | Copyleft licence. Check its terms for distribution with this product. |',
+    LContent) > 0, 'a one-component group keeps the review note on its row');
+  Assert.IsTrue(Pos('| Proprietary | 2 | Demo (product) |  |  |  |', LContent) > 0);
+  Assert.IsTrue(LVsoft < Pos('| MPL-1.1 | 1 | JVCL |', LContent), 'licence groups stay in title order');
 end;
 
 initialization

@@ -76,6 +76,12 @@ type
     procedure NamesText_IsCapped;
     [Test]
     procedure WithoutManifestLine_CountsAndEmptyWithoutThirdParty;
+    /// <summary>
+    /// Licence rows are one component each, sorted by name without regard to
+    /// case, with version and copyright in their own fields. Issue #156.
+    /// </summary>
+    [Test]
+    procedure Licences_OneRowPerComponent_SortedWithVersionAndCopyright;
     [Test]
     procedure WithoutManifestLine_OmittedWhenNoneMissing;
   end;
@@ -137,6 +143,27 @@ begin
   end;
 end;
 
+function FindLicence(const AGroups: TArray<TLicenceGroup>; const ATitle: string): TLicenceGroup;
+begin
+  Result := Default(TLicenceGroup);
+  for var LGroup in AGroups do
+  begin
+    if SameText(LGroup.Title, ATitle) then
+      Exit(LGroup);
+  end;
+end;
+
+function LicenceNames(const AGroup: TLicenceGroup): string;
+begin
+  Result := '';
+  for var i := 0 to High(AGroup.Components) do
+  begin
+    if Result <> '' then
+      Result := Result + ', ';
+    Result := Result + AGroup.Components[i].Name;
+  end;
+end;
+
 procedure TReportOverviewTests.Origins_SumEqualsSbomComponentCount;
 begin
   FData.Metadata.ComponentManifestJson := cManifest;
@@ -170,11 +197,17 @@ begin
   AddUnit('Main', 'Local project');
   var LOverview := BuildReportOverview(FData);
   Assert.AreEqual<Integer>(3, Length(LOverview.Licences));
-  Assert.AreEqual(2, FindGroup(LOverview.Licences, 'MPL-1.1').Count, 'MPL-1.1 and mpl-1.1 form one group');
-  Assert.AreEqual(1, FindGroup(LOverview.Licences, 'Proprietary').Count);
+  var LMpl := FindLicence(LOverview.Licences, 'MPL-1.1');
+  Assert.AreEqual(2, LMpl.Count, 'MPL-1.1 and mpl-1.1 form one group');
+  Assert.AreEqual('JVCL', LMpl.Components[0].Name);
+  Assert.AreEqual('3.5', LMpl.Components[0].Version);
+  Assert.AreEqual('', LMpl.Components[0].Copyright);
+  Assert.AreEqual('Other', LMpl.Components[1].Name);
+  Assert.AreEqual('1.0', LMpl.Components[1].Version);
+  Assert.AreEqual(1, FindLicence(LOverview.Licences, 'Proprietary').Count);
   Assert.AreEqual(cNoLicenceGroupTitle, LOverview.Licences[High(LOverview.Licences)].Title);
   Assert.AreEqual(1, LOverview.Licences[High(LOverview.Licences)].Count);
-  Assert.AreEqual('Main', LOverview.Licences[High(LOverview.Licences)].Names[0]);
+  Assert.AreEqual('Main', LOverview.Licences[High(LOverview.Licences)].Components[0].Name);
 end;
 
 procedure TReportOverviewTests.Licences_BuiltProgram_UnderProductLicence;
@@ -184,11 +217,13 @@ begin
   AddFile('epMCOMLib.dll', 'library');
   AddFile('vendor.dll', 'library');
   var LOverview := BuildReportOverview(FData);
-  var LProduct := FindGroup(LOverview.Licences, 'LicenseRef-Proprietary');
+  var LProduct := FindLicence(LOverview.Licences, 'LicenseRef-Proprietary');
   Assert.AreEqual(2, LProduct.Count, 'Product entry and built program');
-  var LNone := FindGroup(LOverview.Licences, cNoLicenceGroupTitle);
+  var LNone := FindLicence(LOverview.Licences, cNoLicenceGroupTitle);
   Assert.AreEqual(1, LNone.Count);
-  Assert.AreEqual('vendor.dll', LNone.Names[0]);
+  Assert.AreEqual('vendor.dll', LNone.Components[0].Name);
+  Assert.AreEqual('', LNone.Components[0].Version);
+  Assert.AreEqual('', LNone.Components[0].Copyright);
 end;
 
 procedure TReportOverviewTests.Licences_UntypedProjectExe_UnderProductLicence;
@@ -201,20 +236,20 @@ begin
   AddUnit('XmlConvert', 'Local project');
   AddFile('Demo.exe', 'file');
   var LOverview := BuildReportOverview(FData);
-  var LProduct := FindGroup(LOverview.Licences, 'Proprietary');
+  var LProduct := FindLicence(LOverview.Licences, 'Proprietary');
   Assert.AreEqual(2, LProduct.Count, 'Product entry and project executable');
-  Assert.IsTrue(Pos('XmlConvert.exe', LProduct.NamesText) > 0,
+  Assert.IsTrue(Pos('XmlConvert.exe', LicenceNames(LProduct)) > 0,
     'The project executable is under the product licence');
-  Assert.AreEqual(0, Pos('bit.dll', LProduct.NamesText),
+  Assert.AreEqual(0, Pos('bit.dll', LicenceNames(LProduct)),
     'A neighboring DLL does not inherit the product licence');
-  Assert.AreEqual(0, Pos('Demo.exe', LProduct.NamesText),
+  Assert.AreEqual(0, Pos('Demo.exe', LicenceNames(LProduct)),
     'The product display name is not a file match');
-  var LNone := FindGroup(LOverview.Licences, cNoLicenceGroupTitle);
+  var LNone := FindLicence(LOverview.Licences, cNoLicenceGroupTitle);
   Assert.AreEqual(3, LNone.Count);
-  Assert.AreEqual(0, Pos('XmlConvert.exe', LNone.NamesText),
+  Assert.AreEqual(0, Pos('XmlConvert.exe', LicenceNames(LNone)),
     'The project executable is not listed as unlicensed');
-  Assert.IsTrue(Pos('bit.dll', LNone.NamesText) > 0);
-  Assert.IsTrue(Pos('Demo.exe', LNone.NamesText) > 0);
+  Assert.IsTrue(Pos('bit.dll', LicenceNames(LNone)) > 0);
+  Assert.IsTrue(Pos('Demo.exe', LicenceNames(LNone)) > 0);
 end;
 
 procedure TReportOverviewTests.Licences_OutputPathAndSecondCopy_UnderProductLicence;
@@ -229,13 +264,13 @@ begin
   FArtefacts[1] := SetPath(FArtefacts[1], 'C:\Build\setup\XmlConvert.exe');
   AddFile('OtherApp.exe', 'application');
   var LOverview := BuildReportOverview(FData);
-  var LProduct := FindGroup(LOverview.Licences, 'Proprietary');
+  var LProduct := FindLicence(LOverview.Licences, 'Proprietary');
   Assert.AreEqual(3, LProduct.Count,
     'Product entry and both copies of the output file');
-  Assert.IsTrue(Pos('XmlConvert.exe', LProduct.NamesText) > 0);
-  var LNone := FindGroup(LOverview.Licences, cNoLicenceGroupTitle);
+  Assert.IsTrue(Pos('XmlConvert.exe', LicenceNames(LProduct)) > 0);
+  var LNone := FindLicence(LOverview.Licences, cNoLicenceGroupTitle);
   Assert.AreEqual(1, LNone.Count);
-  Assert.AreEqual('OtherApp.exe', LNone.Names[0]);
+  Assert.AreEqual('OtherApp.exe', LNone.Components[0].Name);
 end;
 
 procedure TReportOverviewTests.Licences_PackageSuffix_BeatsOtherPackage;
@@ -246,12 +281,12 @@ begin
   AddFile('MyPkg290.bpl', 'file');
   AddFile('other.bpl', 'package');
   var LOverview := BuildReportOverview(FData);
-  var LProduct := FindGroup(LOverview.Licences, 'Proprietary');
-  Assert.IsTrue(Pos('MyPkg290.bpl', LProduct.NamesText) > 0,
+  var LProduct := FindLicence(LOverview.Licences, 'Proprietary');
+  Assert.IsTrue(Pos('MyPkg290.bpl', LicenceNames(LProduct)) > 0,
     'The suffixed package is the product binary');
-  var LNone := FindGroup(LOverview.Licences, cNoLicenceGroupTitle);
+  var LNone := FindLicence(LOverview.Licences, cNoLicenceGroupTitle);
   Assert.AreEqual(1, LNone.Count);
-  Assert.AreEqual('other.bpl', LNone.Names[0]);
+  Assert.AreEqual('other.bpl', LNone.Components[0].Name);
 end;
 
 procedure TReportOverviewTests.Licences_LibPrefix_MatchesProject;
@@ -262,12 +297,12 @@ begin
   AddFile('libDemo.so', 'file');
   AddFile('vendor.dll', 'library');
   var LOverview := BuildReportOverview(FData);
-  var LProduct := FindGroup(LOverview.Licences, 'MIT');
-  Assert.IsTrue(Pos('libDemo.so', LProduct.NamesText) > 0,
+  var LProduct := FindLicence(LOverview.Licences, 'MIT');
+  Assert.IsTrue(Pos('libDemo.so', LicenceNames(LProduct)) > 0,
     'A lib-prefixed binary of the project is the product');
-  var LNone := FindGroup(LOverview.Licences, cNoLicenceGroupTitle);
+  var LNone := FindLicence(LOverview.Licences, cNoLicenceGroupTitle);
   Assert.AreEqual(1, LNone.Count);
-  Assert.AreEqual('vendor.dll', LNone.Names[0]);
+  Assert.AreEqual('vendor.dll', LNone.Components[0].Name);
 end;
 
 procedure TReportOverviewTests.Licences_CopyleftHint_OnlyWhenDifferentFromProduct;
@@ -348,6 +383,74 @@ begin
   LGroup.Names := ['A', 'B', 'C', 'D'];
   Assert.AreEqual('A, B, C, D', LGroup.NamesText);
   Assert.AreEqual('A, B and 2 more', LGroup.NamesText(2));
+end;
+
+procedure TReportOverviewTests.Licences_OneRowPerComponent_SortedWithVersionAndCopyright;
+const
+  cRows = '{"components":[' +
+    '{"name":"SVG Icon Image List","version":"4.8.1","licence":"Apache-2.0","units_prefix":["Svg"]},' +
+    '{"name":"Logger Pro","version":"2.1.2","licence":"Apache-2.0","copyright":"2020 | 2021","units_prefix":["Logger"]},' +
+    '{"name":"delphi Event Bus","version":"2.1","licence":"apache-2.0","copyright":"A & B","units_prefix":["Event"]},' +
+    '{"name":"VSoft Command Line Parser","version":"0.1.9","licence":"Apache-2.0","copyright":"   ","units_prefix":["VSoft"]},' +
+    '{"name":"NoVersion Lib","licence":"Apache-2.0","copyright":"1999","units_prefix":["NvLib"]},' +
+    '{"name":"Alpha","version":"2.0","licence":"MIT","copyright":"2018","units_exact":["AlphaTwo"]},' +
+    '{"name":"alpha","version":"1.0","licence":"MIT","units_exact":["AlphaOne"]},' +
+    '{"name":"Twin","version":"1","licence":"MIT","copyright":"first","units_exact":["TwinA"]},' +
+    '{"name":"Twin","version":"1","licence":"MIT","copyright":"second","units_exact":["TwinB"]},' +
+    '{"name":"JVCL","version":"3.5","licence":"MPL-1.1","units_prefix":["Jv"]}]}';
+  procedure AssertComponent(const AGroup: TLicenceGroup; AIndex: Integer;
+    const AName, AVersion, ACopyright: string);
+  begin
+    Assert.IsTrue(AIndex <= High(AGroup.Components), AGroup.Title + ' is missing a row');
+    Assert.AreEqual(AName, AGroup.Components[AIndex].Name);
+    Assert.AreEqual(AVersion, AGroup.Components[AIndex].Version);
+    Assert.AreEqual(ACopyright, AGroup.Components[AIndex].Copyright);
+  end;
+begin
+  FData.Metadata.ComponentManifestJson := cRows;
+  FData.Metadata.Licence := 'Proprietary';
+  AddUnit('SvgIcons', 'Third party');
+  AddUnit('LoggerMain', 'Third party');
+  AddUnit('EventBus', 'Third party');
+  AddUnit('VSoftParser', 'Third party');
+  AddUnit('NvLibCore', 'Third party');
+  AddUnit('AlphaOne', 'Third party');
+  AddUnit('AlphaTwo', 'Third party');
+  AddUnit('TwinA', 'Third party');
+  AddUnit('TwinB', 'Third party');
+  AddUnit('JvComponent', 'Third party');
+  var LOverview := BuildReportOverview(FData);
+  Assert.AreEqual<Integer>(4, Length(LOverview.Licences));
+  Assert.AreEqual('Apache-2.0', LOverview.Licences[0].Title);
+  Assert.AreEqual('MIT', LOverview.Licences[1].Title);
+  Assert.AreEqual('MPL-1.1', LOverview.Licences[2].Title);
+  Assert.AreEqual('Proprietary', LOverview.Licences[3].Title);
+
+  var LApache := LOverview.Licences[0];
+  Assert.AreEqual(5, LApache.Count);
+  Assert.AreEqual('', LApache.Note);
+  AssertComponent(LApache, 0, 'delphi Event Bus', '2.1', 'A & B');
+  AssertComponent(LApache, 1, 'Logger Pro', '2.1.2', '2020 | 2021');
+  AssertComponent(LApache, 2, 'NoVersion Lib', '', '1999');
+  AssertComponent(LApache, 3, 'SVG Icon Image List', '4.8.1', '');
+  AssertComponent(LApache, 4, 'VSoft Command Line Parser', '0.1.9', '');
+
+  var LMit := LOverview.Licences[1];
+  Assert.AreEqual(4, LMit.Count);
+  AssertComponent(LMit, 0, 'alpha', '1.0', '');
+  AssertComponent(LMit, 1, 'Alpha', '2.0', '2018');
+  AssertComponent(LMit, 2, 'Twin', '1', 'first');
+  AssertComponent(LMit, 3, 'Twin', '1', 'second');
+
+  var LMpl := LOverview.Licences[2];
+  Assert.AreEqual(1, LMpl.Count);
+  Assert.AreEqual('Copyleft licence. Check its terms for distribution with this product.', LMpl.Note);
+  AssertComponent(LMpl, 0, 'JVCL', '3.5', '');
+
+  var LProduct := LOverview.Licences[3];
+  Assert.AreEqual(1, LProduct.Count);
+  AssertComponent(LProduct, 0, 'Demo (product)', '', '');
+  Assert.AreEqual('', LProduct.Note);
 end;
 
 procedure TReportOverviewTests.WithoutManifestLine_CountsAndEmptyWithoutThirdParty;
