@@ -512,9 +512,31 @@ var
   LCandidateFileNames: TArray<string>;
   LDirectSearchPaths: TList<string>;
   LExplicitReference: TProjectUnitReference;
+  LPasPath: string;
   LResolvedPath: string;
   LSourcePath: string;
   LUsedFallbackName: Boolean;
+
+  function IsOutputPath(const APath: string): Boolean;
+  begin
+    Result := IsPathUnderDirectory(APath, ABuildEvidence.Paths.OutputDir) or
+      IsPathUnderDirectory(APath, ABuildEvidence.Paths.DcuOutputDir) or
+      IsPathUnderDirectory(APath, ABuildEvidence.Paths.DcpOutputDir) or
+      IsPathUnderDirectory(APath, ABuildEvidence.Paths.BplOutputDir);
+  end;
+
+  // Folder rules in the component manifest need the package directory, not
+  // the DCU the compiler wrote into the project output folder.
+  procedure RememberSourcePath(const APasPath: string);
+  begin
+    if SameText(TPath.GetExtension(Result.ResolvedPath), '.pas') then
+      Result.SourcePath := Result.ResolvedPath
+    else if APasPath <> '' then
+      Result.SourcePath := APasPath
+    else if (Result.ResolvedPath <> '') and not IsOutputPath(Result.ResolvedPath) then
+      Result.SourcePath := Result.ResolvedPath;
+  end;
+
 begin
   Result := Default(TResolvedUnitInfo);
   Result.UnitName := AUnitName;
@@ -534,6 +556,7 @@ begin
     Result.OriginKind := DetermineOriginKind(AProjectInfo, AUnitName, Result.ResolvedPath);
     Result.Confidence := rcAuthoritative;
     Result.EvidenceSources := [AEvidenceSource, besProjectMetadata];
+    RememberSourcePath('');
     Exit;
   end;
 
@@ -557,10 +580,8 @@ begin
       Result.ResolvedPath := LResolvedPath;
       Result.EvidenceKind := DetermineEvidenceKind(Result.ResolvedPath);
       Result.OriginKind := DetermineOriginKind(AProjectInfo, AUnitName, Result.ResolvedPath);
-      if IsPathUnderDirectory(Result.ResolvedPath, ABuildEvidence.Paths.OutputDir) or
-         IsPathUnderDirectory(Result.ResolvedPath, ABuildEvidence.Paths.DcuOutputDir) or
-         IsPathUnderDirectory(Result.ResolvedPath, ABuildEvidence.Paths.DcpOutputDir) or
-         IsPathUnderDirectory(Result.ResolvedPath, ABuildEvidence.Paths.BplOutputDir) then
+      LPasPath := '';
+      if IsOutputPath(Result.ResolvedPath) then
       begin
         // A DCU in the output folder was compiled from a source somewhere in
         // the search path. That source decides the origin, so a third-party
@@ -568,8 +589,12 @@ begin
         // (issue #133). Without a source the unit counts as project code.
         Result.OriginKind := uokLocalProject;
         if FindSourceOutsideOutputDirs(ABuildEvidence, AUnitName, LSourcePath) then
+        begin
           Result.OriginKind := DetermineOriginKind(AProjectInfo, AUnitName, LSourcePath);
+          LPasPath := LSourcePath;
+        end;
       end;
+      RememberSourcePath(LPasPath);
       if LUsedFallbackName then
         Result.Confidence := rcHeuristic
       else
@@ -584,6 +609,7 @@ begin
       Result.ResolvedPath := LResolvedPath;
       Result.EvidenceKind := DetermineEvidenceKind(Result.ResolvedPath);
       Result.OriginKind := DetermineOriginKind(AProjectInfo, AUnitName, Result.ResolvedPath);
+      RememberSourcePath('');
       if LUsedFallbackName then
         Result.Confidence := rcHeuristic
       else

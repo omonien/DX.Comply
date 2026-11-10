@@ -242,7 +242,8 @@ begin
       if LUnitName = '' then
         Continue;
 
-      var LMatch := MatchManifestUnit(AManifest, LUnitName);
+      var LMatch := MatchManifestUnit(AManifest, LUnitName,
+        ArtefactFolderPath(LArtefact));
       var LKey: string;
       case LMatch.Kind of
         mmOwnCode:

@@ -5,9 +5,11 @@
 ///
 /// <remarks>
 /// This is DX.Comply's components.json shape (schema_version 1.0): one row
-/// per library, matched by units_exact and units_prefix. schema_version
-/// "1.0" is the version of this manifest, not an industry standard. Root
-/// supplier is the application publisher. The per-component author is vendor.
+/// per library, matched by units_exact, units_prefix, and units_folder.
+/// schema_version "1.0" is the version of this manifest, not an industry
+/// standard. Root supplier is the application publisher. The per-component
+/// author is vendor. own_code_folders names folders of the project's own
+/// units, the same way own_code_units names those units one by one.
 ///
 /// Licence values are classified as an SPDX identifier, an SPDX expression,
 /// or a plain name. Package URLs for manifest libraries use pkg:delphi, which
@@ -90,10 +92,16 @@ type
     /// <summary>Case-insensitive exact unit names.</summary>
     ExactUnits: TArray<string>;
     /// <summary>
-    /// Case-insensitive unit names that the prefixes of this row do not
-    /// match (units_exclude, issue #140).
+    /// Case-insensitive unit names that the prefixes and folders of this
+    /// row do not match (units_exclude, issue #140).
     /// </summary>
     ExcludeUnits: TArray<string>;
+    /// <summary>
+    /// Folders whose units belong to this row (units_folder). A unit matches
+    /// when its source file is in the folder or in a folder under it. After
+    /// a successful load each entry is an absolute path.
+    /// </summary>
+    Folders: TArray<string>;
     /// <summary>Freeform notes. Not written into the SBOM.</summary>
     Notes: string;
     /// <summary>
@@ -124,6 +132,12 @@ type
     OwnCodeUnits: TArray<string>;
     /// <summary>Unit name prefixes that are the project's own code.</summary>
     OwnCodePrefixes: TArray<string>;
+    /// <summary>
+    /// Folders whose units are the project's own code (own_code_folders).
+    /// Subfolders are included. After a successful load each entry is an
+    /// absolute path.
+    /// </summary>
+    OwnCodeFolders: TArray<string>;
     /// <summary>Non-fatal schema notes. Fatal problems are returned separately.</summary>
     Warnings: TArray<string>;
     /// <summary>Path or label the text was loaded from.</summary>
@@ -239,12 +253,23 @@ function TryReadConfigManifest(const AConfigPath: string;
 function ResolveManifestPath(const AProjectDir, AManifestFile: string): string;
 
 /// <summary>
-/// Matches one unit name. Exact rules beat prefix rules. The first row wins.
-/// The name is tried as written and with its scope prefix removed.
-/// own_code_units beats prefix rules. A units_exact hit beats own_code_units.
+/// Matches one unit. units_exact beats own_code_units, those beat a folder,
+/// a folder beats a prefix, and a library prefix beats own_code_prefixes.
+/// The longest matching folder wins, then the longest matching prefix.
+/// On a tie the first row wins, and a component folder beats an own-code
+/// folder of the same length. The name is tried as written and with its
+/// scope prefix removed. ASourcePath is the unit's source file. Folder
+/// rules do not match when it is empty.
 /// </summary>
 function MatchManifestUnit(const AManifest: TComponentManifest;
-  const AUnitName: string): TManifestMatch;
+  const AUnitName: string; const ASourcePath: string = ''): TManifestMatch;
+
+/// <summary>
+/// Source path used for folder rules. The resolver's source path when it
+/// recorded one, otherwise FilePath when that file is a .pas. Empty when
+/// only a unit name, or a DCU in an output folder, is known.
+/// </summary>
+function ArtefactFolderPath(const AArtefact: TArtefactInfo): string;
 
 /// <summary>
 /// Unit name of a unit-evidence artefact, from its file name.
@@ -510,6 +535,17 @@ begin
     Result := TPath.GetFileNameWithoutExtension(AArtefact.FilePath);
 end;
 
+function ArtefactFolderPath(const AArtefact: TArtefactInfo): string;
+begin
+  // The .pas the resolver recorded. A DCU in the output folder is not a
+  // package folder: without a source path, folder rules do not match it.
+  Result := Trim(AArtefact.SourcePath);
+  if Result <> '' then
+    Exit;
+  if SameText(TPath.GetExtension(AArtefact.FilePath), '.pas') then
+    Result := AArtefact.FilePath;
+end;
+
 function EscapeXml(const AValue: string): string;
 begin
   Result := AValue;
@@ -695,10 +731,12 @@ begin
   Result.Prefixes := ReadStringArray(AObject, 'units_prefix', LContext, AWarnings);
   Result.ExactUnits := ReadStringArray(AObject, 'units_exact', LContext, AWarnings);
   Result.ExcludeUnits := ReadStringArray(AObject, 'units_exclude', LContext, AWarnings);
+  Result.Folders := ReadStringArray(AObject, 'units_folder', LContext, AWarnings);
 
-  if (Length(Result.Prefixes) = 0) and (Length(Result.ExactUnits) = 0) then
+  if (Length(Result.Prefixes) = 0) and (Length(Result.ExactUnits) = 0) and
+    (Length(Result.Folders) = 0) then
     AddWarning(AWarnings, LContext +
-      ': no units_prefix or units_exact; this row will not match any unit');
+      ': no units_prefix, units_exact, or units_folder; this row will not match any unit');
 
   for I := 0 to High(Result.Prefixes) do
     if Length(Result.Prefixes[I]) < cMinPrefixLength then
@@ -784,10 +822,271 @@ begin
 
   AManifest.OwnCodeUnits := ReadStringArray(ARoot, 'own_code_units', 'Manifest', AWarnings);
   AManifest.OwnCodePrefixes := ReadStringArray(ARoot, 'own_code_prefixes', 'Manifest', AWarnings);
+  AManifest.OwnCodeFolders := ReadStringArray(ARoot, 'own_code_folders', 'Manifest', AWarnings);
   for I := 0 to High(AManifest.OwnCodePrefixes) do
     if Length(AManifest.OwnCodePrefixes[I]) < cMinPrefixLength then
       AddWarning(AWarnings, 'own_code_prefixes: prefix "' + AManifest.OwnCodePrefixes[I] +
         '" is shorter than 3 characters');
+end;
+
+function BaseDirFromSourceName(const ASourceName: string): string;
+var
+  LName, LFull: string;
+begin
+  Result := '';
+  LName := Trim(ASourceName);
+  if LName = '' then
+    Exit;
+  // A label such as "test" is not a file location. A path has a separator
+  // or a root (a drive, or a UNC share).
+  if (Pos('\', LName) = 0) and (Pos('/', LName) = 0) and
+    not TPath.IsPathRooted(LName) then
+    Exit;
+  try
+    LFull := TPath.GetFullPath(LName);
+  except
+    Exit;
+  end;
+  Result := TPath.GetDirectoryName(LFull);
+end;
+
+function TryNormalizeFullPath(const APath: string; out AFull: string): Boolean;
+begin
+  AFull := '';
+  Result := False;
+  if Trim(APath) = '' then
+    Exit;
+  try
+    AFull := TPath.GetFullPath(APath);
+    Result := AFull <> '';
+  except
+    Result := False;
+  end;
+end;
+
+/// A folder matches a file inside it or inside a subfolder. A sibling whose
+/// name only starts with the folder name does not match.
+function FileIsInsideFolder(const AFileFull, AFolderFull: string): Boolean;
+var
+  LFolder, LFile: string;
+begin
+  Result := False;
+  if (Trim(AFileFull) = '') or (Trim(AFolderFull) = '') then
+    Exit;
+  LFolder := IncludeTrailingPathDelimiter(LowerCase(
+    ExcludeTrailingPathDelimiter(AFolderFull)));
+  LFile := LowerCase(ExcludeTrailingPathDelimiter(AFileFull));
+  Result := LFile.StartsWith(LFolder);
+end;
+
+function TryAcceptFolder(const AText, ABaseDir: string;
+  out AFull, AWarning: string): Boolean;
+var
+  LText, LCombined: string;
+begin
+  AFull := '';
+  AWarning := '';
+  Result := False;
+  LText := Trim(AText);
+  if LText = '' then
+    Exit;
+
+  if TPath.IsRelativePath(LText) then
+  begin
+    if Trim(ABaseDir) = '' then
+    begin
+      AWarning := 'relative path "' + LText +
+        '" was not applied because the manifest file location is unknown';
+      Exit;
+    end;
+    LCombined := TPath.Combine(ABaseDir, LText);
+  end
+  else
+    LCombined := LText;
+
+  if not TryNormalizeFullPath(LCombined, AFull) then
+  begin
+    AWarning := 'path "' + LText + '" could not be resolved and was not applied';
+    AFull := '';
+    Exit;
+  end;
+  AFull := ExcludeTrailingPathDelimiter(AFull);
+
+  if TDirectory.Exists(AFull) then
+    Exit(True);
+
+  if TFile.Exists(AFull) then
+  begin
+    AWarning := 'path "' + LText + '" is a file, not a folder, and was not applied';
+    AFull := '';
+    Exit;
+  end;
+
+  // The directory is missing. The rule stays, so a unit whose source path
+  // is under that folder still matches. The warning names the typo.
+  if SameText(AFull, ExcludeTrailingPathDelimiter(LText)) then
+    AWarning := 'folder "' + LText + '" was not found. It is still applied'
+  else
+    AWarning := 'folder "' + LText + '" was not found (' + AFull +
+      '). It is still applied';
+  Result := True;
+end;
+
+procedure ResolveFolderList(const ARaw: TArray<string>; const ABaseDir, AContext,
+  AField: string; AWarnings: TList<string>; out AResolved: TArray<string>);
+var
+  LList: TList<string>;
+  LFull, LWarning: string;
+  I: Integer;
+begin
+  LList := TList<string>.Create;
+  try
+    for I := 0 to High(ARaw) do
+    begin
+      if TryAcceptFolder(ARaw[I], ABaseDir, LFull, LWarning) then
+        LList.Add(LFull);
+      if LWarning <> '' then
+        AddWarning(AWarnings, AContext + ': ' + AField + ': ' + LWarning);
+    end;
+    AResolved := LList.ToArray;
+  finally
+    LList.Free;
+  end;
+end;
+
+function ComponentFolderContext(const AEntry: TComponentEntry; AIndex: Integer): string;
+begin
+  if Trim(AEntry.Name) <> '' then
+    Result := Format('Component[%d] "%s"', [AIndex, AEntry.Name])
+  else
+    Result := Format('Component[%d]', [AIndex]);
+end;
+
+procedure ResolveManifestFolders(var AManifest: TComponentManifest;
+  AWarnings: TList<string>; const ABaseDir: string);
+var
+  I: Integer;
+  LEntry: TComponentEntry;
+  LResolved: TArray<string>;
+begin
+  for I := 0 to High(AManifest.Components) do
+  begin
+    // Copy the record out and back. Assigning a field of a dynamic-array
+    // element is easy to get wrong, and this stays correct either way.
+    LEntry := AManifest.Components[I];
+    ResolveFolderList(LEntry.Folders, ABaseDir, ComponentFolderContext(LEntry, I),
+      'units_folder', AWarnings, LResolved);
+    LEntry.Folders := LResolved;
+    AManifest.Components[I] := LEntry;
+  end;
+  ResolveFolderList(AManifest.OwnCodeFolders, ABaseDir, 'Manifest',
+    'own_code_folders', AWarnings, LResolved);
+  AManifest.OwnCodeFolders := LResolved;
+end;
+
+function RewriteFolderArray(AArray: TJSONArray; const ABaseDir: string;
+  out AChanged: Boolean): TJSONArray;
+var
+  I: Integer;
+  LText, LFull, LWarning: string;
+  LCopy: TJSONValue;
+begin
+  AChanged := False;
+  Result := TJSONArray.Create;
+  for I := 0 to AArray.Count - 1 do
+  begin
+    if AArray.Items[I] is TJSONString then
+    begin
+      LText := AArray.Items[I].Value;
+      if TryAcceptFolder(LText, ABaseDir, LFull, LWarning) then
+      begin
+        if not SameText(LText, LFull) then
+          AChanged := True;
+        Result.Add(LFull);
+      end
+      else
+        Result.Add(LText);
+    end
+    else
+    begin
+      LCopy := TJSONObject.ParseJSONValue(AArray.Items[I].Format(0));
+      if LCopy <> nil then
+        Result.Add(LCopy);
+    end;
+  end;
+end;
+
+procedure RewriteFolderField(AObject: TJSONObject; const AName, ABaseDir: string;
+  var AChanged: Boolean);
+var
+  LValue: TJSONValue;
+  LNew: TJSONArray;
+  LFieldChanged: Boolean;
+  LPair: TJSONPair;
+begin
+  LValue := AObject.GetValue(AName);
+  if not (LValue is TJSONArray) then
+    Exit;
+  LNew := RewriteFolderArray(TJSONArray(LValue), ABaseDir, LFieldChanged);
+  if not LFieldChanged then
+  begin
+    LNew.Free;
+    Exit;
+  end;
+  LPair := AObject.RemovePair(AName);
+  LPair.Free;
+  AObject.AddPair(AName, LNew);
+  AChanged := True;
+end;
+
+procedure RewriteFolderFields(AValue: TJSONValue; const ABaseDir: string;
+  var AChanged: Boolean);
+var
+  I: Integer;
+  LArray: TJSONArray;
+  LComponents: TJSONValue;
+begin
+  if AValue is TJSONArray then
+  begin
+    // A bare array is the component list.
+    LArray := TJSONArray(AValue);
+    for I := 0 to LArray.Count - 1 do
+      if LArray.Items[I] is TJSONObject then
+        RewriteFolderField(TJSONObject(LArray.Items[I]), 'units_folder',
+          ABaseDir, AChanged);
+  end
+  else if AValue is TJSONObject then
+  begin
+    RewriteFolderField(TJSONObject(AValue), 'own_code_folders', ABaseDir, AChanged);
+    LComponents := TJSONObject(AValue).GetValue('components');
+    if LComponents <> nil then
+      RewriteFolderFields(LComponents, ABaseDir, AChanged);
+  end;
+end;
+
+function ManifestJsonWithAbsoluteFolders(const AJson, ABaseDir: string): string;
+var
+  LValue: TJSONValue;
+  LChanged: Boolean;
+begin
+  Result := AJson;
+  if Trim(ABaseDir) = '' then
+    Exit;
+  if (Pos('units_folder', LowerCase(AJson)) = 0) and
+    (Pos('own_code_folders', LowerCase(AJson)) = 0) then
+    Exit;
+
+  LValue := TJSONObject.ParseJSONValue(AJson);
+  if LValue = nil then
+    Exit;
+  try
+    LChanged := False;
+    RewriteFolderFields(LValue, ABaseDir, LChanged);
+    if LChanged then
+      Result := LValue.Format(0);
+  finally
+    LValue.Free;
+  end;
 end;
 
 function ParseComponentManifest(const AJson, ASourceName: string;
@@ -832,8 +1131,11 @@ begin
     if Result then
     begin
       AManifest.Loaded := True;
-      AManifest.Warnings := LWarnings.ToArray;
       AManifest.SourcePath := ASourceName;
+      // Relative folders are resolved from the components file. A label such
+      // as "test" has no directory, so only absolute folders apply then.
+      ResolveManifestFolders(AManifest, LWarnings, BaseDirFromSourceName(ASourceName));
+      AManifest.Warnings := LWarnings.ToArray;
     end
     else if AError = '' then
       AError := 'The manifest could not be read';
@@ -898,6 +1200,11 @@ begin
   end;
 
   Result := TryParseComponentManifest(AJson, AFilePath, AManifest, AError);
+  // Writers parse this text again, without the file path. Absolute folders
+  // still match. The file on disk is left as the caller wrote it.
+  if Result then
+    AJson := ManifestJsonWithAbsoluteFolders(AJson,
+      BaseDirFromSourceName(AFilePath));
 end;
 
 function TryReadConfigManifest(const AConfigPath: string;
@@ -1042,11 +1349,74 @@ begin
       Exit(True);
 end;
 
+function FolderIsExcluded(const AEntry: TComponentEntry; const AUnitName,
+  AStripped: string): Boolean;
+begin
+  // The same names units_exclude already uses for prefixes: the unit as
+  // written, and the name with one Delphi scope removed.
+  Result := IsExcludedUnit(AEntry, AUnitName);
+  if Result then
+    Exit;
+  if not SameText(AStripped, AUnitName) then
+    Result := IsExcludedUnit(AEntry, AStripped);
+end;
+
+procedure ConsiderFolder(const AFolderFull, AFileFull: string; ALength: Integer;
+  var ABestLength: Integer; var ABestIndex: Integer; AIndex: Integer;
+  var AOwnCode: Boolean; AIsOwnCode: Boolean);
+begin
+  if (ALength > ABestLength) and FileIsInsideFolder(AFileFull, AFolderFull) then
+  begin
+    ABestLength := ALength;
+    ABestIndex := AIndex;
+    AOwnCode := AIsOwnCode;
+  end;
+end;
+
+function FindFolder(const AManifest: TComponentManifest; const AUnitName,
+  AStripped, ASourcePath: string; out AOwnCode: Boolean): Integer;
+var
+  I, J: Integer;
+  LFileFull: string;
+  LBestLength, LLength: Integer;
+  LFolder: string;
+begin
+  // Component folders are visited first, so on equal length a library wins
+  // over an own-code folder and the first row wins. A longer path wins
+  // either way, which is how a package checked into the source tree stays
+  // a library and a patch folder under that package stays own code.
+  Result := -1;
+  AOwnCode := False;
+  if not TryNormalizeFullPath(ASourcePath, LFileFull) then
+    Exit;
+  LBestLength := 0;
+
+  for I := 0 to High(AManifest.Components) do
+  begin
+    if FolderIsExcluded(AManifest.Components[I], AUnitName, AStripped) then
+      Continue;
+    for J := 0 to High(AManifest.Components[I].Folders) do
+    begin
+      LFolder := AManifest.Components[I].Folders[J];
+      LLength := Length(IncludeTrailingPathDelimiter(LFolder));
+      ConsiderFolder(LFolder, LFileFull, LLength, LBestLength, Result, I, AOwnCode, False);
+    end;
+  end;
+
+  for J := 0 to High(AManifest.OwnCodeFolders) do
+  begin
+    LFolder := AManifest.OwnCodeFolders[J];
+    LLength := Length(IncludeTrailingPathDelimiter(LFolder));
+    ConsiderFolder(LFolder, LFileFull, LLength, LBestLength, Result, -1, AOwnCode, True);
+  end;
+end;
+
 function MatchManifestUnit(const AManifest: TComponentManifest;
-  const AUnitName: string): TManifestMatch;
+  const AUnitName, ASourcePath: string): TManifestMatch;
 var
   LStripped: string;
   LIndex: Integer;
+  LOwnCode: Boolean;
 begin
   Result.Kind := mmNone;
   Result.ComponentIndex := -1;
@@ -1072,6 +1442,22 @@ begin
   begin
     Result.Kind := mmOwnCode;
     Exit;
+  end;
+
+  if Trim(ASourcePath) <> '' then
+  begin
+    LIndex := FindFolder(AManifest, AUnitName, LStripped, ASourcePath, LOwnCode);
+    if LOwnCode then
+    begin
+      Result.Kind := mmOwnCode;
+      Exit;
+    end;
+    if LIndex >= 0 then
+    begin
+      Result.Kind := mmLibrary;
+      Result.ComponentIndex := LIndex;
+      Exit;
+    end;
   end;
 
   LIndex := FindPrefix(AManifest, AUnitName);
@@ -1113,7 +1499,8 @@ begin
       if LUnitName = '' then
         Continue;
 
-      LMatch := MatchManifestUnit(AManifest, LUnitName);
+      LMatch := MatchManifestUnit(AManifest, LUnitName,
+        ArtefactFolderPath(AArtefacts[I]));
       if LMatch.Kind <> mmLibrary then
         Continue;
 
@@ -1184,7 +1571,8 @@ begin
       if LSeen[I] then
         Continue;
       LEntry := AManifest.Components[I];
-      if (Length(LEntry.Prefixes) = 0) and (Length(LEntry.ExactUnits) = 0) then
+      if (Length(LEntry.Prefixes) = 0) and (Length(LEntry.ExactUnits) = 0) and
+        (Length(LEntry.Folders) = 0) then
         Continue;
       if LEntry.Name <> '' then
         LList.Add('component "' + LEntry.Name + '" matched no units')

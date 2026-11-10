@@ -1026,11 +1026,20 @@ begin
         for var LUnit in LCompositionEvidence.Units do
         begin
           if SameText(LUnit.UnitName, 'DECCipherBase') then
+          begin
             Assert.AreEqual(uokThirdParty, LUnit.OriginKind,
-              'A DCU compiled from a third-party source stays Third party')
+              'A DCU compiled from a third-party source stays Third party');
+            Assert.IsTrue(SameText(LUnit.SourcePath,
+              TPath.Combine(LLibDir, 'DECCipherBase.pas')),
+              'The .pas on the search path is kept so a manifest folder can match it');
+          end
           else
+          begin
             Assert.AreEqual(uokLocalProject, LUnit.OriginKind,
               'A DCU without a source outside the output folder stays Local project');
+            Assert.AreEqual('', LUnit.SourcePath,
+              'A DCU with no source outside the output folder has no source path');
+          end;
         end;
       finally
         LCompositionEvidence.Free;
@@ -1083,6 +1092,8 @@ begin
         Assert.AreEqual(LUnitDcuPath, LCompositionEvidence.Units[0].ResolvedPath);
         Assert.AreEqual(uokThirdParty, LCompositionEvidence.Units[0].OriginKind,
           'A library below Delphi\Extras must be classified as Third party');
+        Assert.IsTrue(SameText(LCompositionEvidence.Units[0].SourcePath, LUnitDcuPath),
+          'A DCU outside the output folder keeps its path for manifest folder matching');
       finally
         LCompositionEvidence.Free;
       end;

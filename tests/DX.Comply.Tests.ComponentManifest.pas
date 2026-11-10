@@ -5,8 +5,9 @@
 ///
 /// <remarks>
 /// Covers matching (exact beats prefix, first row wins, scope stripping,
-/// case), licence classification, PURL generation, writer output, optional
-/// copyright text, and the CLI / config precedence for --manifest.
+/// case, own-code folders, component folders), licence classification, PURL
+/// generation, writer output, optional copyright text, and the CLI / config
+/// precedence for --manifest.
 /// </remarks>
 ///
 /// <copyright>
@@ -88,6 +89,51 @@ type
     procedure Match_ExactBeatsOwnCodeUnit;
     [Test]
     procedure Match_OwnCodePrefixAfterLibraryPrefix;
+    /// <summary>own_code_folders marks units under that folder, including subfolders.</summary>
+    [Test]
+    procedure Match_OwnCodeFolder_IncludesSubfolders;
+    /// <summary>units_folder assigns the units in a package folder to that row.</summary>
+    [Test]
+    procedure Match_ComponentFolder_AssignsRow;
+    /// <summary>A folder includes its own files and subfolders, and not a sibling directory.</summary>
+    [Test]
+    procedure Match_Folder_SkipsSiblingDirectory;
+    /// <summary>The longest folder path wins, for a package inside own code and a patch inside a package.</summary>
+    [Test]
+    procedure Match_Folder_LongestPathWins;
+    /// <summary>units_exact still beats a folder.</summary>
+    [Test]
+    procedure Match_ExactBeatsFolder;
+    /// <summary>own_code_units still beats a component folder.</summary>
+    [Test]
+    procedure Match_OwnCodeUnitBeatsFolder;
+    /// <summary>A folder beats units_prefix and own_code_prefixes.</summary>
+    [Test]
+    procedure Match_FolderBeatsPrefix;
+    /// <summary>units_exclude takes a unit out of that row's folder.</summary>
+    [Test]
+    procedure Match_UnitsExclude_SkipsFolder;
+    /// <summary>A unit known only by name is not matched by a folder.</summary>
+    [Test]
+    procedure Match_Folder_NameOnly_DoesNotMatch;
+    /// <summary>Folder comparison ignores case and accepts either slash.</summary>
+    [Test]
+    procedure Match_Folder_IsCaseInsensitive;
+    /// <summary>The first component row wins when two folders have the same length.</summary>
+    [Test]
+    procedure Match_FirstFolderRowWinsOnTie;
+    /// <summary>A missing folder is a warning and the rule is still applied. A file is not a folder.</summary>
+    [Test]
+    procedure Parse_MissingFolder_WarnsAndStillApplies;
+    /// <summary>Relative folders are resolved from the components file, then kept absolute for writers.</summary>
+    [Test]
+    procedure Load_RelativeFolder_ResolvesAgainstManifestFile;
+    /// <summary>A row that only has units_folder is a match rule.</summary>
+    [Test]
+    procedure Parse_FolderOnlyRow_IsAMatchRule;
+    /// <summary>Grouping uses the source path, not a DCU in the output folder.</summary>
+    [Test]
+    procedure Plan_UsesSourcePathNotOutputDcu;
 
     [Test]
     procedure Licence_SpdxId_IsCanonical;
@@ -153,6 +199,23 @@ implementation
 
 uses
   DX.Comply.Tests.Paths;
+
+function JsonPath(const APath: string): string;
+begin
+  // Delphi strings do not treat "\" as an escape. JSON does.
+  Result := StringReplace(APath, '\', '\\', [rfReplaceAll]);
+end;
+
+procedure AssertFolderMatch(const AManifest: TComponentManifest;
+  const AUnitName, APath: string; AKind: TManifestMatchKind; AIndex: Integer;
+  const AMessage: string);
+var
+  LMatch: TManifestMatch;
+begin
+  LMatch := MatchManifestUnit(AManifest, AUnitName, APath);
+  Assert.AreEqual(Ord(AKind), Ord(LMatch.Kind), AMessage);
+  Assert.AreEqual(AIndex, LMatch.ComponentIndex, AMessage);
+end;
 
 function TComponentManifestTests.ParseManifest(const AJson: string): TComponentManifest;
 var
@@ -1112,6 +1175,413 @@ begin
   finally
     LJson.Free;
   end;
+end;
+
+procedure TComponentManifestTests.Match_OwnCodeFolder_IncludesSubfolders;
+var
+  LManifest: TComponentManifest;
+begin
+  LManifest := ParseManifest(
+    '{"components":[],"own_code_folders":["' +
+    JsonPath('C:\DXComplyFolderTest\src') + '"]}');
+  AssertFolderMatch(LManifest, 'Main',
+    'C:\DXComplyFolderTest\src\App\Main.pas', mmOwnCode, -1,
+    'A unit in a subfolder of own_code_folders is own code');
+  AssertFolderMatch(LManifest, 'VendorUnit',
+    'C:\DXComplyFolderTest\libs\VendorUnit.pas', mmNone, -1,
+    'A unit outside the own-code folder stays unmatched');
+end;
+
+procedure TComponentManifestTests.Match_ComponentFolder_AssignsRow;
+var
+  LManifest: TComponentManifest;
+begin
+  LManifest := ParseManifest(
+    '{"components":[' +
+    '{"name":"JVCL","version":"1","vendor":"A","licence":"MPL-1.1","type":"library",' +
+    '"units_folder":["' + JsonPath('C:\DXComplyFolderTest\JVCL') + '"]}]}');
+  AssertFolderMatch(LManifest, 'JvCore',
+    'C:\DXComplyFolderTest\JVCL\run\JvCore.pas', mmLibrary, 0,
+    'A unit under units_folder belongs to that row');
+end;
+
+procedure TComponentManifestTests.Match_Folder_SkipsSiblingDirectory;
+var
+  LManifest: TComponentManifest;
+begin
+  LManifest := ParseManifest(
+    '{"components":[' +
+    '{"name":"JVCL","version":"1","vendor":"A","licence":"MPL-1.1","type":"library",' +
+    '"units_folder":["' + JsonPath('C:\DXComplyFolderTest\JVCL') + '"]}]}');
+  AssertFolderMatch(LManifest, 'JvCore',
+    'C:\DXComplyFolderTest\JVCL\JvCore.pas', mmLibrary, 0,
+    'A unit directly in the folder matches');
+  AssertFolderMatch(LManifest, 'JvCore',
+    'C:\DXComplyFolderTest\JVCL\run\core\JvCore.pas', mmLibrary, 0,
+    'Subfolders are included');
+  AssertFolderMatch(LManifest, 'JvCore',
+    'C:\DXComplyFolderTest\JVCL2\JvCore.pas', mmNone, -1,
+    'A sibling directory whose name starts with the folder name does not match');
+end;
+
+procedure TComponentManifestTests.Match_Folder_LongestPathWins;
+var
+  LManifest: TComponentManifest;
+begin
+  LManifest := ParseManifest(
+    '{"components":[' +
+    '{"name":"JVCL","version":"1","vendor":"A","licence":"MPL-1.1","type":"library",' +
+    '"units_folder":["' + JsonPath('C:\DXComplyFolderTest\src\ThirdParty\JVCL') + '"]}' +
+    '],"own_code_folders":["' + JsonPath('C:\DXComplyFolderTest\src') + '"]}');
+  AssertFolderMatch(LManifest, 'JvCore',
+    'C:\DXComplyFolderTest\src\ThirdParty\JVCL\run\JvCore.pas', mmLibrary, 0,
+    'A package folder inside the own-code tree wins because it is longer');
+  AssertFolderMatch(LManifest, 'Main',
+    'C:\DXComplyFolderTest\src\App\Main.pas', mmOwnCode, -1,
+    'The rest of the own-code tree stays own code');
+
+  LManifest := ParseManifest(
+    '{"components":[' +
+    '{"name":"JVCL","version":"1","vendor":"A","licence":"MPL-1.1","type":"library",' +
+    '"units_folder":["' + JsonPath('C:\DXComplyFolderTest\JVCL') + '"]}' +
+    '],"own_code_folders":["' + JsonPath('C:\DXComplyFolderTest\JVCL\Patches') + '"]}');
+  AssertFolderMatch(LManifest, 'MyFix',
+    'C:\DXComplyFolderTest\JVCL\Patches\MyFix.pas', mmOwnCode, -1,
+    'A longer own-code folder inside a package stays own code');
+  AssertFolderMatch(LManifest, 'JvCore',
+    'C:\DXComplyFolderTest\JVCL\run\JvCore.pas', mmLibrary, 0,
+    'The rest of the package stays with the component');
+end;
+
+procedure TComponentManifestTests.Match_ExactBeatsFolder;
+var
+  LManifest: TComponentManifest;
+begin
+  LManifest := ParseManifest(
+    '{"components":[' +
+    '{"name":"JVCL","version":"1","vendor":"A","licence":"MPL-1.1","type":"library",' +
+    '"units_folder":["' + JsonPath('C:\DXComplyFolderTest\JVCL') + '"]},' +
+    '{"name":"Special","version":"1","vendor":"A","licence":"MIT","type":"library",' +
+    '"units_exact":["JvSpecial"]}' +
+    ']}');
+  AssertFolderMatch(LManifest, 'JvSpecial',
+    'C:\DXComplyFolderTest\JVCL\JvSpecial.pas', mmLibrary, 1,
+    'units_exact beats a folder on another row');
+  AssertFolderMatch(LManifest, 'JvCore',
+    'C:\DXComplyFolderTest\JVCL\JvCore.pas', mmLibrary, 0,
+    'Other units in the folder stay with the folder row');
+end;
+
+procedure TComponentManifestTests.Match_OwnCodeUnitBeatsFolder;
+var
+  LManifest: TComponentManifest;
+begin
+  LManifest := ParseManifest(
+    '{"components":[' +
+    '{"name":"JVCL","version":"1","vendor":"A","licence":"MPL-1.1","type":"library",' +
+    '"units_folder":["' + JsonPath('C:\DXComplyFolderTest\JVCL') + '"]}' +
+    '],"own_code_units":["JvPatch"]}');
+  AssertFolderMatch(LManifest, 'JvPatch',
+    'C:\DXComplyFolderTest\JVCL\JvPatch.pas', mmOwnCode, -1,
+    'own_code_units beats a component folder');
+  AssertFolderMatch(LManifest, 'JvCore',
+    'C:\DXComplyFolderTest\JVCL\JvCore.pas', mmLibrary, 0,
+    'The rest of the folder stays with the component');
+end;
+
+procedure TComponentManifestTests.Match_FolderBeatsPrefix;
+var
+  LManifest: TComponentManifest;
+begin
+  LManifest := ParseManifest(
+    '{"components":[' +
+    '{"name":"ByPrefix","version":"1","vendor":"A","licence":"MIT","type":"library",' +
+    '"units_prefix":["Jv"]},' +
+    '{"name":"ByFolder","version":"1","vendor":"A","licence":"MIT","type":"library",' +
+    '"units_folder":["' + JsonPath('C:\DXComplyFolderTest\Other') + '"]}' +
+    ']}');
+  AssertFolderMatch(LManifest, 'JvFoo',
+    'C:\DXComplyFolderTest\Other\JvFoo.pas', mmLibrary, 1,
+    'A component folder beats a prefix, whatever the row order');
+
+  LManifest := ParseManifest(
+    '{"components":[' +
+    '{"name":"ByPrefix","version":"1","vendor":"A","licence":"MIT","type":"library",' +
+    '"units_prefix":["App"]}' +
+    '],"own_code_folders":["' + JsonPath('C:\DXComplyFolderTest\src') + '"]}');
+  AssertFolderMatch(LManifest, 'AppSettings',
+    'C:\DXComplyFolderTest\src\AppSettings.pas', mmOwnCode, -1,
+    'An own-code folder beats a library prefix');
+end;
+
+procedure TComponentManifestTests.Match_UnitsExclude_SkipsFolder;
+var
+  LManifest: TComponentManifest;
+begin
+  LManifest := ParseManifest(
+    '{"components":[' +
+    '{"name":"JVCL","version":"1","vendor":"A","licence":"MPL-1.1","type":"library",' +
+    '"units_folder":["' + JsonPath('C:\DXComplyFolderTest\JVCL') + '"],' +
+    '"units_prefix":["Jv"],"units_exclude":["JvSkip","Vcl.Skia"]},' +
+    '{"name":"Skia","version":"1","vendor":"A","licence":"MIT","type":"library",' +
+    '"units_prefix":["Skia"]}' +
+    ']}');
+  AssertFolderMatch(LManifest, 'JvCore',
+    'C:\DXComplyFolderTest\JVCL\JvCore.pas', mmLibrary, 0,
+    'A unit that is not excluded stays in the folder');
+  AssertFolderMatch(LManifest, 'JvSkip',
+    'C:\DXComplyFolderTest\JVCL\JvSkip.pas', mmNone, -1,
+    'units_exclude takes the unit out of that row''s folder and its prefix');
+  AssertFolderMatch(LManifest, 'Vcl.Skia',
+    'C:\DXComplyFolderTest\JVCL\Skia.pas', mmLibrary, 1,
+    'An excluded scoped name leaves the unit for another row');
+end;
+
+procedure TComponentManifestTests.Match_Folder_NameOnly_DoesNotMatch;
+var
+  LManifest: TComponentManifest;
+begin
+  LManifest := ParseManifest(
+    '{"components":[' +
+    '{"name":"JVCL","version":"1","vendor":"A","licence":"MPL-1.1","type":"library",' +
+    '"units_folder":["' + JsonPath('C:\DXComplyFolderTest\JVCL') + '"],' +
+    '"units_prefix":["Jv"]}' +
+    '],"own_code_folders":["' + JsonPath('C:\DXComplyFolderTest\src') + '"]}');
+  AssertFolderMatch(LManifest, 'JvCore', '', mmLibrary, 0,
+    'With no source path the prefix still matches and the folder does not');
+  AssertFolderMatch(LManifest, 'Main', '', mmNone, -1,
+    'An own-code folder does not match a unit known only by name');
+  AssertFolderMatch(LManifest, 'JvCore',
+    'C:\DXComplyFolderTest\JVCL\run\JvCore.pas', mmLibrary, 0,
+    'The same unit matches the folder once a source path is known');
+end;
+
+procedure TComponentManifestTests.Match_Folder_IsCaseInsensitive;
+var
+  LManifest: TComponentManifest;
+begin
+  LManifest := ParseManifest(
+    '{"components":[' +
+    '{"name":"JVCL","version":"1","vendor":"A","licence":"MPL-1.1","type":"library",' +
+    '"units_folder":["C:/DXComplyFolderTest/JVCL"]}]}');
+  AssertFolderMatch(LManifest, 'JvCore',
+    'c:\dxcomplyfoldertest\jvcl\run\JvCore.pas', mmLibrary, 0,
+    'Folder matching ignores case and accepts either slash');
+end;
+
+procedure TComponentManifestTests.Match_FirstFolderRowWinsOnTie;
+var
+  LManifest: TComponentManifest;
+begin
+  LManifest := ParseManifest(
+    '{"components":[' +
+    '{"name":"First","version":"1","vendor":"A","licence":"MIT","type":"library",' +
+    '"units_folder":["' + JsonPath('C:\DXComplyFolderTest\JVCL') + '"]},' +
+    '{"name":"Second","version":"1","vendor":"A","licence":"MIT","type":"library",' +
+    '"units_folder":["' + JsonPath('C:\DXComplyFolderTest\JVCL') + '"]}' +
+    '],"own_code_folders":["' + JsonPath('C:\DXComplyFolderTest\JVCL') + '"]}');
+  AssertFolderMatch(LManifest, 'JvCore',
+    'C:\DXComplyFolderTest\JVCL\JvCore.pas', mmLibrary, 0,
+    'On equal length the first component row wins, ahead of own code');
+end;
+
+procedure TComponentManifestTests.Parse_MissingFolder_WarnsAndStillApplies;
+var
+  LManifest: TComponentManifest;
+  LError: string;
+  I: Integer;
+  LFound: Boolean;
+  LDir, LFile: string;
+begin
+  Assert.IsTrue(TryParseComponentManifest(
+    '{"components":[' +
+    '{"name":"JVCL","version":"1","vendor":"A","licence":"MPL-1.1","type":"library",' +
+    '"units_folder":["' + JsonPath('C:\DXComplyFolderTest\Missing') + '"]}]}',
+    'test', LManifest, LError), LError);
+  LFound := False;
+  for I := 0 to High(LManifest.Warnings) do
+    if (Pos('was not found', LManifest.Warnings[I]) > 0) and
+      (Pos('still applied', LManifest.Warnings[I]) > 0) and
+      (Pos('Missing', LManifest.Warnings[I]) > 0) then
+      LFound := True;
+  Assert.IsTrue(LFound, 'A missing folder must be a warning that says the rule is still applied');
+  AssertFolderMatch(LManifest, 'JvCore',
+    'C:\DXComplyFolderTest\Missing\JvCore.pas', mmLibrary, 0,
+    'The missing folder is still applied');
+
+  LDir := TPath.Combine(TPath.GetTempPath, 'dxm-not-a-folder');
+  TDirectory.CreateDirectory(LDir);
+  LFile := TPath.Combine(LDir, 'note.txt');
+  try
+    TFile.WriteAllText(LFile, 'not a folder');
+    Assert.IsTrue(TryParseComponentManifest(
+      '{"components":[' +
+      '{"name":"JVCL","version":"1","vendor":"A","licence":"MPL-1.1","type":"library",' +
+      '"units_folder":["' + JsonPath(LFile) + '"]}]}',
+      'test', LManifest, LError), LError);
+    LFound := False;
+    for I := 0 to High(LManifest.Warnings) do
+      if Pos('is a file, not a folder', LManifest.Warnings[I]) > 0 then
+        LFound := True;
+    Assert.IsTrue(LFound, 'A file path must be reported as not a folder');
+    AssertFolderMatch(LManifest, 'Note', LFile, mmNone, -1,
+      'A file path is not applied as a folder');
+  finally
+    if TDirectory.Exists(LDir) then
+      TDirectory.Delete(LDir, True);
+  end;
+end;
+
+procedure TComponentManifestTests.Load_RelativeFolder_ResolvesAgainstManifestFile;
+var
+  LRoot, LManifestDir, LVendor, LSrc, LManifestPath: string;
+  LUnitPath, LOwnPath, LJson, LError: string;
+  LManifest, LAgain: TComponentManifest;
+  I: Integer;
+  LMissingNamed, LVendorMissing: Boolean;
+begin
+  LRoot := TPath.Combine(TPath.GetTempPath, 'dxm-folders-' + TPath.GetRandomFileName);
+  LManifestDir := TPath.Combine(LRoot, 'sbom');
+  LVendor := TPath.Combine(LRoot, 'vendor', 'JVCL', 'run');
+  LSrc := TPath.Combine(LRoot, 'src', 'App');
+  TDirectory.CreateDirectory(LManifestDir);
+  TDirectory.CreateDirectory(LVendor);
+  TDirectory.CreateDirectory(LSrc);
+  try
+    LUnitPath := TPath.Combine(LVendor, 'JvCore.pas');
+    LOwnPath := TPath.Combine(LSrc, 'Main.pas');
+    TFile.WriteAllText(LUnitPath, 'unit JvCore;');
+    TFile.WriteAllText(LOwnPath, 'unit Main;');
+    LManifestPath := TPath.Combine(LManifestDir, 'components.json');
+    TFile.WriteAllText(LManifestPath,
+      '{"components":[{"name":"JVCL","version":"1","vendor":"A","licence":"MPL-1.1",' +
+      '"type":"library","units_folder":["../vendor/JVCL"]}],' +
+      '"own_code_folders":["../src","../missing-src"]}');
+
+    Assert.IsTrue(TryLoadComponentManifest(LManifestPath, LManifest, LJson, LError), LError);
+    LMissingNamed := False;
+    LVendorMissing := False;
+    for I := 0 to High(LManifest.Warnings) do
+    begin
+      if (Pos('missing-src', LManifest.Warnings[I]) > 0) and
+        (Pos('was not found', LManifest.Warnings[I]) > 0) and
+        (Pos('still applied', LManifest.Warnings[I]) > 0) then
+        LMissingNamed := True;
+      if (Pos('JVCL', LManifest.Warnings[I]) > 0) and
+        (Pos('was not found', LManifest.Warnings[I]) > 0) then
+        LVendorMissing := True;
+    end;
+    Assert.IsTrue(LMissingNamed, 'A relative folder that is missing must be named');
+    Assert.IsFalse(LVendorMissing, 'A folder that exists must not be reported missing');
+    AssertFolderMatch(LManifest, 'JvCore', LUnitPath, mmLibrary, 0,
+      'A relative units_folder is resolved from the manifest file');
+    AssertFolderMatch(LManifest, 'Main', LOwnPath, mmOwnCode, -1,
+      'A relative own_code_folders entry is resolved from the manifest file');
+    AssertFolderMatch(LManifest, 'JvOther',
+      TPath.Combine(LRoot, 'vendor', 'JVCL2', 'JvOther.pas'), mmNone, -1,
+      'The resolved folder does not include a sibling directory');
+
+    // Writers parse the loaded text again, with no file path.
+    Assert.IsTrue(TryParseComponentManifest(LJson, '', LAgain, LError), LError);
+    AssertFolderMatch(LAgain, 'JvCore', LUnitPath, mmLibrary, 0,
+      'The loaded text keeps the folder absolute for a later parse');
+    AssertFolderMatch(LAgain, 'Main', LOwnPath, mmOwnCode, -1,
+      'The loaded text keeps own-code folders absolute for a later parse');
+
+    Assert.IsTrue(TryParseComponentManifest(
+      '{"components":[{"name":"JVCL","version":"1","vendor":"A","licence":"MPL-1.1",' +
+      '"type":"library","units_folder":["libs/JVCL"]}]}',
+      'test', LManifest, LError), LError);
+    LMissingNamed := False;
+    for I := 0 to High(LManifest.Warnings) do
+      if Pos('was not applied', LManifest.Warnings[I]) > 0 then
+        LMissingNamed := True;
+    Assert.IsTrue(LMissingNamed,
+      'A relative folder is not applied when the manifest file location is unknown');
+    AssertFolderMatch(LManifest, 'JvCore',
+      TPath.Combine(TPath.GetTempPath, 'libs', 'JVCL', 'JvCore.pas'), mmNone, -1,
+      'An unresolved relative folder does not match');
+  finally
+    if TDirectory.Exists(LRoot) then
+      TDirectory.Delete(LRoot, True);
+  end;
+end;
+
+procedure TComponentManifestTests.Parse_FolderOnlyRow_IsAMatchRule;
+var
+  LManifest: TComponentManifest;
+  LError: string;
+  I: Integer;
+  LPlan: TManifestPlan;
+  LWarnings: TArray<string>;
+  LArtefacts: TArtefactList;
+  LArtefact: TArtefactInfo;
+begin
+  Assert.IsTrue(TryParseComponentManifest(
+    '{"components":[{"name":"JVCL","version":"1","vendor":"A","licence":"MPL-1.1",' +
+    '"type":"library","units_folder":["' + JsonPath('C:\DXComplyFolderTest\JVCL') + '"]}]}',
+    'test', LManifest, LError), LError);
+  for I := 0 to High(LManifest.Warnings) do
+    Assert.IsFalse(Pos('no units_prefix', LManifest.Warnings[I]) > 0,
+      LManifest.Warnings[I]);
+
+  LPlan := BuildManifestPlan(LManifest, FArtefacts);
+  LWarnings := DormantComponentWarnings(LManifest, LPlan);
+  Assert.AreEqual(1, Length(LWarnings), 'A folder row that matches nothing is reported');
+  Assert.IsTrue(Pos('JVCL', LWarnings[0]) > 0, LWarnings[0]);
+
+  LArtefacts := TArtefactList.Create;
+  try
+    LArtefact := Default(TArtefactInfo);
+    LArtefact.ArtefactType := 'unit-evidence';
+    LArtefact.RelativePath := 'JvCore.pas';
+    LArtefact.FilePath := 'C:\DXComplyFolderTest\JVCL\run\JvCore.pas';
+    LArtefacts.Add(LArtefact);
+    LPlan := BuildManifestPlan(LManifest, LArtefacts);
+    Assert.AreEqual(1, Length(LPlan.Libraries));
+    Assert.AreEqual(0, LPlan.Libraries[0].ComponentIndex);
+    LWarnings := DormantComponentWarnings(LManifest, LPlan);
+    Assert.AreEqual(0, Length(LWarnings), 'A matched folder row is not dormant');
+  finally
+    LArtefacts.Free;
+  end;
+end;
+
+procedure TComponentManifestTests.Plan_UsesSourcePathNotOutputDcu;
+var
+  LManifest: TComponentManifest;
+  LPlan: TManifestPlan;
+  LArtefact: TArtefactInfo;
+begin
+  LManifest := ParseManifest(
+    '{"components":[{"name":"JVCL","version":"1","vendor":"A","licence":"MPL-1.1",' +
+    '"type":"library","units_folder":["' + JsonPath('C:\DXComplyFolderTest\JVCL') + '"]}]}');
+
+  LArtefact := Default(TArtefactInfo);
+  LArtefact.ArtefactType := 'unit-evidence';
+  LArtefact.RelativePath := 'JvCore.dcu';
+  LArtefact.FilePath := 'C:\DXComplyFolderTest\Project\Win32\Release\JvCore.dcu';
+  LArtefact.SourcePath := 'C:\DXComplyFolderTest\JVCL\run\JvCore.pas';
+  FArtefacts.Add(LArtefact);
+
+  LArtefact := Default(TArtefactInfo);
+  LArtefact.ArtefactType := 'unit-evidence';
+  LArtefact.RelativePath := 'Other.dcu';
+  LArtefact.FilePath := 'C:\DXComplyFolderTest\Project\Win32\Release\Other.dcu';
+  FArtefacts.Add(LArtefact);
+
+  LArtefact := Default(TArtefactInfo);
+  LArtefact.ArtefactType := 'unit-evidence';
+  LArtefact.RelativePath := 'OnlyPas.pas';
+  LArtefact.FilePath := 'C:\DXComplyFolderTest\JVCL\OnlyPas.pas';
+  FArtefacts.Add(LArtefact);
+
+  LPlan := BuildManifestPlan(LManifest, FArtefacts);
+  Assert.AreEqual(1, Length(LPlan.Libraries));
+  Assert.AreEqual(2, Length(LPlan.GroupedArtefactIndexes),
+    'The source path and a .pas file match. The output DCU with no source path does not');
+  Assert.AreEqual(0, LPlan.GroupedArtefactIndexes[0]);
+  Assert.AreEqual(2, LPlan.GroupedArtefactIndexes[1]);
 end;
 
 initialization

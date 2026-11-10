@@ -431,11 +431,23 @@ dxcomply --project=MyApp.dproj --manifest=components.json --no-pause
 
 The same path can live in `.dxcomply.json` as `"manifest"`. A relative path is resolved from the project directory. Without `--ci`, the CLI does not read `.dxcomply.json`, so pass `--manifest` on the command line. With `--ci`, the file supplies `manifest` unless you also pass `--manifest`. The flag wins. The IDE expert reads the same key from the project folder and has no extra options field.
 
-The units come from the MAP file, including a Delphi 7 `.dpr` with its `.dof` and `.cfg`. Each row matches those units by `units_exact` and/or `units_prefix` (case-insensitive). The unit name is tried as written and again with one known scope prefix removed (`System.`, `Vcl.`, `Winapi.`, and the other Delphi scopes). An exact hit beats `own_code_units`, those beat a prefix, and a library prefix beats `own_code_prefixes`. Among prefixes the longest matching prefix wins, whatever the order of the rows, so a row with `Neslib.Xml` gets `Neslib.Xml.Reader` even when a row with `Neslib` comes first. On equal length, and for exact names, the first matching row wins.
+The units come from the MAP file, including a Delphi 7 `.dpr` with its `.dof` and `.cfg`. Each row matches those units by `units_exact`, `units_prefix`, and/or `units_folder` (names are case-insensitive). The unit name is tried as written and again with one known scope prefix removed (`System.`, `Vcl.`, `Winapi.`, and the other Delphi scopes).
 
-`units_exclude` lists unit names that the prefixes of that row do not match. This helps with a short prefix: `"units_prefix": ["Ab"], "units_exclude": ["AboutBox"]` gives every `Ab*` unit to the row except `AboutBox`, which can still match another row or stay unmatched. For a unit with a Delphi scope, write the name either way: `Vcl.Skia` and `Skia` both keep the unit `Vcl.Skia` out of a row with the prefix `Skia`. A prefix shorter than 3 characters gets a warning, but it is still applied.
+`units_folder` is an array, the same shape as `units_exact`, `units_prefix`, and `units_exclude`. One row can name more than one package folder. `own_code_folders` is the same kind of list for your own units, next to `own_code_units` and `own_code_prefixes`. A folder stands for every unit whose source file is in that folder or in a folder under it. There is no switch to turn that off. A neighboring folder is not included: `C:\Libs\JVCL` does not match `C:\Libs\JVCL2\Unit.pas`. Comparison ignores case, and `/` and `\` are the same. A relative path is resolved from the directory of the components file, not from the project directory, and `..` is applied. A folder that is not on disk produces a warning, and the rule is still applied. A path that is a file is not applied.
 
-`own_code_units` and `own_code_prefixes` mark the project's own units. Those units stay in the evidence. They are not dropped, and they are not attributed to a third-party library. Unmatched units stay as they are: one component each, linked from the program that was built.
+Folder rules need the unit's source path. The MAP file names the unit. DX.Comply uses the `.pas` it finds, including when the linked file is a DCU in the output directory and the `.pas` is on the search path. A DCU that lives in the package folder itself (not in the project output directory) is matched by that path when no `.pas` was found. A unit that stays a name with no file, and a DCU in the output directory whose `.pas` was not found, are not matched by a folder. `units_exact`, `own_code_units`, `units_prefix`, and `own_code_prefixes` still match those units by name.
+
+The first hit wins, in this order:
+
+1. `units_exact` (the first matching row).
+2. `own_code_units`.
+3. The longest matching folder, from `units_folder` and `own_code_folders` together. `units_exclude` keeps a unit out of that row's folders as well as its prefixes. On a tie the first component row wins, and a component folder wins over an own-code folder of the same length.
+4. `units_prefix`. Among prefixes the longest one wins, whatever the order of the rows, so a row with `Neslib.Xml` gets `Neslib.Xml.Reader` even when a row with `Neslib` comes first. On equal length the first row wins.
+5. `own_code_prefixes`.
+
+`units_exclude` lists unit names that the prefixes and folders of that row do not match. This helps with a short prefix: `"units_prefix": ["Ab"], "units_exclude": ["AboutBox"]` gives every `Ab*` unit to the row except `AboutBox`, which can still match another row or stay unmatched. The same list keeps a unit out of a `units_folder` on that row. For a unit with a Delphi scope, write the name either way: `Vcl.Skia` and `Skia` both keep the unit `Vcl.Skia` out of a row with the prefix `Skia`. A prefix shorter than 3 characters gets a warning, but it is still applied.
+
+`own_code_units`, `own_code_prefixes`, and `own_code_folders` mark the project's own units. Those units stay in the evidence. They are not dropped, and they are not attributed to a third-party library. Unmatched units stay as they are: one component each, linked from the program that was built.
 
 A matched unit stays as its own evidence component (hash, origin). The SBOM adds one library component for the row (`name`, `version`, `type`, supplier and author from `vendor`, optional `vendor_url`). The program that was built depends on that library, and the library depends on the matched units. Other binaries stay linked from that program. This is written for CycloneDX JSON, CycloneDX XML, SPDX 2.3 JSON, and SPDX 3.0.1 JSON-LD.
 
@@ -454,7 +466,7 @@ A file that cannot be read (missing, not JSON, or not an object or array) stops 
 Most Delphi libraries ship without an SBOM or a components file. You write the rows for them yourself, in your own components file. That file belongs to your product and is versioned with it.
 
 1. Run DX.Comply once with `--report=html` and open the report. The section **Third-party units without manifest** lists the units without a row, grouped by unit prefix.
-2. Add one row per library to your components file: `name`, `version`, `vendor`, `licence`, and `units_prefix` or `units_exact` for the units in the list. Take the licence and the version from the library's licence file, its readme, or your purchase records.
+2. Add one row per library to your components file: `name`, `version`, `vendor`, `licence`, and `units_prefix`, `units_exact`, or `units_folder` for the units in the list. A package that lives in one directory tree is a `units_folder` entry. Take the licence and the version from the library's licence file, its readme, or your purchase records.
 3. Run DX.Comply again with `--manifest=<file>` (or the `manifest` key in `.dxcomply.json`). The rows you added leave the list, and the units get supplier and licence in the SBOM. A row that matches no unit is reported as a warning, so a typo in a prefix shows up.
 
 Repeat until the list is empty, or until only units remain whose supplier you cannot name. With `--strict`, a CI build fails while that list is not empty.
@@ -531,6 +543,10 @@ Yes. `--report-content=overview` writes the origin summary, suppliers, and licen
 
 Add a row for it to your own components file and pass it with `--manifest`. The report section **Third-party units without manifest** shows which units still need a row. See [Libraries that ship no metadata](#libraries-that-ship-no-metadata).
 
+### Do I have to list every unit in the component manifest?
+
+No. `own_code_folders` names folders of your own units. `units_folder` on a row names the folder of a third-party package, including its subfolders. A unit known only by its name, with no source file found, is still matched by `units_exact`, `units_prefix`, `own_code_units`, or `own_code_prefixes`. See [Component manifest](#component-manifest).
+
 ### Library SBOM vs product SBOM: which one do I keep?
 
 Keep both when both apply. The library author archives the `--library` SBOM for each source release. Each product manufacturer archives the build-mode SBOM for each shipped app version. Downstream SBOMs do not replace the manufacturer's archive duty.
@@ -559,7 +575,7 @@ No internet connection is required. All processing is local.
 | [Library SBOM](docs/Library-SBOM.md) | Build mode and library mode, and what each SBOM contains |
 | [FAQ](#faq) | Common questions on library mode, old DLLs, generation time, and CRA archive |
 | [Example SBOM (JSON)](docs/examples/ConwaysLifeFMX.cdx.json) | CycloneDX 1.6 from ConwaysLifeFMX in RADStudio13Demos, Release/Win32 with a map file |
-| [Component manifest sample](docs/samples/components.sample.json) | Optional components.json (supplier, licence, version, type, package URL, copyright) |
+| [Component manifest sample](docs/samples/components.sample.json) | Optional components.json (supplier, licence, version, type, package URL, copyright, folders) |
 
 ---
 
