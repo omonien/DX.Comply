@@ -53,6 +53,11 @@ function UnitOriginKindToString(AValue: TUnitOriginKind): string;
 function ResolutionConfidenceToString(AValue: TResolutionConfidence): string;
 function ValidationStatusText(const AData: TComplianceReportData): string;
 function SafeText(const AValue: string; const AFallback: string = 'n/a'): string;
+/// <summary>
+/// True when AValue starts with http:// or https://. The reports only make
+/// such a value a link, so a value like "javascript:..." stays plain text.
+/// </summary>
+function IsHttpUrl(const AValue: string): Boolean;
 function DelphiRuntimeUnitsText(const AProjectInfo: TProjectInfo): string;
 function HumanReadableReportTitle: string;
 function HumanReadableReportSubtitle: string;
@@ -87,6 +92,14 @@ begin
   else
     Result := 'Unknown';
   end;
+end;
+
+function IsHttpUrl(const AValue: string): Boolean;
+var
+  LValue: string;
+begin
+  LValue := LowerCase(Trim(AValue));
+  Result := LValue.StartsWith('http://') or LValue.StartsWith('https://');
 end;
 
 function DelphiRuntimeUnitsText(const AProjectInfo: TProjectInfo): string;

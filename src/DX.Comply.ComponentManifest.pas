@@ -987,7 +987,8 @@ begin
       Exit(True);
 end;
 
-function FindPrefix(const AManifest: TComponentManifest; const AUnitName: string): Integer;
+function FindPrefix(const AManifest: TComponentManifest; const AUnitName: string;
+  const AFullUnitName: string = ''): Integer;
 var
   I, J: Integer;
   LLower: string;
@@ -1000,8 +1001,11 @@ begin
   LLower := LowerCase(AUnitName);
   for I := 0 to High(AManifest.Components) do
   begin
-    // units_exclude takes a unit out of this row's prefixes only.
-    if IsExcludedUnit(AManifest.Components[I], AUnitName) then
+    // units_exclude takes a unit out of this row's prefixes only. When the
+    // name was shortened by its Delphi scope (Vcl.Skia to Skia), an entry
+    // with the full name excludes it as well.
+    if IsExcludedUnit(AManifest.Components[I], AUnitName) or
+      ((AFullUnitName <> '') and IsExcludedUnit(AManifest.Components[I], AFullUnitName)) then
       Continue;
     for J := 0 to High(AManifest.Components[I].Prefixes) do
       if (AManifest.Components[I].Prefixes[J] <> '') and
@@ -1071,7 +1075,7 @@ begin
 
   LIndex := FindPrefix(AManifest, AUnitName);
   if (LIndex < 0) and not SameText(LStripped, AUnitName) then
-    LIndex := FindPrefix(AManifest, LStripped);
+    LIndex := FindPrefix(AManifest, LStripped, AUnitName);
   if LIndex >= 0 then
   begin
     Result.Kind := mmLibrary;

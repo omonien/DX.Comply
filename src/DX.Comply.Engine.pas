@@ -386,16 +386,19 @@ type
     /// ResolveExternalDllFile with the project-tree index cached for this
     /// generator, so one SBOM does not walk the project once per DLL.
     /// </summary>
-    function ResolveKnownBinary(const ADllName, AOutputDir, AProjectDir: string;
-      const ASystemDirs: TArray<string>;
+    function ResolveKnownBinary(const ADllName, AOutputDir, AProjectDir,
+      APlatform: string; const ASystemDirs: TArray<string>;
       out ASource: TDllLocationSource): string;
     /// <summary>
     /// Maps each .dll and .bpl file name under AProjectDir to the preferred
-    /// full path. Installer wins. The output directory and Windows system
-    /// directories are omitted. The caller frees the dictionary.
+    /// full path. For a Windows APlatform a copy built for that platform
+    /// wins over a copy built for another one, so lib\Win64\x.dll is taken
+    /// for Win64 and lib\Win32\x.dll for Win32. Then Installer wins. The
+    /// output directory and Windows system directories are omitted. The
+    /// caller frees the dictionary.
     /// </summary>
     class function BuildProjectBinaryIndex(const AProjectDir,
-      AOutputDir: string): TDictionary<string, string>; static;
+      AOutputDir: string; const APlatform: string = ''): TDictionary<string, string>; static;
     class function ResolveExternalDllWithIndex(const ADllName, AOutputDir,
       AProjectDir: string; const ASystemDirs: TArray<string>;
       const AProjectBinaries: TDictionary<string, string>;
@@ -459,6 +462,15 @@ type
       AProjectDir: string; const ASystemDirs: TArray<string>;
       out ASource: TDllLocationSource): string; overload; static;
     /// <summary>
+    /// Same search for a target platform. When the project tree holds one
+    /// copy of the file per platform, the copy whose PE header names
+    /// APlatform (Win32, Win64, Win64x, WinARM64EC) is returned. Public for
+    /// testability.
+    /// </summary>
+    class function ResolveExternalDllFile(const ADllName, AOutputDir,
+      AProjectDir, APlatform: string; const ASystemDirs: TArray<string>;
+      out ASource: TDllLocationSource): string; overload; static;
+    /// <summary>
     /// Windows system directory that holds DLLs for the target platform:
     /// SysWOW64 for Win32 on 64-bit Windows, System32 for Win64 (Sysnative
     /// when this process is 32-bit, so file system redirection does not
@@ -479,6 +491,15 @@ type
     /// Creates a new TDxComplyGenerator with custom configuration.
     /// </summary>
     constructor Create(const AConfig: TSbomConfig); overload;
+    /// <summary>
+    /// The artefacts the third-party supplier and licence check runs on.
+    /// With composition evidence switched off the units are not in
+    /// AArtefacts, so the resolved units are added here. That way --strict
+    /// still fails on third-party units without a manifest row. The caller
+    /// frees the list. Public for testability.
+    /// </summary>
+    function ThirdPartyCheckArtefacts(const ACompositionEvidence: TCompositionEvidence;
+      const AArtefacts: TArtefactList): TArtefactList;
     /// <summary>
     /// Destroys the TDxComplyGenerator instance.
     /// </summary>
@@ -992,6 +1013,27 @@ begin
   end;
 end;
 
+function TDxComplyGenerator.ThirdPartyCheckArtefacts(
+  const ACompositionEvidence: TCompositionEvidence;
+  const AArtefacts: TArtefactList): TArtefactList;
+var
+  LArtefact: TArtefactInfo;
+begin
+  Result := TArtefactList.Create;
+  try
+    if Assigned(AArtefacts) then
+      for LArtefact in AArtefacts do
+        Result.Add(LArtefact);
+    // With composition evidence on, the units are already in AArtefacts.
+    if (not FConfig.IncludeCompositionEvidence) and
+      Assigned(ACompositionEvidence.Units) then
+      AddCompositionEvidenceToArtefacts(ACompositionEvidence, Result);
+  except
+    Result.Free;
+    raise;
+  end;
+end;
+
 procedure TDxComplyGenerator.AddRuntimePackagesToArtefacts(
   const AProjectInfo: TProjectInfo;
   const AArtefacts: TArtefactList);
@@ -1036,7 +1078,7 @@ begin
     // A BPL staged under the project is the copy that ships. A file found
     // only in a system directory is not hashed, same as an external DLL.
     LResolved := ResolveKnownBinary(LBplFileName, LOutputDir,
-      AProjectInfo.ProjectDir, LSystemDirs, LSource);
+      AProjectInfo.ProjectDir, AProjectInfo.Platform, LSystemDirs, LSource);
     if LSource in [dlsExplicitPath, dlsOutputDirectory, dlsProjectTree] then
     begin
       LArtefact.LocationSource := DllLocationSourceText(LSource);
@@ -1134,7 +1176,7 @@ begin
         LArtefact.Conditional := LConditional[I];
 
       LResolvedPath := ResolveKnownBinary(LDllName, LOutputDir,
-        AProjectInfo.ProjectDir, LSystemDirs, LSource);
+        AProjectInfo.ProjectDir, AProjectInfo.Platform, LSystemDirs, LSource);
       case LSource of
         dlsExplicitPath, dlsOutputDirectory, dlsProjectTree:
           begin
@@ -1263,6 +1305,78 @@ begin
   Result := Length(LLeft) - Length(LRight);
 end;
 
+function ReadPeMachine(const AFilePath: string): Word;
+const
+  cPeSignature = $00004550; // 'PE'#0#0
+var
+  LStream: TFileStream;
+  LDosHeader: array[0..63] of Byte;
+  LPeOffset, LSignature: Cardinal;
+  LMachine: Word;
+begin
+  // The Machine field of the COFF header. 0 when the file is not a PE image
+  // or cannot be read.
+  Result := 0;
+  try
+    LStream := TFileStream.Create(AFilePath, fmOpenRead or fmShareDenyNone);
+    try
+      if LStream.Read(LDosHeader, SizeOf(LDosHeader)) <> SizeOf(LDosHeader) then
+        Exit;
+      if (LDosHeader[0] <> Ord('M')) or (LDosHeader[1] <> Ord('Z')) then
+        Exit;
+      Move(LDosHeader[$3C], LPeOffset, SizeOf(LPeOffset));
+      if (LPeOffset = 0) or (Int64(LPeOffset) + 6 > LStream.Size) then
+        Exit;
+      LStream.Position := LPeOffset;
+      if LStream.Read(LSignature, SizeOf(LSignature)) <> SizeOf(LSignature) then
+        Exit;
+      if LSignature <> cPeSignature then
+        Exit;
+      if LStream.Read(LMachine, SizeOf(LMachine)) <> SizeOf(LMachine) then
+        Exit;
+      Result := LMachine;
+    finally
+      LStream.Free;
+    end;
+  except
+    on E: Exception do
+      Result := 0;
+  end;
+end;
+
+function ShippedBinaryPlatformRank(const AFilePath, APlatform: string): Integer;
+const
+  cMachineI386 = $014C;
+  cMachineAmd64 = $8664;
+  cMachineArm64 = $AA64;
+var
+  LMachine: Word;
+begin
+  // 0: PE image for the target platform. 1: PE image for another platform.
+  // 2: not a PE image. Without a Windows target every file ranks 0, so the
+  // order is the one used before the platform was considered.
+  Result := 0;
+  if not (SameText(APlatform, 'Win32') or SameText(APlatform, 'Win64') or
+    SameText(APlatform, 'Win64x') or SameText(APlatform, 'WinARM64EC')) then
+    Exit;
+  LMachine := ReadPeMachine(AFilePath);
+  if LMachine = 0 then
+    Exit(2);
+  if SameText(APlatform, 'Win32') then
+  begin
+    if LMachine <> cMachineI386 then
+      Result := 1;
+  end
+  else if SameText(APlatform, 'WinARM64EC') then
+  begin
+    // An ARM64EC process loads ARM64EC and x64 images.
+    if (LMachine <> cMachineArm64) and (LMachine <> cMachineAmd64) then
+      Result := 1;
+  end
+  else if LMachine <> cMachineAmd64 then
+    Result := 1;
+end;
+
 function PreferShippedBinary(const ACandidate, ACurrent: string): Boolean;
 var
   LCandidateInstaller, LCurrentInstaller: Boolean;
@@ -1330,7 +1444,7 @@ begin
 end;
 
 class function TDxComplyGenerator.BuildProjectBinaryIndex(const AProjectDir,
-  AOutputDir: string): TDictionary<string, string>;
+  AOutputDir: string; const APlatform: string): TDictionary<string, string>;
 const
   cMaxProjectBinaryDepth = 6;
   cMaxProjectBinaryDirs = 500;
@@ -1339,6 +1453,7 @@ var
   LRoot, LSkipOutput: string;
   LVisited, LInstallerVisited: Integer;
   LIndex: TDictionary<string, string>;
+  LRanks: TDictionary<string, Integer>;
 
   function SameDir(const ALeft, ARight: string): Boolean;
   begin
@@ -1389,6 +1504,7 @@ var
   var
     LMask, LFile, LFull, LKey, LExisting: string;
     LFiles: TStringDynArray;
+    LRank, LExistingRank: Integer;
   begin
     for LMask in cMasks do
     begin
@@ -1411,9 +1527,18 @@ var
         LKey := LowerCase(TPath.GetFileName(LFull));
         if LKey = '' then
           Continue;
+        // A copy for the target platform beats a copy for another one,
+        // whatever the folder. Equal ranks keep the Installer, depth and
+        // name order.
+        LRank := ShippedBinaryPlatformRank(LFull, APlatform);
         if (not LIndex.TryGetValue(LKey, LExisting)) or
-           PreferShippedBinary(LFull, LExisting) then
+           (not LRanks.TryGetValue(LKey, LExistingRank)) or
+           (LRank < LExistingRank) or
+           ((LRank = LExistingRank) and PreferShippedBinary(LFull, LExisting)) then
+        begin
           LIndex.AddOrSetValue(LKey, LFull);
+          LRanks.AddOrSetValue(LKey, LRank);
+        end;
       end;
     end;
   end;
@@ -1488,7 +1613,12 @@ begin
         LSkipOutput := '';
     end;
 
-  Walk(LRoot, 0);
+  LRanks := TDictionary<string, Integer>.Create;
+  try
+    Walk(LRoot, 0);
+  finally
+    LRanks.Free;
+  end;
 end;
 
 class function TDxComplyGenerator.ResolveExternalDllWithIndex(
@@ -1607,6 +1737,21 @@ begin
   end;
 end;
 
+class function TDxComplyGenerator.ResolveExternalDllFile(const ADllName,
+  AOutputDir, AProjectDir, APlatform: string; const ASystemDirs: TArray<string>;
+  out ASource: TDllLocationSource): string;
+var
+  LIndex: TDictionary<string, string>;
+begin
+  LIndex := BuildProjectBinaryIndex(AProjectDir, AOutputDir, APlatform);
+  try
+    Result := ResolveExternalDllWithIndex(ADllName, AOutputDir, AProjectDir,
+      ASystemDirs, LIndex, ASource);
+  finally
+    LIndex.Free;
+  end;
+end;
+
 procedure TDxComplyGenerator.ClearProjectBinaryIndex;
 begin
   FreeAndNil(FProjectBinaryIndex);
@@ -1614,16 +1759,17 @@ begin
 end;
 
 function TDxComplyGenerator.ResolveKnownBinary(const ADllName, AOutputDir,
-  AProjectDir: string; const ASystemDirs: TArray<string>;
+  AProjectDir, APlatform: string; const ASystemDirs: TArray<string>;
   out ASource: TDllLocationSource): string;
 var
   LKey: string;
   LFresh: TDictionary<string, string>;
 begin
-  LKey := LowerCase(AProjectDir) + '|' + LowerCase(AOutputDir);
+  LKey := LowerCase(AProjectDir) + '|' + LowerCase(AOutputDir) + '|' +
+    LowerCase(APlatform);
   if not SameText(FProjectBinaryIndexKey, LKey) then
   begin
-    LFresh := BuildProjectBinaryIndex(AProjectDir, AOutputDir);
+    LFresh := BuildProjectBinaryIndex(AProjectDir, AOutputDir, APlatform);
     FProjectBinaryIndex.Free;
     FProjectBinaryIndex := LFresh;
     FProjectBinaryIndexKey := LKey;
@@ -1714,7 +1860,7 @@ begin
     if ListsFile(LName) then
       Continue;
     LResolved := ResolveKnownBinary(LName, LOutputDir, AProjectInfo.ProjectDir,
-      LSystemDirs, LSource);
+      AProjectInfo.Platform, LSystemDirs, LSource);
     // The output directory is already scanned. A system DLL stays out.
     if LSource <> dlsProjectTree then
       Continue;
@@ -2352,6 +2498,12 @@ begin
         if LJson.GetValue('spdxVersion') <> nil then
         begin
           Result.SpdxVersion := Trim(LJson.GetValue<string>('spdxVersion'));
+          // The CLI rejects an unknown --spdx-version. The file key keeps the
+          // run going, so it says which version is written instead.
+          if not IsSupportedSpdxVersion(Result.SpdxVersion) then
+            DoProgress('Warning: spdxVersion "' + Result.SpdxVersion + '" in ' +
+              TPath.GetFileName(AConfigPath) + ' is not supported. Use "2.3" or "3.0.1". ' +
+              'SPDX output is written as 2.3.', 5);
           Result.Format := ApplySpdxVersion(Result.Format, Result.SpdxVersion);
         end;
 
@@ -3330,9 +3482,17 @@ begin
         for LCraText in BuildCraMetadataWarnings(FConfig, LMetadata, LProjectInfo,
           LArtefacts) do
           LCraWarnings.Add(LCraText);
-        // Issue #110: third-party units without supplier or licence.
-        for LCraText in BuildThirdPartyComponentWarnings(FConfig, LManifest, LArtefacts) do
-          LCraWarnings.Add(LCraText);
+        // Issue #110: third-party units without supplier or licence. With
+        // composition evidence switched off the units are not SBOM components,
+        // but the program still links them. The check then runs on the
+        // resolved units, so --strict does not pass because they are hidden.
+        var LUnitArtefacts := ThirdPartyCheckArtefacts(LCompositionEvidence, LArtefacts);
+        try
+          for LCraText in BuildThirdPartyComponentWarnings(FConfig, LManifest, LUnitArtefacts) do
+            LCraWarnings.Add(LCraText);
+        finally
+          LUnitArtefacts.Free;
+        end;
         ReportWarnings(LCraWarnings, LReportedWarnings, 69);
         FCraWarnings := LCraWarnings.ToArray;
         // Issue #114: one-line count for the CLI and the IDE log.

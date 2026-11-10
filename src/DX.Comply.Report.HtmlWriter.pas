@@ -355,7 +355,11 @@ begin
     if Trim(AData.Metadata.SupplierUrl) <> '' then
     begin
       var LSupplierUrl := EscapeHtml(Trim(AData.Metadata.SupplierUrl));
-      Lines.Add('<tr><th>Supplier URL</th><td><a href="' + LSupplierUrl + '">' + LSupplierUrl + '</a></td></tr>');
+      // Only an http(s) address becomes a link.
+      if IsHttpUrl(AData.Metadata.SupplierUrl) then
+        Lines.Add('<tr><th>Supplier URL</th><td><a href="' + LSupplierUrl + '">' + LSupplierUrl + '</a></td></tr>')
+      else
+        Lines.Add('<tr><th>Supplier URL</th><td>' + LSupplierUrl + '</td></tr>');
     end;
     if Trim(AData.Metadata.Licence) <> '' then
       Lines.Add('<tr><th>Licence</th><td>' + EscapeHtml(AData.Metadata.Licence) + '</td></tr>');

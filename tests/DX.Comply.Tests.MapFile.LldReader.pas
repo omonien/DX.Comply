@@ -61,6 +61,21 @@ type
     /// <summary>A file without the LLD header is not read.</summary>
     [Test]
     procedure Read_ClassicMap_IsNotLldMap;
+
+    /// <summary>
+    /// A Windows map in the ANSI code page holds bytes that are not UTF-8.
+    /// Reading it must not raise. It is not an LLD map.
+    /// </summary>
+    [Test]
+    procedure Read_ClassicMapWithAnsiByte_DoesNotRaise;
+
+    /// <summary>An LLD map with a byte that is not UTF-8 still yields its units.</summary>
+    [Test]
+    procedure Read_LldMapWithNonUtf8Byte_StillReadsUnits;
+
+    /// <summary>A project below a folder named NDK keeps its units.</summary>
+    [Test]
+    procedure TryParseInputLine_ProjectFolderNamedNdk_ReturnsUnit;
   end;
 
 implementation
@@ -173,6 +188,55 @@ begin
   finally
     TFile.Delete(LPath);
   end;
+end;
+
+procedure TLldMapReaderTests.Read_ClassicMapWithAnsiByte_DoesNotRaise;
+begin
+  var LPath := TPath.GetTempFileName;
+  try
+    // $FC is "u umlaut" in Windows-1252. Alone it is not valid UTF-8.
+    TFile.WriteAllBytes(LPath,
+      TEncoding.ASCII.GetBytes(' Start         Length     Name                   Class' + sLineBreak +
+        '  0001:00000000 000067FCH .text                  CODE' + sLineBreak +
+        ' 0001:00000000       M') + TBytes.Create($FC) +
+      TEncoding.ASCII.GetBytes('ller.Unit1' + sLineBreak));
+
+    var LContents := TLldMapReader.Read(LPath);
+    Assert.IsFalse(LContents.IsLldMap);
+    Assert.AreEqual(NativeInt(0), NativeInt(Length(LContents.UnitNames)));
+  finally
+    TFile.Delete(LPath);
+  end;
+end;
+
+procedure TLldMapReaderTests.Read_LldMapWithNonUtf8Byte_StillReadsUnits;
+begin
+  var LPath := TPath.GetTempFileName;
+  try
+    TFile.WriteAllBytes(LPath,
+      TEncoding.ASCII.GetBytes('             VMA              LMA     Size Align Out     In      Symbol' + sLineBreak +
+        cSystemLine + sLineBreak +
+        '         184e348          184e348        4     4         c:\\proj\\M') + TBytes.Create($FC) +
+      TEncoding.ASCII.GetBytes('ller\\Unit1.o:(.text)' + sLineBreak));
+
+    var LContents := TLldMapReader.Read(LPath);
+    Assert.IsTrue(LContents.IsLldMap);
+    Assert.AreEqual('System,Unit1', string.Join(',', LContents.UnitNames));
+  finally
+    TFile.Delete(LPath);
+  end;
+end;
+
+procedure TLldMapReaderTests.TryParseInputLine_ProjectFolderNamedNdk_ReturnsUnit;
+begin
+  var LUnitName: string;
+  var LArchiveName: string;
+  Assert.IsTrue(TLldMapReader.TryParseInputLine(
+    '         184e348          184e348        4     4         D:\\Work\\NDK\\MyApp\\dcu\\MainForm.o:(.text)',
+    LUnitName, LArchiveName), 'A folder named NDK alone is not the Android NDK');
+  Assert.AreEqual('MainForm', LUnitName);
+  Assert.IsFalse(TLldMapReader.TryParseInputLine(cNdkLine, LUnitName, LArchiveName),
+    'An object of the NDK toolchain is still skipped');
 end;
 
 initialization

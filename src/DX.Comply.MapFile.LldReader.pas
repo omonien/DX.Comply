@@ -25,6 +25,9 @@ unit DX.Comply.MapFile.LldReader;
 
 interface
 
+uses
+  System.SysUtils;
+
 type
   /// <summary>
   /// What an LLD map contributes: unit names and native archive names.
@@ -42,6 +45,9 @@ type
   /// Reads an ARM/LLVM (LLD) linker map.
   /// </summary>
   TLldMapReader = class
+  private
+    class function ReadWithEncoding(const AMapFilePath: string;
+      AEncoding: TEncoding): TLldMapContents; static;
   public
     /// <summary>
     /// True when ALine is the LLD map header "VMA LMA Size Align Out In Symbol".
@@ -57,6 +63,9 @@ type
     /// <summary>
     /// Streams AMapFilePath and returns its units and native components.
     /// IsLldMap is False, and nothing is read, when the header is missing.
+    /// The file is read as UTF-8. A file with bytes that are not UTF-8, such
+    /// as a Windows map in the ANSI code page, is read again in the ANSI code
+    /// page instead of raising an encoding error.
     /// </summary>
     class function Read(const AMapFilePath: string): TLldMapContents; static;
   end;
@@ -69,8 +78,7 @@ uses
   System.Generics.Defaults,
   System.IOUtils,
   System.RegularExpressions,
-  System.StrUtils,
-  System.SysUtils;
+  System.StrUtils;
 
 const
   /// <summary>Input section of an object file: VMA, LMA, Size, Align, path.o:(section).</summary>
@@ -116,8 +124,13 @@ end;
 /// </summary>
 function IsNdkPath(const ANormalizedPath: string): Boolean;
 begin
+  // An ndk folder counts only with a folder the NDK itself ships below it,
+  // so a project kept in D:\Work\NDK\MyApp keeps its units.
   var LPath := LowerCase(ANormalizedPath);
-  Result := ContainsText(LPath, '\ndk\') or ContainsText(LPath, '\sysroot\');
+  Result := ContainsText(LPath, '\sysroot\') or
+    (ContainsText(LPath, '\ndk\') and
+     (ContainsText(LPath, '\toolchains\') or ContainsText(LPath, '\platforms\') or
+      ContainsText(LPath, '\sources\')));
 end;
 
 procedure AddUnique(const AValue: string; const ASeen: TDictionary<string, Boolean>;
@@ -176,6 +189,21 @@ end;
 
 class function TLldMapReader.Read(const AMapFilePath: string): TLldMapContents;
 begin
+  // This reader also runs for every Windows map without unit sections, and
+  // those are written in the ANSI code page. Strict UTF-8 raises on such
+  // bytes, so the file is read again in the ANSI code page, which accepts
+  // every byte.
+  try
+    Result := ReadWithEncoding(AMapFilePath, TEncoding.UTF8);
+  except
+    on E: EEncodingError do
+      Result := ReadWithEncoding(AMapFilePath, TEncoding.ANSI);
+  end;
+end;
+
+class function TLldMapReader.ReadWithEncoding(const AMapFilePath: string;
+  AEncoding: TEncoding): TLldMapContents;
+begin
   Result := Default(TLldMapContents);
   if not TFile.Exists(AMapFilePath) then
     Exit;
@@ -184,7 +212,7 @@ begin
   var LArchiveSeen := TDictionary<string, Boolean>.Create(TIStringComparer.Ordinal);
   var LUnitNames := TList<string>.Create;
   var LArchives := TList<string>.Create;
-  var LReader := TStreamReader.Create(AMapFilePath, TEncoding.UTF8, True, 65536);
+  var LReader := TStreamReader.Create(AMapFilePath, AEncoding, True, 65536);
   try
     var LLineCount := 0;
     while not LReader.EndOfStream do

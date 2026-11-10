@@ -19,6 +19,7 @@ unit DX.Comply.BuildOrchestrator;
 interface
 
 uses
+  System.SysUtils,
   DX.Comply.Engine.Intf;
 
 type
@@ -203,12 +204,43 @@ function AppendUnicodeCodePageHint(const AMessage: string): string;
 function WriteDeepEvidenceDiagnosticLog(const AProjectDirectory: string;
   const AResult: TDeepEvidenceBuildResult; const AProjectPath: string = ''): string;
 
+/// <summary>
+/// Turns the bytes captured from the build process into text. UTF-8 is tried
+/// first. MSBuild and the compiler can also write in the console (OEM) code
+/// page, for example German umlauts in cp850, and those bytes are not valid
+/// UTF-8. They are then read in the OEM code page, which accepts every byte,
+/// so the output never raises an encoding error.
+/// </summary>
+function DecodeBuildOutput(const ABytes: TBytes): string;
+
 implementation
 
 uses
+  System.Classes,
   System.IOUtils,
-  System.SysUtils,
   Winapi.Windows;
+
+function DecodeBuildOutput(const ABytes: TBytes): string;
+var
+  LOem: TEncoding;
+begin
+  Result := '';
+  if Length(ABytes) = 0 then
+    Exit;
+  try
+    Result := TEncoding.UTF8.GetString(ABytes);
+  except
+    on E: EEncodingError do
+    begin
+      LOem := TEncoding.GetEncoding(Integer(GetOEMCP));
+      try
+        Result := LOem.GetString(ABytes);
+      finally
+        LOem.Free;
+      end;
+    end;
+  end;
+end;
 
 // ---------------------------------------------------------------------------
 // Local helper — always returns an English Windows system error description.
@@ -508,7 +540,7 @@ var
   LBuffer: TBytes;
   LCommandLine: string;
   LExitCode: Cardinal;
-  LOutputBuilder: TStringBuilder;
+  LRawOutput: TBytesStream;
   LPipeRead, LPipeWrite: THandle;
   LProcessInfo: TProcessInformation;
   LProcessStarted: Boolean;
@@ -521,8 +553,11 @@ var
 
   procedure AppendPipeText;
   begin
+    // Raw bytes are kept and decoded once at the end. A 4096-byte chunk can
+    // end inside a multi-byte character, and decoding each chunk as strict
+    // UTF-8 raised on such a chunk and on OEM code page output.
     if LBytesRead > 0 then
-      LOutputBuilder.Append(TEncoding.UTF8.GetString(LBuffer, 0, LBytesRead));
+      LRawOutput.WriteBuffer(LBuffer[0], LBytesRead);
   end;
 
   function DrainAvailableOutput: Boolean;
@@ -609,7 +644,7 @@ begin
       LTimedOut := False;
       LTimeoutMs := ResolveBuildTimeoutMs(APlan);
       LStartTick := GetTickCount64;
-      LOutputBuilder := TStringBuilder.Create;
+      LRawOutput := TBytesStream.Create;
       try
         SetLength(LBuffer, 4096);
         while True do
@@ -631,9 +666,9 @@ begin
             Break;
           end;
         end;
-        Result.Output := Trim(LOutputBuilder.ToString);
+        Result.Output := Trim(DecodeBuildOutput(Copy(LRawOutput.Bytes, 0, Integer(LRawOutput.Size))));
       finally
-        LOutputBuilder.Free;
+        LRawOutput.Free;
       end;
 
       if not GetExitCodeProcess(LProcessInfo.hProcess, LExitCode) then
