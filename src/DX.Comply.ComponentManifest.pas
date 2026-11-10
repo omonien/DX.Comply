@@ -1010,8 +1010,10 @@ begin
     else
     begin
       LCopy := TJSONObject.ParseJSONValue(AArray.Items[I].Format(0));
+      // Add accepts a string, a number, or an object. A copied TJSONValue
+      // goes through AddElement, which takes ownership of it.
       if LCopy <> nil then
-        Result.Add(LCopy);
+        Result.AddElement(LCopy);
     end;
   end;
 end;
