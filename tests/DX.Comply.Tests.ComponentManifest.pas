@@ -1527,7 +1527,8 @@ begin
 
   LPlan := BuildManifestPlan(LManifest, FArtefacts);
   LWarnings := DormantComponentWarnings(LManifest, LPlan);
-  Assert.AreEqual(1, Length(LWarnings), 'A folder row that matches nothing is reported');
+  Assert.AreEqual(NativeInt(1), NativeInt(Length(LWarnings)),
+    'A folder row that matches nothing is reported');
   Assert.IsTrue(Pos('JVCL', LWarnings[0]) > 0, LWarnings[0]);
 
   LArtefacts := TArtefactList.Create;
@@ -1538,10 +1539,11 @@ begin
     LArtefact.FilePath := 'C:\DXComplyFolderTest\JVCL\run\JvCore.pas';
     LArtefacts.Add(LArtefact);
     LPlan := BuildManifestPlan(LManifest, LArtefacts);
-    Assert.AreEqual(1, Length(LPlan.Libraries));
+    Assert.AreEqual(NativeInt(1), NativeInt(Length(LPlan.Libraries)));
     Assert.AreEqual(0, LPlan.Libraries[0].ComponentIndex);
     LWarnings := DormantComponentWarnings(LManifest, LPlan);
-    Assert.AreEqual(0, Length(LWarnings), 'A matched folder row is not dormant');
+    Assert.AreEqual(NativeInt(0), NativeInt(Length(LWarnings)),
+      'A matched folder row is not dormant');
   finally
     LArtefacts.Free;
   end;
@@ -1577,8 +1579,8 @@ begin
   FArtefacts.Add(LArtefact);
 
   LPlan := BuildManifestPlan(LManifest, FArtefacts);
-  Assert.AreEqual(1, Length(LPlan.Libraries));
-  Assert.AreEqual(2, Length(LPlan.GroupedArtefactIndexes),
+  Assert.AreEqual(NativeInt(1), NativeInt(Length(LPlan.Libraries)));
+  Assert.AreEqual(NativeInt(2), NativeInt(Length(LPlan.GroupedArtefactIndexes)),
     'The source path and a .pas file match. The output DCU with no source path does not');
   Assert.AreEqual(0, LPlan.GroupedArtefactIndexes[0]);
   Assert.AreEqual(2, LPlan.GroupedArtefactIndexes[1]);
