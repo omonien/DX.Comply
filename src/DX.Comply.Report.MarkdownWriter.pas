@@ -313,7 +313,11 @@ begin
     if Trim(AData.Metadata.SupplierUrl) <> '' then
     begin
       var LSupplierUrl := EscapeMarkdown(Trim(AData.Metadata.SupplierUrl));
-      Lines.Add(Format('| Supplier URL | [%s](%s) |', [LSupplierUrl, LSupplierUrl]));
+      // Only an http(s) address becomes a link.
+      if IsHttpUrl(AData.Metadata.SupplierUrl) then
+        Lines.Add(Format('| Supplier URL | [%s](%s) |', [LSupplierUrl, LSupplierUrl]))
+      else
+        Lines.Add(Format('| Supplier URL | %s |', [LSupplierUrl]));
     end;
     if Trim(AData.Metadata.Licence) <> '' then
       AddKeyValue(Lines, 'Licence', AData.Metadata.Licence);

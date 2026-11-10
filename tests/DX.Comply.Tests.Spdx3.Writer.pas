@@ -67,6 +67,13 @@ type
     procedure Build_Licence_IsLicenseExpression;
     [Test]
     procedure Write_OutputPassesValidate;
+
+    /// <summary>
+    /// JSON output starts with "{", not with a UTF-8 byte order mark
+    /// (RFC 8259 section 8.1). Strict JSON parsers reject a leading mark.
+    /// </summary>
+    [Test]
+    procedure Write_Output_HasNoByteOrderMark;
     [Test]
     procedure Validate_RejectsSpdx23;
     [Test]
@@ -323,6 +330,22 @@ begin
     Assert.IsTrue(ArrayHas(LRel.GetValue('to'), LFound));
   finally
     LDoc.Free;
+  end;
+end;
+
+procedure TSpdx3WriterTests.Write_Output_HasNoByteOrderMark;
+begin
+  AddArtefact('TestProject.exe', 'application', 'abc');
+  var LPath := TPath.Combine(TPath.GetTempPath, 'test_spdx3_bom_' + FormatDateTime('yyyymmddhhnnsszzz', Now) + '.json');
+  try
+    Assert.IsTrue(FWriter.Write(LPath, FMetadata, FArtefacts, FProjectInfo));
+    var LBytes := TFile.ReadAllBytes(LPath);
+    Assert.IsTrue(Length(LBytes) > 0, 'Output must not be empty');
+    Assert.AreEqual(NativeInt(Ord('{')), NativeInt(LBytes[0]),
+      'The file must start with "{", not with a byte order mark');
+  finally
+    if TFile.Exists(LPath) then
+      TFile.Delete(LPath);
   end;
 end;
 
