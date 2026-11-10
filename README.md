@@ -218,7 +218,7 @@ Both reports open with three overview sections built from the same data as the S
 
 - **Origin summary.** Component counts per origin (Embarcadero RTL/VCL/FMX, local project, third party, component manifest libraries, DLLs, runtime packages, other files), with links to the detail sections. The total equals the number of components in the SBOM. Third-party units are also counted per supplier from the component manifest, the rest as unknown supplier.
 - **Licences.** Components grouped by the licence declared in the SBOM, plus a group for components without licence information. Copyleft licences that differ from the product licence get a review hint. The hint is not legal advice.
-- **Third-party units without manifest.** Third-party units that no component manifest row matches, grouped by unit prefix, with the fields they are missing. The section is left out when the manifest covers every third-party unit. The CLI and the IDE log print the same count as one line.
+- **Third-party units without manifest.** Third-party units that no component manifest row matches, grouped by unit prefix, with the fields they are missing. The section is left out when the manifest covers every third-party unit. The CLI and the IDE log print the same count as one line only when at least one unit is missing.
 
 `--report-content` chooses which of these parts a report contains. It changes the HTML and Markdown reports only. The SBOM always lists every component.
 
