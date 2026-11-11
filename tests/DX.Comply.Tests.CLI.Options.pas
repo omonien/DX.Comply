@@ -205,6 +205,70 @@ type
     /// </summary>
     [Test]
     procedure Parse_SupplierUrlAndLicence_WinOverConfigFile;
+
+    /// <summary>
+    /// A relative config file in the working directory is used, even when
+    /// the project folder has another file of the same name.
+    /// </summary>
+    [Test]
+    procedure ResolveConfigPath_FoundInWorkingDirectory;
+
+    /// <summary>
+    /// When the working directory has no config file, the file next to
+    /// --project is used.
+    /// </summary>
+    [Test]
+    procedure ResolveConfigPath_FoundNextToProject;
+
+    /// <summary>
+    /// When neither directory has the file, both paths are reported and
+    /// the folder of dxcomply.exe is not one of them.
+    /// </summary>
+    [Test]
+    procedure ResolveConfigPath_NeitherPresent;
+
+    /// <summary>
+    /// An absolute --config path is used as given. A missing absolute path
+    /// is not replaced with a file in the project folder.
+    /// </summary>
+    [Test]
+    procedure ResolveConfigPath_AbsolutePath;
+
+    /// <summary>
+    /// A relative path with a subdirectory is applied to the working
+    /// directory and then to the project folder.
+    /// </summary>
+    [Test]
+    procedure ResolveConfigPath_RelativeSubfolder;
+
+    /// <summary>
+    /// Without --config the default name is .dxcomply.json, and that file
+    /// is found next to the project when the working directory has none.
+    /// </summary>
+    [Test]
+    procedure ResolveConfigPath_DefaultWithoutConfigFlag;
+
+    /// <summary>
+    /// The config file exists only next to the project, the process
+    /// directory is somewhere else, and LoadConfig reads the header values.
+    /// </summary>
+    [Test]
+    procedure ResolveConfigPath_ProjectFolder_LoadsValuesWhenCwdDiffers;
+
+    /// <summary>
+    /// With --ci, a missing config file produces a warning that lists the
+    /// paths that were checked. Without --ci, or when a file was found,
+    /// there is no warning.
+    /// </summary>
+    [Test]
+    procedure ConfigFileWarning_ListsTriedPathsWhenMissing;
+
+    /// <summary>
+    /// Help text says that square brackets mark an optional value, and it
+    /// describes the --config lookup order.
+    /// </summary>
+    [Test]
+    procedure HelpText_DescribesOptionalBrackets;
   end;
 
 implementation
@@ -999,6 +1063,316 @@ begin
       TFile.Delete(LPath);
     end;
   end;
+end;
+
+function CliOptions_TempDir: string;
+begin
+  Result := TPath.Combine(TPath.GetTempPath, 'dxcomply-cfg-' + TPath.GetRandomFileName);
+  TDirectory.CreateDirectory(Result);
+end;
+
+procedure CliOptions_DeleteTree(const APath: string);
+begin
+  if (APath <> '') and TDirectory.Exists(APath) then
+    TDirectory.Delete(APath, True);
+end;
+
+procedure CliOptions_WriteText(const APath, AText: string);
+var
+  LDir: string;
+begin
+  LDir := TPath.GetDirectoryName(APath);
+  if (LDir <> '') and not TDirectory.Exists(LDir) then
+    TDirectory.CreateDirectory(LDir);
+  TFile.WriteAllText(APath, AText, TEncoding.UTF8);
+end;
+
+procedure TCliOptionsTests.ResolveConfigPath_FoundInWorkingDirectory;
+var
+  LRoot, LWork, LProjectDir, LProject, LCwdConfig: string;
+  LResolution: TConfigPathResolution;
+begin
+  LRoot := CliOptions_TempDir;
+  try
+    LWork := TPath.Combine(LRoot, 'work');
+    LProjectDir := TPath.Combine(LRoot, 'proj');
+    TDirectory.CreateDirectory(LWork);
+    TDirectory.CreateDirectory(LProjectDir);
+    LProject := TPath.Combine(LProjectDir, 'App.dproj');
+    CliOptions_WriteText(LProject, '<Project/>');
+    LCwdConfig := TPath.Combine(LWork, '.dxcomply.json');
+    CliOptions_WriteText(LCwdConfig, '{"product":{"supplier":"FromCwd"}}');
+    CliOptions_WriteText(TPath.Combine(LProjectDir, '.dxcomply.json'),
+      '{"product":{"supplier":"FromProject"}}');
+
+    LResolution := TCliOptions.ResolveConfigPath('.dxcomply.json', LProject, LWork);
+    Assert.IsTrue(LResolution.Found, 'the working-directory file must be used');
+    Assert.IsTrue(SameText(LResolution.Path, LCwdConfig), LResolution.Path);
+    Assert.AreEqual(NativeInt(1), NativeInt(Length(LResolution.Tried)),
+      'a file in the working directory stops the lookup');
+    Assert.IsTrue(SameText(LResolution.Tried[0], LCwdConfig), LResolution.Tried[0]);
+  finally
+    CliOptions_DeleteTree(LRoot);
+  end;
+end;
+
+procedure TCliOptionsTests.ResolveConfigPath_FoundNextToProject;
+var
+  LRoot, LWork, LProjectDir, LProject, LProjectConfig: string;
+  LResolution: TConfigPathResolution;
+begin
+  LRoot := CliOptions_TempDir;
+  try
+    LWork := TPath.Combine(LRoot, 'work');
+    LProjectDir := TPath.Combine(LRoot, 'proj');
+    TDirectory.CreateDirectory(LWork);
+    TDirectory.CreateDirectory(LProjectDir);
+    LProject := TPath.Combine(LProjectDir, 'App.dproj');
+    CliOptions_WriteText(LProject, '<Project/>');
+    LProjectConfig := TPath.Combine(LProjectDir, '.dxcomply.json');
+    CliOptions_WriteText(LProjectConfig, '{"product":{"supplier":"FromProject"}}');
+
+    LResolution := TCliOptions.ResolveConfigPath('.dxcomply.json', LProject, LWork);
+    Assert.IsTrue(LResolution.Found, 'the file next to the project must be used');
+    Assert.IsTrue(SameText(LResolution.Path, LProjectConfig), LResolution.Path);
+    Assert.AreEqual(NativeInt(2), NativeInt(Length(LResolution.Tried)));
+    Assert.IsTrue(SameText(LResolution.Tried[0],
+      TPath.GetFullPath(TPath.Combine(LWork, '.dxcomply.json'))), LResolution.Tried[0]);
+    Assert.IsTrue(SameText(LResolution.Tried[1], LProjectConfig), LResolution.Tried[1]);
+  finally
+    CliOptions_DeleteTree(LRoot);
+  end;
+end;
+
+procedure TCliOptionsTests.ResolveConfigPath_NeitherPresent;
+var
+  LRoot, LWork, LProjectDir, LProject, LExeDir: string;
+  LResolution: TConfigPathResolution;
+  I: Integer;
+begin
+  LRoot := CliOptions_TempDir;
+  try
+    LWork := TPath.Combine(LRoot, 'work');
+    LProjectDir := TPath.Combine(LRoot, 'proj');
+    TDirectory.CreateDirectory(LWork);
+    TDirectory.CreateDirectory(LProjectDir);
+    LProject := TPath.Combine(LProjectDir, 'App.dproj');
+    CliOptions_WriteText(LProject, '<Project/>');
+
+    LResolution := TCliOptions.ResolveConfigPath('.dxcomply.json', LProject, LWork);
+    Assert.IsFalse(LResolution.Found);
+    Assert.AreEqual('', LResolution.Path);
+    Assert.AreEqual(NativeInt(2), NativeInt(Length(LResolution.Tried)),
+      'the working directory and the project folder are both checked');
+    Assert.IsTrue(SameText(LResolution.Tried[0],
+      TPath.GetFullPath(TPath.Combine(LWork, '.dxcomply.json'))));
+    Assert.IsTrue(SameText(LResolution.Tried[1],
+      TPath.GetFullPath(TPath.Combine(LProjectDir, '.dxcomply.json'))));
+
+    LExeDir := ExcludeTrailingPathDelimiter(ExtractFileDir(ParamStr(0)));
+    for I := 0 to High(LResolution.Tried) do
+      Assert.IsFalse(
+        SameText(ExcludeTrailingPathDelimiter(TPath.GetDirectoryName(LResolution.Tried[I])), LExeDir),
+        'lookup must not use the folder of dxcomply.exe');
+  finally
+    CliOptions_DeleteTree(LRoot);
+  end;
+end;
+
+procedure TCliOptionsTests.ResolveConfigPath_AbsolutePath;
+var
+  LRoot, LWork, LProjectDir, LProject, LAbsolute, LMissing: string;
+  LResolution: TConfigPathResolution;
+begin
+  LRoot := CliOptions_TempDir;
+  try
+    LWork := TPath.Combine(LRoot, 'work');
+    LProjectDir := TPath.Combine(LRoot, 'proj');
+    TDirectory.CreateDirectory(LWork);
+    TDirectory.CreateDirectory(LProjectDir);
+    LProject := TPath.Combine(LProjectDir, 'App.dproj');
+    CliOptions_WriteText(LProject, '<Project/>');
+    CliOptions_WriteText(TPath.Combine(LProjectDir, '.dxcomply.json'),
+      '{"product":{"supplier":"FromProject"}}');
+    LAbsolute := TPath.Combine(LWork, 'explicit.json');
+    CliOptions_WriteText(LAbsolute, '{"product":{"supplier":"Absolute"}}');
+
+    LResolution := TCliOptions.ResolveConfigPath(LAbsolute, LProject, LWork);
+    Assert.IsTrue(LResolution.Found);
+    Assert.AreEqual(LAbsolute, LResolution.Path, 'an absolute path is used as given');
+    Assert.AreEqual(NativeInt(1), NativeInt(Length(LResolution.Tried)));
+    Assert.AreEqual(LAbsolute, LResolution.Tried[0]);
+
+    LMissing := TPath.Combine(LRoot, 'missing.json');
+    LResolution := TCliOptions.ResolveConfigPath(LMissing, LProject, LWork);
+    Assert.IsFalse(LResolution.Found, 'a missing absolute path is not found elsewhere');
+    Assert.AreEqual('', LResolution.Path);
+    Assert.AreEqual(NativeInt(1), NativeInt(Length(LResolution.Tried)),
+      'a missing absolute path is not looked up in the project folder');
+    Assert.AreEqual(LMissing, LResolution.Tried[0]);
+  finally
+    CliOptions_DeleteTree(LRoot);
+  end;
+end;
+
+procedure TCliOptionsTests.ResolveConfigPath_RelativeSubfolder;
+var
+  LRoot, LWork, LProjectDir, LProject, LRelative, LProjectConfig: string;
+  LResolution: TConfigPathResolution;
+begin
+  LRoot := CliOptions_TempDir;
+  try
+    LWork := TPath.Combine(LRoot, 'work');
+    LProjectDir := TPath.Combine(LRoot, 'proj');
+    TDirectory.CreateDirectory(LWork);
+    TDirectory.CreateDirectory(LProjectDir);
+    LProject := TPath.Combine(LProjectDir, 'App.dproj');
+    CliOptions_WriteText(LProject, '<Project/>');
+    LRelative := TPath.Combine('ci', '.dxcomply.json');
+    LProjectConfig := TPath.Combine(LProjectDir, LRelative);
+    CliOptions_WriteText(LProjectConfig, '{"product":{"supplier":"FromSub"}}');
+
+    LResolution := TCliOptions.ResolveConfigPath(LRelative, LProject, LWork);
+    Assert.IsTrue(LResolution.Found);
+    Assert.IsTrue(SameText(LResolution.Path, TPath.GetFullPath(LProjectConfig)), LResolution.Path);
+    Assert.AreEqual(NativeInt(2), NativeInt(Length(LResolution.Tried)));
+    Assert.IsTrue(SameText(LResolution.Tried[0],
+      TPath.GetFullPath(TPath.Combine(LWork, LRelative))), LResolution.Tried[0]);
+    Assert.IsTrue(SameText(LResolution.Tried[1], TPath.GetFullPath(LProjectConfig)),
+      LResolution.Tried[1]);
+  finally
+    CliOptions_DeleteTree(LRoot);
+  end;
+end;
+
+procedure TCliOptionsTests.ResolveConfigPath_DefaultWithoutConfigFlag;
+var
+  LRoot, LWork, LProjectDir, LProject, LProjectConfig: string;
+  LOptions: TCliOptions;
+  LResolution: TConfigPathResolution;
+begin
+  LRoot := CliOptions_TempDir;
+  try
+    LWork := TPath.Combine(LRoot, 'work');
+    LProjectDir := TPath.Combine(LRoot, 'proj');
+    TDirectory.CreateDirectory(LWork);
+    TDirectory.CreateDirectory(LProjectDir);
+    LProject := TPath.Combine(LProjectDir, 'App.dproj');
+    CliOptions_WriteText(LProject, '<Project/>');
+    LProjectConfig := TPath.Combine(LProjectDir, '.dxcomply.json');
+    CliOptions_WriteText(LProjectConfig, '{"product":{"name":"Default"}}');
+
+    LOptions := TCliOptions.Create;
+    try
+      Assert.IsTrue(LOptions.Parse(['--project=' + LProject, '--ci']), LOptions.ParseError);
+      Assert.AreEqual('.dxcomply.json', LOptions.ConfigFile);
+      LResolution := TCliOptions.ResolveConfigPath(
+        LOptions.ConfigFile, LOptions.Project, LWork);
+      Assert.IsTrue(LResolution.Found);
+      Assert.IsTrue(SameText(LResolution.Path, LProjectConfig), LResolution.Path);
+    finally
+      LOptions.Free;
+    end;
+  finally
+    CliOptions_DeleteTree(LRoot);
+  end;
+end;
+
+procedure TCliOptionsTests.ResolveConfigPath_ProjectFolder_LoadsValuesWhenCwdDiffers;
+var
+  LRoot, LWork, LProjectDir, LProject, LSaved: string;
+  LResolution: TConfigPathResolution;
+  LGen: TDxComplyGenerator;
+  LConfig: TSbomConfig;
+begin
+  LRoot := CliOptions_TempDir;
+  LSaved := TDirectory.GetCurrentDirectory;
+  try
+    LWork := TPath.Combine(LRoot, 'work');
+    LProjectDir := TPath.Combine(LRoot, 'proj');
+    TDirectory.CreateDirectory(LWork);
+    TDirectory.CreateDirectory(LProjectDir);
+    LProject := TPath.Combine(LProjectDir, 'App.dproj');
+    CliOptions_WriteText(LProject, '<Project/>');
+    CliOptions_WriteText(TPath.Combine(LProjectDir, '.dxcomply.json'),
+      '{"sbomCreator":"sbom@example.com",' +
+      '"product":{"supplier":"From Project GmbH",' +
+      '"supplierUrl":"https://example.com/supplier",' +
+      '"licence":"MIT"}}');
+
+    TDirectory.SetCurrentDirectory(LWork);
+    LResolution := TCliOptions.ResolveConfigPath('.dxcomply.json', LProject);
+    Assert.IsTrue(LResolution.Found, 'the file next to the project must be found');
+    Assert.IsTrue(SameText(LResolution.Path,
+      TPath.Combine(LProjectDir, '.dxcomply.json')), LResolution.Path);
+
+    LGen := TDxComplyGenerator.Create;
+    try
+      LConfig := LGen.LoadConfig(LResolution.Path);
+      Assert.AreEqual('From Project GmbH', LConfig.Supplier);
+      Assert.AreEqual('https://example.com/supplier', LConfig.SupplierUrl);
+      Assert.AreEqual('MIT', LConfig.Licence);
+      Assert.AreEqual('sbom@example.com', LConfig.SbomCreator);
+    finally
+      LGen.Free;
+    end;
+  finally
+    TDirectory.SetCurrentDirectory(LSaved);
+    CliOptions_DeleteTree(LRoot);
+  end;
+end;
+
+procedure TCliOptionsTests.ConfigFileWarning_ListsTriedPathsWhenMissing;
+var
+  LRoot, LWork, LProjectDir, LProject, LWarning: string;
+  LResolution: TConfigPathResolution;
+begin
+  LRoot := CliOptions_TempDir;
+  try
+    LWork := TPath.Combine(LRoot, 'work');
+    LProjectDir := TPath.Combine(LRoot, 'proj');
+    TDirectory.CreateDirectory(LWork);
+    TDirectory.CreateDirectory(LProjectDir);
+    LProject := TPath.Combine(LProjectDir, 'App.dproj');
+    CliOptions_WriteText(LProject, '<Project/>');
+
+    LResolution := TCliOptions.ResolveConfigPath('.dxcomply.json', LProject, LWork);
+    Assert.IsFalse(LResolution.Found);
+    Assert.AreEqual(NativeInt(2), NativeInt(Length(LResolution.Tried)));
+    LWarning := TCliOptions.ConfigFileWarning(True, LResolution);
+    Assert.Contains(LWarning, 'No config file was found for --ci');
+    Assert.Contains(LWarning, 'continues without it');
+    Assert.Contains(LWarning, LResolution.Tried[0]);
+    Assert.Contains(LWarning, LResolution.Tried[1]);
+    Assert.IsTrue(Pos(LResolution.Tried[0], LWarning) < Pos(LResolution.Tried[1], LWarning),
+      'the working directory is listed before the project folder');
+    Assert.AreEqual('', TCliOptions.ConfigFileWarning(False, LResolution),
+      'without --ci the missing file is not reported');
+
+    CliOptions_WriteText(TPath.Combine(LProjectDir, '.dxcomply.json'), '{}');
+    LResolution := TCliOptions.ResolveConfigPath('.dxcomply.json', LProject, LWork);
+    Assert.IsTrue(LResolution.Found);
+    Assert.AreEqual('', TCliOptions.ConfigFileWarning(True, LResolution),
+      'a file that was found does not produce the warning');
+  finally
+    CliOptions_DeleteTree(LRoot);
+  end;
+end;
+
+procedure TCliOptionsTests.HelpText_DescribesOptionalBrackets;
+var
+  LHelp: string;
+begin
+  LHelp := TCliOptions.HelpText;
+  Assert.Contains(LHelp, 'Square brackets mark an optional value');
+  Assert.Contains(LHelp, '--report equals --report=both');
+  Assert.Contains(LHelp, '--library equals --library=true');
+  Assert.Contains(LHelp, '--report[=<format>]',
+    'the optional-value notation stays in the option list');
+  Assert.Contains(LHelp, '--library[=true|false]',
+    'the optional-value notation stays in the option list');
+  Assert.Contains(LHelp, 'checked in the current');
+  Assert.Contains(LHelp, 'project folder');
 end;
 
 initialization

@@ -7,7 +7,7 @@ DX.Comply has two modes. Pick the one that matches what you ship.
 You ship a program, a DLL, or a runtime package. DX.Comply reads the `.dproj`, the MAP file, the DCUs, and the output directory of one build. The SBOM describes that build: the binary, the runtime packages it loads, the DLLs it references, and the units that were linked into it.
 
 ```cmd
-dxcomply --project=MyApp.dproj --config=Release --platform=Win64 --no-pause
+dxcomply.exe --project=MyApp.dproj --config-name=Release --platform=Win64 --no-pause
 ```
 
 ## Library mode (`--library`)

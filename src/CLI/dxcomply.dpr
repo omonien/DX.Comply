@@ -29,7 +29,6 @@ program dxcomply;
 uses
   DX.Comply.Locale.EN, // Must be first — forces English RTL messages
   System.SysUtils,
-  System.IOUtils,
   DX.Comply.Engine,
   DX.Comply.Engine.Intf,
   DX.Comply.CLI.Options in 'DX.Comply.CLI.Options.pas',
@@ -70,6 +69,8 @@ var
   LFileConfig: TSbomConfig;
   LPeek: TDxComplyGenerator;
   LGitTagWarning: string;
+  LConfigResolution: TConfigPathResolution;
+  LConfigWarning: string;
   {$IFNDEF CI}
   LNoPause: Boolean;
   {$ENDIF}
@@ -94,6 +95,17 @@ begin
       Exit;
     end;
 
+    // A relative config path used to be TFile.Exists against the working
+    // directory only. A batch file started elsewhere then ignored the
+    // .dxcomply.json next to the project. The folder of dxcomply.exe is
+    // not searched. The warning is not a CRA/BSI warning, so --strict still
+    // exits with code 3 only when one of those warnings was raised.
+    LConfigResolution := TCliOptions.ResolveConfigPath(
+      LOptions.ConfigFile, LOptions.Project);
+    LConfigWarning := TCliOptions.ConfigFileWarning(LOptions.CiMode, LConfigResolution);
+    if LConfigWarning <> '' then
+      Writeln(LConfigWarning);
+
     if LOptions.Project = '' then
     begin
       // --library and --source-dir on the command line are enough.
@@ -102,11 +114,11 @@ begin
       LLibraryWithoutProject := LConfig.LibraryMode and
         (Length(LConfig.SourceDirs) > 0);
       if (not LLibraryWithoutProject) and LOptions.CiMode and
-         TFile.Exists(LOptions.ConfigFile) then
+         LConfigResolution.Found then
       begin
         LPeek := TDxComplyGenerator.Create;
         try
-          LFileConfig := LPeek.LoadConfig(LOptions.ConfigFile);
+          LFileConfig := LPeek.LoadConfig(LConfigResolution.Path);
         finally
           LPeek.Free;
         end;
@@ -166,9 +178,9 @@ begin
 
       // With --ci, the file fills defaults and any flag the user actually
       // passed (recorded on TSbomConfig.ExplicitOverrides) wins. Issue #50.
-      if LOptions.CiMode and TFile.Exists(LOptions.ConfigFile) then
+      if LOptions.CiMode and LConfigResolution.Found then
       begin
-        LSuccess := LGenerator.GenerateFromConfig(LOptions.Project, LOptions.ConfigFile);
+        LSuccess := LGenerator.GenerateFromConfig(LOptions.Project, LConfigResolution.Path);
         LConfig := LGenerator.Config;
       end
       else

@@ -283,8 +283,8 @@ The same header also carries the product data that section 5.2.2 and CRA Annex I
 There are three ways to set them. All of them end up in the same SBOM fields.
 
 - **Command line.** Pass the flags above, for example `dxcomply --project=MyApp.dproj --sbom-creator=sbom@acme.example --licence=MIT`.
-- **`.dxcomply.json`.** Put the keys into the `.dxcomply.json` in the project folder (see [Configuration](#configuration)) and run the CLI with `--ci`. A flag you pass on the command line wins over the file.
-- **IDE.** Choose **Project > DX.Comply - SBOM > SBOM Header Data...** The dialog edits the values for the active project and saves them in the `.dxcomply.json` next to the `.dproj`. Other keys in that file are kept, and an empty field removes its key. The SBOM creator is checked like on the command line, and the supplier URL must start with `http://` or `https://`. Because the dialog writes the same keys, `dxcomply --ci` run from the project folder produces the same header. When a generation in the IDE reports missing header data, DX.Comply offers to open the dialog right away and to generate the SBOM again after you save.
+- **`.dxcomply.json`.** Put the keys into the `.dxcomply.json` in the project folder (see [Configuration](#configuration)) and run `dxcomply.exe` with `--ci`. A relative path is checked in the current directory, then in the project folder when `--project` is set. An absolute `--config` path is used as given. A flag you pass on the command line wins over the file.
+- **IDE.** Choose **Project > DX.Comply - SBOM > SBOM Header Data...** The dialog edits the values for the active project and saves them in the `.dxcomply.json` next to the `.dproj`. Other keys in that file are kept, and an empty field removes its key. The SBOM creator is checked like on the command line, and the supplier URL must start with `http://` or `https://`. Because the dialog writes the same keys, `dxcomply.exe --ci` produces the same header when it loads that file. When a generation in the IDE reports missing header data, DX.Comply offers to open the dialog right away and to generate the SBOM again after you save.
 
 ### CRA and BSI header warnings
 
@@ -354,7 +354,7 @@ dxcomply --library --project=Source\MyLib.dproj --source-dir=Source --version=2.
 
 ## Configuration
 
-Add a `.dxcomply.json` to your project folder and pass `--ci` so the CLI loads it:
+Add a `.dxcomply.json` to your project folder and pass `--ci` so `dxcomply.exe` loads it. A relative path, including the default `.dxcomply.json`, is checked in the current directory first and then in the folder of `--project`. An absolute path is used as given.
 
 ```json
 {
@@ -414,7 +414,7 @@ An option you leave off the command line does not override the file, even though
 
 If you pass `--include` or `--exclude`, that list replaces the file's list. `--report` overrides the file's enabled flag and format, and leaves the file's report output path as it is. `--report-content` overrides `report.content` only.
 
-Without `--ci`, the file is not read. `--config=<path>` only chooses which file `--ci` loads (the default path is `.dxcomply.json`).
+Without `--ci`, the file is not read. `--config=<path>` chooses which file `--ci` loads. The default path is `.dxcomply.json`. A relative path is checked in the current directory, then in the project folder when `--project` is set. An absolute path is used as given. When `--ci` is set and none of those paths exists, `dxcomply.exe` prints a warning that lists the paths it tried and continues. That warning does not change the exit code.
 
 `deepEvidence.mode` may be `always` or `when-missing`. The old `deepEvidence.build` boolean is ignored.
 
