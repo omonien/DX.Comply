@@ -6,8 +6,8 @@
 /// <remarks>
 /// Covers matching (exact beats prefix, first row wins, scope stripping,
 /// case, own-code folders, component folders), licence classification, PURL
-/// generation, writer output, optional copyright text, and the CLI / config
-/// precedence for --manifest.
+/// generation, writer output, optional copyright text in CycloneDX, SPDX 2.3
+/// and SPDX 3.0.1, and the CLI / config precedence for --manifest.
 /// </remarks>
 ///
 /// <copyright>
@@ -53,6 +53,7 @@ type
     function DependsOnContains(ADependency: TJSONObject; const ARef: string): Boolean;
     procedure AddUnit(const AFileName: string);
     procedure AddFile(const AFileName, AKind: string);
+    procedure PrepareCopyrightLibraries(const AManifest: string);
   public
     [Setup]
     procedure Setup;
@@ -193,12 +194,134 @@ type
     procedure XmlWriter_LibraryElementOrder;
     [Test]
     procedure SpdxWriter_LicenceSupplierAndPurl;
+
+    /// <summary>
+    /// A manifest copyright is written only on that library component.
+    /// CycloneDX JSON uses copyright. XML uses the same element after
+    /// licenses and before purl.
+    /// </summary>
+    [Test]
+    procedure CycloneDx_Copyright_WhenManifestSetsIt;
+    /// <summary>
+    /// A row that omits copyright, and a blank copyright, leave CycloneDX
+    /// JSON and XML without a copyright field.
+    /// </summary>
+    [Test]
+    procedure CycloneDx_Copyright_WhenManifestOmitsIt;
+    /// <summary>
+    /// SPDX 2.3 writes the manifest copyright as package copyrightText.
+    /// Other packages stay NOASSERTION.
+    /// </summary>
+    [Test]
+    procedure Spdx_CopyrightText_WhenManifestSetsIt;
+    /// <summary>
+    /// SPDX 2.3 keeps copyrightText NOASSERTION when no copyright is known.
+    /// </summary>
+    [Test]
+    procedure Spdx_CopyrightText_WhenManifestOmitsIt;
+    /// <summary>
+    /// SPDX 3.0.1 writes software_copyrightText on the software package
+    /// the manifest row describes.
+    /// </summary>
+    [Test]
+    procedure Spdx3_CopyrightText_WhenManifestSetsIt;
+    /// <summary>
+    /// SPDX 3.0.1 omits software_copyrightText when the row has no copyright.
+    /// </summary>
+    [Test]
+    procedure Spdx3_CopyrightText_WhenManifestOmitsIt;
   end;
 
 implementation
 
 uses
+  DX.Comply.Spdx3.Writer,
   DX.Comply.Tests.Paths;
+
+procedure AssertValidation(const AResult: TValidationResult);
+var
+  LErrors: string;
+  I: Integer;
+begin
+  LErrors := '';
+  for I := 0 to High(AResult.Errors) do
+    LErrors := LErrors + AResult.Errors[I] + sLineBreak;
+  Assert.IsTrue(AResult.IsValid, LErrors);
+end;
+
+procedure AssertXmlSequence(const AContent: string);
+var
+  LSequence: TArray<string>;
+  LErrors: string;
+  I: Integer;
+begin
+  LSequence := CycloneDxXmlSequenceErrors(AContent);
+  LErrors := '';
+  for I := 0 to High(LSequence) do
+    LErrors := LErrors + LSequence[I] + sLineBreak;
+  Assert.AreEqual(NativeInt(0), NativeInt(Length(LSequence)), LErrors);
+end;
+
+const
+  cCopyrightNotice = 'Copyright (c) 2020 Smith & Sons';
+
+function ManifestCopyrightSet: string;
+begin
+  Result :=
+    '{"components":[' +
+    '{"name":"OmniThreadLibrary","version":"3.7.8","vendor":"Primo Gabrijelcic",' +
+    '"licence":"MIT","type":"library",' +
+    '"copyright":"' + cCopyrightNotice + '","units_exact":["OtlTask"]},' +
+    '{"name":"SynEdit","version":"3.0","vendor":"SynEdit Contributors",' +
+    '"licence":"MPL-1.1","type":"library","units_exact":["SynEdit"]}]}';
+end;
+
+function ManifestCopyrightOmitted: string;
+begin
+  // The second row sets copyright to spaces. Parsing trims that to empty,
+  // which is the same as leaving the field out.
+  Result :=
+    '{"components":[' +
+    '{"name":"OmniThreadLibrary","version":"3.7.8","vendor":"Primo Gabrijelcic",' +
+    '"licence":"MIT","type":"library","units_exact":["OtlTask"]},' +
+    '{"name":"SynEdit","version":"3.0","vendor":"SynEdit Contributors",' +
+    '"licence":"MPL-1.1","type":"library","copyright":"   ",' +
+    '"units_exact":["SynEdit"]}]}';
+end;
+
+function XmlComponentSlice(const AContent, ABomRef: string): string;
+var
+  LStart, LEnd: Integer;
+begin
+  LStart := Pos('bom-ref="' + ABomRef + '"', AContent);
+  Assert.IsTrue(LStart > 0, 'Missing component ' + ABomRef);
+  LEnd := Pos('</component>', AContent, LStart);
+  Assert.IsTrue(LEnd > LStart, ABomRef);
+  Result := Copy(AContent, LStart, LEnd - LStart);
+end;
+
+function Spdx3Package(ADoc: TJSONObject; const AName: string): TJSONObject;
+var
+  LGraph: TJSONArray;
+  I: Integer;
+  LItem: TJSONObject;
+begin
+  Result := nil;
+  LGraph := ADoc.GetValue('@graph') as TJSONArray;
+  Assert.IsNotNull(LGraph, '@graph must be present');
+  for I := 0 to LGraph.Count - 1 do
+  begin
+    if not (LGraph.Items[I] is TJSONObject) then
+      Continue;
+    LItem := TJSONObject(LGraph.Items[I]);
+    if (LItem.GetValue('type') <> nil) and
+      (LItem.GetValue<string>('type') = 'software_Package') and
+      (LItem.GetValue('name') <> nil) and
+      SameText(LItem.GetValue<string>('name'), AName) then
+      Exit(LItem);
+  end;
+  Assert.Fail(AName + ' must appear as a software_Package');
+end;
 
 function JsonPath(const APath: string): string;
 begin
@@ -303,6 +426,13 @@ begin
   for I := 0 to LDepends.Count - 1 do
     if SameText(LDepends.Items[I].Value, ARef) then
       Exit(True);
+end;
+
+procedure TComponentManifestTests.PrepareCopyrightLibraries(const AManifest: string);
+begin
+  AddUnit('OtlTask.pas');
+  AddUnit('SynEdit.pas');
+  FMetadata.ComponentManifestJson := AManifest;
 end;
 
 procedure TComponentManifestTests.AddUnit(const AFileName: string);
@@ -1172,6 +1302,292 @@ begin
     end;
     Assert.IsTrue(LDescribesLibrary, 'The document must describe the library package');
     Assert.IsTrue(LDependsOnUnit, 'The library must depend on the matched unit package');
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TComponentManifestTests.CycloneDx_Copyright_WhenManifestSetsIt;
+var
+  LWriter: ISbomWriter;
+  LText: string;
+  LJson, LLibrary: TJSONObject;
+  LComponents: TJSONArray;
+  LLibraryXml, LUnitXml: string;
+  LAt: Integer;
+  LValidator: TSbomValidator;
+begin
+  PrepareCopyrightLibraries(ManifestCopyrightSet);
+
+  LWriter := TCycloneDxJsonWriter.Create;
+  Assert.IsTrue(LWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LText := TFile.ReadAllText(FOutputFile, TEncoding.UTF8);
+  LValidator := TSbomValidator.Create;
+  try
+    AssertValidation(LValidator.ValidateCycloneDxJson(LText));
+  finally
+    LValidator.Free;
+  end;
+  LAt := Pos('"copyright"', LText);
+  Assert.IsTrue(LAt > 0, 'The library component must carry copyright');
+  Assert.AreEqual(0, Pos('"copyright"', LText, LAt + 1),
+    'Only the manifest row that sets copyright is written');
+
+  LJson := TJSONObject.ParseJSONValue(LText) as TJSONObject;
+  Assert.IsNotNull(LJson);
+  try
+    LComponents := LJson.GetValue('components') as TJSONArray;
+    LLibrary := FindComponent(LComponents, 'OmniThreadLibrary');
+    Assert.IsNotNull(LLibrary);
+    Assert.AreEqual(cCopyrightNotice, LLibrary.GetValue<string>('copyright'));
+    LLibrary := FindComponent(LComponents, 'SynEdit');
+    Assert.IsNotNull(LLibrary);
+    Assert.IsNull(LLibrary.GetValue('copyright'),
+      'A row without copyright must not gain the field');
+    LLibrary := FindComponent(LComponents, 'OtlTask.pas');
+    Assert.IsNotNull(LLibrary, 'The matched unit stays in the evidence');
+    Assert.IsNull(LLibrary.GetValue('copyright'),
+      'Copyright belongs to the library component, not the unit');
+  finally
+    LJson.Free;
+  end;
+
+  LWriter := TCycloneDxXmlWriter.Create;
+  Assert.IsTrue(LWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LText := TFile.ReadAllText(FOutputFile, TEncoding.UTF8);
+  AssertXmlSequence(LText);
+  LValidator := TSbomValidator.Create;
+  try
+    AssertValidation(LValidator.ValidateCycloneDxXml(LText));
+  finally
+    LValidator.Free;
+  end;
+  LAt := Pos('<copyright>', LText);
+  Assert.IsTrue(LAt > 0, LText);
+  Assert.AreEqual(0, Pos('<copyright>', LText, LAt + 1),
+    'XML writes one copyright element');
+  LLibraryXml := XmlComponentSlice(LText, 'manifest-0');
+  Assert.IsTrue(Pos('<licenses>', LLibraryXml) < Pos('<copyright>', LLibraryXml), LLibraryXml);
+  Assert.IsTrue(Pos('<copyright>', LLibraryXml) < Pos('<purl>', LLibraryXml), LLibraryXml);
+  Assert.IsTrue(Pos('<copyright>Copyright (c) 2020 Smith &amp; Sons</copyright>',
+    LLibraryXml) > 0, LLibraryXml);
+  Assert.AreEqual(0, Pos('<copyright>', XmlComponentSlice(LText, 'manifest-1')));
+  LUnitXml := XmlComponentSlice(LText, 'comp-0');
+  Assert.AreEqual(0, Pos('<copyright>', LUnitXml), LUnitXml);
+end;
+
+procedure TComponentManifestTests.CycloneDx_Copyright_WhenManifestOmitsIt;
+var
+  LWriter: ISbomWriter;
+  LText: string;
+  LJson, LLibrary: TJSONObject;
+  LComponents: TJSONArray;
+  I: Integer;
+  LValidator: TSbomValidator;
+begin
+  PrepareCopyrightLibraries(ManifestCopyrightOmitted);
+
+  LWriter := TCycloneDxJsonWriter.Create;
+  Assert.IsTrue(LWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LText := TFile.ReadAllText(FOutputFile, TEncoding.UTF8);
+  LValidator := TSbomValidator.Create;
+  try
+    AssertValidation(LValidator.ValidateCycloneDxJson(LText));
+  finally
+    LValidator.Free;
+  end;
+  Assert.AreEqual(0, Pos('"copyright"', LText),
+    'Omitting copyright, or setting only spaces, must not add the field');
+
+  LJson := TJSONObject.ParseJSONValue(LText) as TJSONObject;
+  Assert.IsNotNull(LJson);
+  try
+    LComponents := LJson.GetValue('components') as TJSONArray;
+    for I := 0 to LComponents.Count - 1 do
+    begin
+      LLibrary := LComponents.Items[I] as TJSONObject;
+      Assert.IsNull(LLibrary.GetValue('copyright'), LLibrary.GetValue<string>('name'));
+    end;
+    Assert.IsNotNull(FindComponent(LComponents, 'OmniThreadLibrary'));
+    Assert.IsNotNull(FindComponent(LComponents, 'SynEdit'));
+  finally
+    LJson.Free;
+  end;
+
+  LWriter := TCycloneDxXmlWriter.Create;
+  Assert.IsTrue(LWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LText := TFile.ReadAllText(FOutputFile, TEncoding.UTF8);
+  AssertXmlSequence(LText);
+  LValidator := TSbomValidator.Create;
+  try
+    AssertValidation(LValidator.ValidateCycloneDxXml(LText));
+  finally
+    LValidator.Free;
+  end;
+  Assert.AreEqual(0, Pos('<copyright', LText), LText);
+  Assert.IsTrue(Pos('bom-ref="manifest-0"', LText) > 0, 'The library component is still written');
+  Assert.IsTrue(Pos('bom-ref="manifest-1"', LText) > 0, 'A blank copyright still matches the row');
+end;
+
+procedure TComponentManifestTests.Spdx_CopyrightText_WhenManifestSetsIt;
+var
+  LWriter: ISbomWriter;
+  LText: string;
+  LJson, LPackage: TJSONObject;
+  LPackages: TJSONArray;
+  LValidator: TSbomValidator;
+begin
+  PrepareCopyrightLibraries(ManifestCopyrightSet);
+
+  LWriter := TSpdxJsonWriter.Create;
+  Assert.IsTrue(LWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LText := TFile.ReadAllText(FOutputFile, TEncoding.UTF8);
+  LValidator := TSbomValidator.Create;
+  try
+    AssertValidation(LValidator.ValidateSpdxJson(LText));
+  finally
+    LValidator.Free;
+  end;
+
+  LJson := TJSONObject.ParseJSONValue(LText) as TJSONObject;
+  Assert.IsNotNull(LJson);
+  try
+    LPackages := LJson.GetValue('packages') as TJSONArray;
+    LPackage := FindComponent(LPackages, 'OmniThreadLibrary');
+    Assert.IsNotNull(LPackage);
+    Assert.AreEqual(cCopyrightNotice, LPackage.GetValue<string>('copyrightText'));
+    LPackage := FindComponent(LPackages, 'SynEdit');
+    Assert.IsNotNull(LPackage);
+    Assert.AreEqual('NOASSERTION', LPackage.GetValue<string>('copyrightText'));
+    LPackage := FindComponent(LPackages, 'OtlTask.pas');
+    Assert.IsNotNull(LPackage, 'The matched unit stays a package');
+    Assert.AreEqual('NOASSERTION', LPackage.GetValue<string>('copyrightText'));
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TComponentManifestTests.Spdx_CopyrightText_WhenManifestOmitsIt;
+var
+  LWriter: ISbomWriter;
+  LText: string;
+  LJson, LPackage: TJSONObject;
+  LPackages: TJSONArray;
+  I: Integer;
+  LValidator: TSbomValidator;
+begin
+  PrepareCopyrightLibraries(ManifestCopyrightOmitted);
+
+  LWriter := TSpdxJsonWriter.Create;
+  Assert.IsTrue(LWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LText := TFile.ReadAllText(FOutputFile, TEncoding.UTF8);
+  LValidator := TSbomValidator.Create;
+  try
+    AssertValidation(LValidator.ValidateSpdxJson(LText));
+  finally
+    LValidator.Free;
+  end;
+  Assert.AreEqual(0, Pos(cCopyrightNotice, LText), LText);
+
+  LJson := TJSONObject.ParseJSONValue(LText) as TJSONObject;
+  Assert.IsNotNull(LJson);
+  try
+    LPackages := LJson.GetValue('packages') as TJSONArray;
+    Assert.IsNotNull(FindComponent(LPackages, 'OmniThreadLibrary'));
+    Assert.IsNotNull(FindComponent(LPackages, 'SynEdit'));
+    for I := 0 to LPackages.Count - 1 do
+    begin
+      LPackage := LPackages.Items[I] as TJSONObject;
+      Assert.AreEqual('NOASSERTION', LPackage.GetValue<string>('copyrightText'),
+        LPackage.GetValue<string>('name'));
+    end;
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TComponentManifestTests.Spdx3_CopyrightText_WhenManifestSetsIt;
+var
+  LWriter: ISbomWriter;
+  LText: string;
+  LJson, LPackage: TJSONObject;
+  LGraph: TJSONArray;
+  I, LCount: Integer;
+  LValidator: TSbomValidator;
+begin
+  PrepareCopyrightLibraries(ManifestCopyrightSet);
+
+  LWriter := TSpdx3JsonWriter.Create;
+  Assert.IsTrue(LWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LText := TFile.ReadAllText(FOutputFile, TEncoding.UTF8);
+  LValidator := TSbomValidator.Create;
+  try
+    AssertValidation(LValidator.ValidateSpdx3Json(LText));
+  finally
+    LValidator.Free;
+  end;
+
+  LJson := TJSONObject.ParseJSONValue(LText) as TJSONObject;
+  Assert.IsNotNull(LJson);
+  try
+    LPackage := Spdx3Package(LJson, 'OmniThreadLibrary');
+    Assert.AreEqual(cCopyrightNotice, LPackage.GetValue<string>('software_copyrightText'));
+    LPackage := Spdx3Package(LJson, 'SynEdit');
+    Assert.IsNull(LPackage.GetValue('software_copyrightText'));
+    LPackage := Spdx3Package(LJson, 'OtlTask.pas');
+    Assert.IsNull(LPackage.GetValue('software_copyrightText'),
+      'The unit package does not take the library copyright');
+
+    LCount := 0;
+    LGraph := LJson.GetValue('@graph') as TJSONArray;
+    for I := 0 to LGraph.Count - 1 do
+      if (LGraph.Items[I] is TJSONObject) and
+        (TJSONObject(LGraph.Items[I]).GetValue('software_copyrightText') <> nil) then
+        Inc(LCount);
+    Assert.AreEqual(NativeInt(1), NativeInt(LCount),
+      'Only the library with a copyright notice is marked');
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TComponentManifestTests.Spdx3_CopyrightText_WhenManifestOmitsIt;
+var
+  LWriter: ISbomWriter;
+  LText: string;
+  LJson, LItem: TJSONObject;
+  LGraph: TJSONArray;
+  I: Integer;
+  LValidator: TSbomValidator;
+begin
+  PrepareCopyrightLibraries(ManifestCopyrightOmitted);
+
+  LWriter := TSpdx3JsonWriter.Create;
+  Assert.IsTrue(LWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LText := TFile.ReadAllText(FOutputFile, TEncoding.UTF8);
+  LValidator := TSbomValidator.Create;
+  try
+    AssertValidation(LValidator.ValidateSpdx3Json(LText));
+  finally
+    LValidator.Free;
+  end;
+  Assert.AreEqual(0, Pos('software_copyrightText', LText),
+    'No copyright notice means the SPDX 3 property stays absent');
+  Assert.AreEqual(0, Pos(cCopyrightNotice, LText), LText);
+
+  LJson := TJSONObject.ParseJSONValue(LText) as TJSONObject;
+  Assert.IsNotNull(LJson);
+  try
+    Assert.IsNotNull(Spdx3Package(LJson, 'OmniThreadLibrary'));
+    Assert.IsNotNull(Spdx3Package(LJson, 'SynEdit'));
+    LGraph := LJson.GetValue('@graph') as TJSONArray;
+    for I := 0 to LGraph.Count - 1 do
+    begin
+      if not (LGraph.Items[I] is TJSONObject) then
+        Continue;
+      LItem := TJSONObject(LGraph.Items[I]);
+      Assert.IsNull(LItem.GetValue('software_copyrightText'));
+    end;
   finally
     LJson.Free;
   end;
