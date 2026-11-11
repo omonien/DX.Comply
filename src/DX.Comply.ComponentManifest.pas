@@ -21,8 +21,9 @@
 /// not attached to a third-party library.
 ///
 /// An optional copyright string on a row is stored as text (a year or other
-/// copyright notice). It is not used for matching. The human-readable
-/// licence summary shows it. It is not written into the SBOM.
+/// copyright notice). It is not used for matching. When the text is set,
+/// the CycloneDX and SPDX writers put it on the library component for that
+/// row. The human-readable licence summary shows the same text.
 /// </remarks>
 ///
 /// <copyright>
@@ -106,8 +107,10 @@ type
     Notes: string;
     /// <summary>
     /// Optional copyright text, such as a year ("2020") or a free-form
-    /// notice. Not a timestamp. Not used for matching. Shown in the
-    /// human-readable licence summary. Not written into the SBOM.
+    /// notice. Not a timestamp. Not used for matching. Written on the
+    /// library component when set (CycloneDX copyright, SPDX 2.3
+    /// copyrightText, SPDX 3.0.1 software_copyrightText). Shown in the
+    /// human-readable licence summary. Empty when the row omits it.
     /// </summary>
     Copyright: string;
   end;
@@ -1755,6 +1758,12 @@ begin
 
   AddLicenceJson(Result, AEntry);
 
+  // CycloneDX 1.6 places copyright after licenses and before purl.
+  // A row with no text keeps the field out, so the component stays as it
+  // was when copyright was not part of the manifest.
+  if AEntry.Copyright <> '' then
+    Result.AddPair('copyright', AEntry.Copyright);
+
   LPurl := BuildDelphiPurl(AEntry.Name, AEntry.Version, AEntry.Purl);
   if LPurl <> '' then
     Result.AddPair('purl', LPurl);
@@ -1927,7 +1936,7 @@ var
     LPurl: string;
   begin
     // bom-1.6.xsd component order: supplier, author, name, version,
-    // hashes, licenses, purl, externalReferences.
+    // hashes, licenses, copyright, purl, externalReferences.
     AddLine(AIndentLevel, '<component type="' + EscapeXml(AEntry.ComponentType) +
       '" bom-ref="' + EscapeXml(ABomRef) + '">');
     if AEntry.Vendor <> '' then
@@ -1950,6 +1959,11 @@ var
     if AEntry.Version <> '' then
       AddLine(AIndentLevel + 1, '<version>' + EscapeXml(AEntry.Version) + '</version>');
     EmitLicence(AEntry, AIndentLevel + 1);
+    // Same slot as the JSON property: after licenses, before purl, and
+    // only when the row has copyright text.
+    if AEntry.Copyright <> '' then
+      AddLine(AIndentLevel + 1, '<copyright>' + EscapeXml(AEntry.Copyright) +
+        '</copyright>');
     LPurl := BuildDelphiPurl(AEntry.Name, AEntry.Version, AEntry.Purl);
     if LPurl <> '' then
       AddLine(AIndentLevel + 1, '<purl>' + EscapeXml(LPurl) + '</purl>');
@@ -2137,8 +2151,12 @@ begin
   LToken := SpdxLicenceToken(AEntry, LKind);
   Result.AddPair('licenseConcluded', LToken);
   Result.AddPair('licenseDeclared', LToken);
-  // Manifest copyright is stored on the row and is not written here yet.
-  Result.AddPair('copyrightText', 'NOASSERTION');
+  // SPDX 2.3 requires copyrightText. The manifest text is that value.
+  // A blank row stays NOASSERTION, the same as a package with no notice.
+  if AEntry.Copyright <> '' then
+    Result.AddPair('copyrightText', AEntry.Copyright)
+  else
+    Result.AddPair('copyrightText', 'NOASSERTION');
 
   LPurl := BuildDelphiPurl(AEntry.Name, AEntry.Version, AEntry.Purl);
   if (LPurl <> '') or (AEntry.VendorUrl <> '') then

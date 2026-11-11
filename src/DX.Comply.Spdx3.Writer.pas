@@ -25,6 +25,10 @@
 /// - The TR properties (filename, executable, archive, structured) stay in
 ///   the package comment, as in SPDX 2.3. software_primaryPurpose is set
 ///   from the file extension.
+/// - Package copyrightText is copied to software_copyrightText when it is
+///   a notice. That is the JSON-LD name of SoftwareArtifact.copyrightText
+///   (optional, one string), which software_Package inherits. NOASSERTION
+///   and NONE are left out, so a package with no known copyright is unchanged.
 ///
 /// SPDX 3.0.1 specification: https://spdx.github.io/spdx-spec/v3.0.1/
 /// </remarks>
@@ -451,6 +455,14 @@ begin
 
   if JsonText(APackage, 'versionInfo') <> '' then
     LElement.AddPair('software_packageVersion', JsonText(APackage, 'versionInfo'));
+
+  // SoftwareArtifact.copyrightText is optional. SPDX 2.3 always has the
+  // field, and NOASSERTION means no notice was asserted. Copying that
+  // sentinel would add a property every package lacks today.
+  var LCopyright := Trim(JsonText(APackage, 'copyrightText'));
+  if (LCopyright <> '') and not SameText(LCopyright, 'NOASSERTION') and
+    not SameText(LCopyright, 'NONE') then
+    LElement.AddPair('software_copyrightText', LCopyright);
 
   var LDeclared := LicenceId(JsonText(APackage, 'licenseDeclared'));
   if LDeclared <> '' then

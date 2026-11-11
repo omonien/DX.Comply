@@ -260,11 +260,11 @@ also writes that SHA-512 as an external reference of type distribution. It
 writes the file name and the executable, archive, and structured properties
 when the component has a file name. Pass `--sbom-creator` with an email
 address or an http(s) URL when you want that contact in the document. A
-component manifest supplies licence, version, and creator for third-party
-libraries. The dependency list is the grouped graph of the built program,
-plus direct uses edges where the Pascal source was read. CycloneDX
-compositions say which of those sets are complete. A unit with no source
-stays incomplete. See
+component manifest supplies licence, version, creator, and, when the row
+sets it, copyright for third-party libraries. The dependency list is the
+grouped graph of the built program, plus direct uses edges where the Pascal
+source was read. CycloneDX compositions say which of those sets are
+complete. A unit with no source stays incomplete. See
 [BSI-TR-03183-2.md](BSI-TR-03183-2.md). This output is not a certification.
 
 Practical checklist:

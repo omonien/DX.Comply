@@ -313,6 +313,8 @@ begin
   if IsBsiEmailAddress(Trim(ASupplier)) then
     LPackage.AddPair('originator', 'Person: ' + Trim(ASupplier) + ' (' +
       Trim(ASupplier) + ')');
+  // A scanned file has no copyright notice. A manifest library sets its
+  // own copyrightText from the row when that row has one.
   LPackage.AddPair('copyrightText', 'NOASSERTION');
 
   // Checksums. SHA256 stays first. SHA512 is the SPDX 2.3 algorithm name.
