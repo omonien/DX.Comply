@@ -273,6 +273,9 @@ type
 
 implementation
 
+uses
+  Winapi.Windows;
+
 { TCliOptionsTests }
 
 procedure TCliOptionsTests.Create_Default_VerboseIsFalse;
