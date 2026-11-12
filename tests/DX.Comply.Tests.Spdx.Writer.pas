@@ -171,6 +171,20 @@ type
     /// </summary>
     [Test]
     procedure Write_UnitLicences_EmbarcaderoAndOwnCode;
+    /// <summary>
+    /// A product or manifest licence that already starts with LicenseRef-
+    /// keeps that prefix. A plain name still gets one prefix.
+    /// </summary>
+    [Test]
+    procedure Write_LicenseRef_IsNotDoubled;
+    /// <summary>
+    /// The built program with no version of its own uses the product version.
+    /// A shared library with no version resource is that case. A third-party
+    /// file keeps its own version, or none. A file-date stand-in on the
+    /// built program is replaced and is not marked as a file date.
+    /// </summary>
+    [Test]
+    procedure Write_DeliverableWithoutVersion_UsesProductVersion;
   end;
 
 implementation
@@ -1044,6 +1058,157 @@ begin
     ExpectLicence('TestProject.exe', 'NOASSERTION');
     ExpectLicence('MainForm.pas', 'NOASSERTION');
     ExpectLicence('System.SysUtils.pas', 'LicenseRef-Embarcadero-RTL');
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TSpdxWriterTests.Write_LicenseRef_IsNotDoubled;
+var
+  LJson, LPackage: TJSONObject;
+  LExtracted: TJSONArray;
+
+  function PackageNamed(const AName: string): TJSONObject;
+  var
+    LPackages: TJSONArray;
+    I: Integer;
+  begin
+    Result := nil;
+    LPackages := LJson.GetValue('packages') as TJSONArray;
+    Assert.IsNotNull(LPackages, 'packages must be present');
+    for I := 0 to LPackages.Count - 1 do
+      if SameText(TJSONObject(LPackages.Items[I]).GetValue<string>('name'), AName) then
+        Exit(TJSONObject(LPackages.Items[I]));
+  end;
+
+  procedure ExpectLicence(const AName, AToken: string);
+  begin
+    LPackage := PackageNamed(AName);
+    Assert.IsNotNull(LPackage, AName);
+    Assert.AreEqual(AToken, LPackage.GetValue<string>('licenseConcluded'), AName);
+    Assert.AreEqual(AToken, LPackage.GetValue<string>('licenseDeclared'), AName);
+  end;
+
+  function ExtractedName(const AId: string): string;
+  var
+    I: Integer;
+    LInfo: TJSONObject;
+  begin
+    Result := '';
+    Assert.IsTrue(LJson.GetValue('hasExtractedLicensingInfos') is TJSONArray, AId);
+    LExtracted := TJSONArray(LJson.GetValue('hasExtractedLicensingInfos'));
+    for I := 0 to LExtracted.Count - 1 do
+    begin
+      LInfo := LExtracted.Items[I] as TJSONObject;
+      if LInfo.GetValue<string>('licenseId') = AId then
+        Exit(LInfo.GetValue<string>('name'));
+    end;
+  end;
+
+begin
+  FProjectInfo.ProjectName := 'TestProject';
+  FMetadata.Licence := 'LicenseRef-Proprietary';
+  FMetadata.ComponentManifestJson :=
+    '{"components":[' +
+    '{"name":"FreeLib","version":"1","vendor":"A","licence":"LicenseRef-Freeware-with-source",' +
+    '"type":"library","units_exact":["FreeUnit"]},' +
+    '{"name":"Spaced","version":"1","vendor":"A","licence":"LicenseRef-My Terms",' +
+    '"type":"library","units_exact":["SpaceUnit"]},' +
+    '{"name":"Plain","version":"1","vendor":"A","licence":"Freeware",' +
+    '"type":"library","units_exact":["PlainUnit"]},' +
+    '{"name":"Lower","version":"1","vendor":"A","licence":"licenseref-Internal",' +
+    '"type":"library","units_exact":["LowerUnit"]}' +
+    ']}';
+  FArtefacts.Add(MakeArtefact('TestProject.exe', 'application', 'abcd1234ef', 1024));
+  FArtefacts.Add(MakeArtefact('FreeUnit.pas', 'unit-evidence', 'abcd1234ef', 32));
+  FArtefacts.Add(MakeArtefact('SpaceUnit.pas', 'unit-evidence', 'abcd1234ef', 32));
+  FArtefacts.Add(MakeArtefact('PlainUnit.pas', 'unit-evidence', 'abcd1234ef', 32));
+  FArtefacts.Add(MakeArtefact('LowerUnit.pas', 'unit-evidence', 'abcd1234ef', 32));
+  Assert.IsTrue(FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LJson := LoadOutputJson;
+  Assert.IsNotNull(LJson);
+  try
+    Assert.AreEqual(0, Pos('LicenseRef-LicenseRef', LJson.ToJSON));
+    ExpectLicence('TestProject.exe', 'LicenseRef-Proprietary');
+    ExpectLicence('FreeLib', 'LicenseRef-Freeware-with-source');
+    ExpectLicence('Spaced', 'LicenseRef-My-Terms');
+    ExpectLicence('Plain', 'LicenseRef-Freeware');
+    ExpectLicence('Lower', 'licenseref-Internal');
+    Assert.AreEqual('LicenseRef-Proprietary', ExtractedName('LicenseRef-Proprietary'));
+    Assert.AreEqual('LicenseRef-Freeware-with-source', ExtractedName('LicenseRef-Freeware-with-source'));
+    Assert.AreEqual('LicenseRef-My Terms', ExtractedName('LicenseRef-My-Terms'));
+    Assert.AreEqual('Freeware', ExtractedName('LicenseRef-Freeware'));
+    Assert.AreEqual('licenseref-Internal', ExtractedName('licenseref-Internal'));
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TSpdxWriterTests.Write_DeliverableWithoutVersion_UsesProductVersion;
+var
+  LJson: TJSONObject;
+  LSo, LDll: TArtefactInfo;
+
+  function PackageNamed(const AName: string): TJSONObject;
+  var
+    LPackages: TJSONArray;
+    I: Integer;
+  begin
+    Result := nil;
+    LPackages := LJson.GetValue('packages') as TJSONArray;
+    Assert.IsNotNull(LPackages, 'packages must be present');
+    for I := 0 to LPackages.Count - 1 do
+      if (LPackages.Items[I] as TJSONObject).GetValue<string>('name') = AName then
+        Exit(LPackages.Items[I] as TJSONObject);
+    Assert.Fail(AName + ' must be a package');
+  end;
+
+begin
+  FProjectInfo.ProjectName := 'WernigApp';
+  FMetadata.ProductVersion := '16.0.0.7';
+  FArtefacts.Add(MakeArtefact('libWernigApp.so', 'file', 'abcd1234ef', 1024));
+  LDll := MakeArtefact('vendor.dll', 'library', 'abcd1234ef', 2048);
+  LDll.Version := '9.9.9';
+  FArtefacts.Add(LDll);
+  FArtefacts.Add(MakeArtefact('plugin.dll', 'library', 'abcd1234ef', 512));
+  Assert.IsTrue(FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LJson := LoadOutputJson;
+  Assert.IsNotNull(LJson);
+  try
+    Assert.AreEqual('16.0.0.7', PackageNamed('libWernigApp.so').GetValue<string>('versionInfo'),
+      'A shared library with no version resource uses the product version');
+    Assert.AreEqual(0, Pos(cVersionSourceFileDate,
+      PackageNamed('libWernigApp.so').GetValue<string>('comment')));
+    Assert.AreEqual('9.9.9', PackageNamed('vendor.dll').GetValue<string>('versionInfo'),
+      'A third-party DLL keeps its own version');
+    Assert.IsNull(PackageNamed('plugin.dll').GetValue('versionInfo'),
+      'A third-party file with no version stays without one');
+  finally
+    LJson.Free;
+  end;
+
+  FArtefacts.Clear;
+  LSo := MakeArtefact('libWernigApp.so', 'file', 'abcd1234ef', 1024);
+  LSo.Version := '2026-01-01T00:00:00Z';
+  LSo.VersionFromFileDate := True;
+  FArtefacts.Add(LSo);
+  LDll := MakeArtefact('vendor.dll', 'library', 'abcd1234ef', 2048);
+  LDll.Version := '2026-01-02T00:00:00Z';
+  LDll.VersionFromFileDate := True;
+  FArtefacts.Add(LDll);
+  Assert.IsTrue(FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LJson := LoadOutputJson;
+  Assert.IsNotNull(LJson);
+  try
+    Assert.AreEqual('16.0.0.7', PackageNamed('libWernigApp.so').GetValue<string>('versionInfo'));
+    Assert.AreEqual(0, Pos(cVersionSourceFileDate,
+      PackageNamed('libWernigApp.so').GetValue<string>('comment')),
+      'The product version is not marked as a file date');
+    Assert.AreEqual('2026-01-02T00:00:00Z',
+      PackageNamed('vendor.dll').GetValue<string>('versionInfo'));
+    Assert.IsTrue(Pos(cVersionSourceFileDate,
+      PackageNamed('vendor.dll').GetValue<string>('comment')) > 0,
+      'A third-party file keeps its file-date version');
   finally
     LJson.Free;
   end;

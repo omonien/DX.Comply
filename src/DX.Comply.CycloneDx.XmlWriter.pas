@@ -61,12 +61,15 @@ type
     /// <summary>
     /// Writes one component. ALicence is written as licenses when it is not
     /// empty. The built program and own-code units use the product licence.
-    /// An Embarcadero unit uses its origin label.
+    /// An Embarcadero unit uses its origin label. AVersion is the version
+    /// to write. The built program uses the product version when it has
+    /// none of its own.
     /// </summary>
     procedure BuildComponent(const AArtefact: TArtefactInfo; const AIndex: Integer;
-      AUnresolvedSource: Boolean; const ALicence: string);
+      AUnresolvedSource: Boolean; const ALicence, AVersion: string);
     procedure BuildComponents(const AArtefacts: TArtefactList; const AMetadata: TSbomMetadata;
-      const AGraph: TUsesDependencyGraph; const AProjectName, AOutputFilePath: string);
+      const AGraph: TUsesDependencyGraph; const AProjectName, AOutputFilePath,
+      AProjectVersion: string);
     procedure BuildDependencies(const AArtefacts: TArtefactList;
       const AProjectBomRef, AOutputFilePath: string; const AGraph: TUsesDependencyGraph);
   public
@@ -241,7 +244,8 @@ begin
 end;
 
 procedure TCycloneDxXmlWriter.BuildComponent(const AArtefact: TArtefactInfo;
-  const AIndex: Integer; AUnresolvedSource: Boolean; const ALicence: string);
+  const AIndex: Integer; AUnresolvedSource: Boolean;
+  const ALicence, AVersion: string);
 var
   LComponentType: string;
   LBomRef: string;
@@ -265,9 +269,11 @@ begin
 
   AddElement('name', ArtefactComponentName(AArtefact));
 
-  // Same rule as the JSON writer: only a known version is written.
-  if Trim(AArtefact.Version) <> '' then
-    AddElement('version', Trim(AArtefact.Version));
+  // Same rule as the JSON writer. The built program with no version of
+  // its own uses the product version. A component that still has none
+  // has no version element.
+  if AVersion <> '' then
+    AddElement('version', AVersion);
 
   // Component sequence: name, version, then hashes, then purl, then properties.
   if (AArtefact.Hash <> '') or (AArtefact.HashSha512 <> '') then
@@ -315,7 +321,7 @@ begin
      (Trim(AArtefact.Evidence) <> '') or (Trim(AArtefact.Confidence) <> '') or
      AArtefact.Conditional or (LFileName <> '') or AUnresolvedSource or
      (AArtefact.LocationSource <> '') or (AArtefact.Location <> '') or
-     AArtefact.VersionFromFileDate then
+     ComponentVersionFromFileDate(AArtefact, AVersion) then
   begin
     OpenTag('properties');
     if AArtefact.FileSize >= 0 then
@@ -364,7 +370,8 @@ begin
       AddLine('<property name="net.developer-experts.dx-comply:location">' +
         EscapeXml(AArtefact.Location) + '</property>');
     // Issue #109: the version is the file modification time, not a real version.
-    if AArtefact.VersionFromFileDate then
+    // A product version used in place of that stand-in is not a file date.
+    if ComponentVersionFromFileDate(AArtefact, AVersion) then
       AddLine('<property name="' + cVersionSourceProperty + '">' + cVersionSourceFileDate + '</property>');
     if LFileName <> '' then
     begin
@@ -387,13 +394,14 @@ end;
 
 procedure TCycloneDxXmlWriter.BuildComponents(const AArtefacts: TArtefactList;
   const AMetadata: TSbomMetadata; const AGraph: TUsesDependencyGraph;
-  const AProjectName, AOutputFilePath: string);
+  const AProjectName, AOutputFilePath, AProjectVersion: string);
 var
   I: Integer;
   LRootIndex: Integer;
   LManifest: TComponentManifest;
   LLicenceError: string;
   LLicence: string;
+  LIsDeliverable: Boolean;
 begin
   OpenTag('components');
   LRootIndex := FindDeliverableTargetIndex(AArtefacts, AProjectName, AOutputFilePath);
@@ -407,10 +415,12 @@ begin
   end;
   for I := 0 to AArtefacts.Count - 1 do
   begin
-    LLicence := ComponentLicenceFor(AArtefacts[I],
-      IsSameDeliverableFile(AArtefacts, I, LRootIndex), AMetadata.Licence,
-      LManifest);
-    BuildComponent(AArtefacts[I], I, AGraph.Status[I] = uusMissingSource, LLicence);
+    LIsDeliverable := IsSameDeliverableFile(AArtefacts, I, LRootIndex);
+    LLicence := ComponentLicenceFor(AArtefacts[I], LIsDeliverable,
+      AMetadata.Licence, LManifest);
+    BuildComponent(AArtefacts[I], I, AGraph.Status[I] = uusMissingSource, LLicence,
+      ComponentVersionFor(AArtefacts[I], LIsDeliverable, AMetadata.ProductVersion,
+        AProjectVersion));
   end;
   // Library rows from a component manifest. Element order is owned by
   // DX.Comply.ComponentManifest so this writer stays a thin hook.
@@ -492,7 +502,7 @@ begin
     LGraph := BuildUsesDependencyGraph(AArtefacts);
     BuildMetadata(AMetadata, AProjectInfo);
     BuildComponents(AArtefacts, AMetadata, LGraph, AProjectInfo.ProjectName,
-      AProjectInfo.OutputFilePath);
+      AProjectInfo.OutputFilePath, AProjectInfo.Version);
     if AMetadata.ComponentManifestJson <> '' then
       AppendManifestDependenciesXml(FLines, AMetadata.ComponentManifestJson,
         AArtefacts, AProjectInfo.ProjectName, FIndentLevel, LGraph,

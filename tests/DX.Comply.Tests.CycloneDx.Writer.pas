@@ -229,6 +229,14 @@ type
     /// </summary>
     [Test]
     procedure Write_UnitLicences_EmbarcaderoAndOwnCode;
+    /// <summary>
+    /// The built program with no version of its own uses the product version.
+    /// A shared library with no version resource is that case. A third-party
+    /// file keeps its own version, or none. A file-date stand-in on the
+    /// built program is replaced. A real version on that file is kept.
+    /// </summary>
+    [Test]
+    procedure Write_DeliverableWithoutVersion_UsesProductVersion;
   end;
 
 implementation
@@ -1327,6 +1335,121 @@ begin
     Assert.IsNull(ComponentNamed('MainForm.pas').GetValue('licenses'),
       'Own code stays without a licence when the product licence is empty');
     Assert.AreEqual('Embarcadero RTL', LicenceText(ComponentNamed('System.SysUtils.pas')));
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TCycloneDxWriterTests.Write_DeliverableWithoutVersion_UsesProductVersion;
+var
+  LJson: TJSONObject;
+  LSo, LDll: TArtefactInfo;
+
+  function ComponentNamed(const AJson: TJSONObject; const AName: string): TJSONObject;
+  var
+    LComponents: TJSONArray;
+    I: Integer;
+  begin
+    Result := nil;
+    LComponents := AJson.GetValue('components') as TJSONArray;
+    Assert.IsNotNull(LComponents, 'components must be present');
+    for I := 0 to LComponents.Count - 1 do
+      if (LComponents.Items[I] as TJSONObject).GetValue<string>('name') = AName then
+        Exit(LComponents.Items[I] as TJSONObject);
+    Assert.Fail(AName + ' must be a component');
+  end;
+
+  function HasVersionSource(const AComponent: TJSONObject): Boolean;
+  var
+    LProps: TJSONArray;
+    I: Integer;
+    LProp: TJSONObject;
+  begin
+    Result := False;
+    if not (AComponent.GetValue('properties') is TJSONArray) then
+      Exit;
+    LProps := AComponent.GetValue('properties') as TJSONArray;
+    for I := 0 to LProps.Count - 1 do
+    begin
+      LProp := LProps.Items[I] as TJSONObject;
+      if LProp.GetValue<string>('name') = cVersionSourceProperty then
+        Exit(True);
+    end;
+  end;
+
+begin
+  FProjectInfo.ProjectName := 'WernigApp';
+  FMetadata.ProductVersion := '16.0.0.7';
+  FArtefacts.Add(MakeArtefact('libWernigApp.so', 'file', 'abcd1234ef', 1024));
+  LDll := MakeArtefact('vendor.dll', 'library', 'abcd1234ef', 2048);
+  LDll.Version := '9.9.9';
+  FArtefacts.Add(LDll);
+  FArtefacts.Add(MakeArtefact('plugin.dll', 'library', 'abcd1234ef', 512));
+
+  Assert.IsTrue(FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LJson := LoadOutputJson;
+  Assert.IsNotNull(LJson);
+  try
+    Assert.AreEqual('16.0.0.7', ComponentNamed(LJson, 'libWernigApp.so').GetValue<string>('version'),
+      'A shared library with no version resource uses the product version');
+    Assert.IsFalse(HasVersionSource(ComponentNamed(LJson, 'libWernigApp.so')));
+    Assert.AreEqual('9.9.9', ComponentNamed(LJson, 'vendor.dll').GetValue<string>('version'),
+      'A third-party DLL keeps its own version');
+    Assert.IsNull(ComponentNamed(LJson, 'plugin.dll').GetValue('version'),
+      'A third-party file with no version stays without one');
+  finally
+    LJson.Free;
+  end;
+
+  FArtefacts.Clear;
+  LSo := MakeArtefact('libWernigApp.so', 'file', 'abcd1234ef', 1024);
+  LSo.Version := '2026-01-01T00:00:00Z';
+  LSo.VersionFromFileDate := True;
+  FArtefacts.Add(LSo);
+  LDll := MakeArtefact('vendor.dll', 'library', 'abcd1234ef', 2048);
+  LDll.Version := '2026-01-02T00:00:00Z';
+  LDll.VersionFromFileDate := True;
+  FArtefacts.Add(LDll);
+  Assert.IsTrue(FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LJson := LoadOutputJson;
+  Assert.IsNotNull(LJson);
+  try
+    Assert.AreEqual('16.0.0.7', ComponentNamed(LJson, 'libWernigApp.so').GetValue<string>('version'),
+      'A file-date stand-in on the built program is replaced by the product version');
+    Assert.IsFalse(HasVersionSource(ComponentNamed(LJson, 'libWernigApp.so')),
+      'The product version is not marked as a file date');
+    Assert.AreEqual('2026-01-02T00:00:00Z',
+      ComponentNamed(LJson, 'vendor.dll').GetValue<string>('version'));
+    Assert.IsTrue(HasVersionSource(ComponentNamed(LJson, 'vendor.dll')),
+      'A third-party file keeps its file-date version');
+  finally
+    LJson.Free;
+  end;
+
+  FArtefacts.Clear;
+  LSo := MakeArtefact('libWernigApp.so', 'file', 'abcd1234ef', 1024);
+  LSo.Version := '3.2.1';
+  FArtefacts.Add(LSo);
+  Assert.IsTrue(FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LJson := LoadOutputJson;
+  Assert.IsNotNull(LJson);
+  try
+    Assert.AreEqual('3.2.1', ComponentNamed(LJson, 'libWernigApp.so').GetValue<string>('version'),
+      'A version already on the built program is kept');
+  finally
+    LJson.Free;
+  end;
+
+  FArtefacts.Clear;
+  FMetadata.ProductVersion := '';
+  FProjectInfo.Version := '4.5.6';
+  FArtefacts.Add(MakeArtefact('libWernigApp.so', 'file', 'abcd1234ef', 1024));
+  Assert.IsTrue(FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LJson := LoadOutputJson;
+  Assert.IsNotNull(LJson);
+  try
+    Assert.AreEqual('4.5.6', ComponentNamed(LJson, 'libWernigApp.so').GetValue<string>('version'),
+      'An empty header version falls back to the project version, as the report header does');
   finally
     LJson.Free;
   end;

@@ -112,6 +112,12 @@ type
     /// <summary>Unit names are not case-sensitive, so two spellings of a prefix share one group.</summary>
     [Test]
     procedure ThirdParty_PrefixGroups_IgnoreCase;
+    /// <summary>
+    /// own_code_* outside the project folder is not warned. An unmatched
+    /// unit is named. Issue #176.
+    /// </summary>
+    [Test]
+    procedure ThirdParty_OwnCode_IsNotWarned_UnmatchedIsNamed;
     [Test]
     procedure ThirdPartyUnitPrefix_Cases;
   end;
@@ -585,6 +591,34 @@ begin
     Assert.AreEqual<Integer>(1, Length(LWarnings), 'Spring and spring are one group');
     Assert.IsTrue(Pos('prefix "Spring"', LWarnings[0]) > 0, LWarnings[0]);
     Assert.IsTrue(Pos('2 units (Spring.Collections, spring.Base)', LWarnings[0]) > 0, LWarnings[0]);
+  finally
+    LArtefacts.Free;
+  end;
+end;
+
+procedure TCraChecksTests.ThirdParty_OwnCode_IsNotWarned_UnmatchedIsNamed;
+begin
+  var LManifest := ParseTestManifest('{"components":[{"name":"JVCL","version":"3.5",' +
+    '"vendor":"Project JEDI","licence":"MPL-1.1","units_prefix":["Jv"]}],' +
+    '"own_code_units":["SharedHelper"],"own_code_prefixes":["Acme"],' +
+    '"own_code_folders":["' +
+    StringReplace('C:\Libs\Mine', '\', '\\', [rfReplaceAll]) + '"]}');
+  var LArtefacts := TArtefactList.Create;
+  try
+    LArtefacts.Add(ThirdPartyUnit('JvComponent'));
+    LArtefacts.Add(ThirdPartyUnit('SharedHelper'));
+    LArtefacts.Add(ThirdPartyUnit('AcmeGrid'));
+    var LMine := ThirdPartyUnit('MineUnit');
+    LMine.SourcePath := 'C:\Libs\Mine\MineUnit.pas';
+    LArtefacts.Add(LMine);
+    LArtefacts.Add(ThirdPartyUnit('XyzGrid'));
+    var LWarnings := BuildThirdPartyComponentWarnings(TSbomConfig.Default, LManifest, LArtefacts);
+    Assert.AreEqual(NativeInt(1), NativeInt(Length(LWarnings)));
+    Assert.IsTrue(Pos('XyzGrid', LWarnings[0]) > 0, LWarnings[0]);
+    Assert.AreEqual(0, Pos('SharedHelper', LWarnings[0]));
+    Assert.AreEqual(0, Pos('AcmeGrid', LWarnings[0]));
+    Assert.AreEqual(0, Pos('MineUnit', LWarnings[0]));
+    Assert.AreEqual(0, Pos('JvComponent', LWarnings[0]));
   finally
     LArtefacts.Free;
   end;

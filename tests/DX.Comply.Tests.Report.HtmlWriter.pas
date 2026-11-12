@@ -86,6 +86,20 @@ type
     procedure Write_EmptySbomHeaderData_IsOmitted;
     [Test]
     procedure Write_Overview_ShowsOriginsLicencesAndUnitsWithoutManifest;
+    /// <summary>
+    /// The Unknown supplier row lists its units by prefix. A known supplier
+    /// stays a count. Issue #176.
+    /// </summary>
+    [Test]
+    procedure Write_UnknownSupplier_ListsUnitsByPrefix;
+    /// <summary>
+    /// An Android shared library with no version resource shows the product
+    /// version in the licence table and in the artefacts table. A third-party
+    /// DLL keeps its own version in the artefacts table and does not inherit
+    /// the product version in the licence table.
+    /// </summary>
+    [Test]
+    procedure Write_DeliverableWithoutVersion_UsesProductVersion;
     /// <summary>Content overview writes the overview sections without the unit list. Issue #126.</summary>
     [Test]
     procedure Write_ContentOverview_OmitsUnitList;
@@ -391,6 +405,67 @@ begin
   Assert.IsTrue(Pos('<section id="unit-evidence">', LContent) > 0);
   Assert.IsTrue(Pos('id="origin-summary"', LContent) < Pos('id="artefacts"', LContent),
     'the origin summary is near the top');
+end;
+
+procedure THtmlReportWriterTests.Write_UnknownSupplier_ListsUnitsByPrefix;
+begin
+  FData.Metadata.ComponentManifestJson :=
+    '{"components":[{"name":"JVCL","version":"3.5","vendor":"Project JEDI",' +
+    '"licence":"MPL-1.1","units_prefix":["Jv"]}]}';
+  var LJv := Default(TArtefactInfo);
+  LJv.RelativePath := 'JvComponent.pas';
+  LJv.ArtefactType := 'unit-evidence';
+  LJv.Origin := 'Third party';
+  FArtefacts.Add(LJv);
+  var LXyz := Default(TArtefactInfo);
+  LXyz.RelativePath := 'XyzGrid.pas';
+  LXyz.ArtefactType := 'unit-evidence';
+  LXyz.Origin := 'Third party';
+  FArtefacts.Add(LXyz);
+  var LWriter: IHumanReadableReportWriter := THtmlReportWriter.Create;
+  Assert.IsTrue(LWriter.Write(FOutputPath, FData, THumanReadableReportConfig.Default));
+  var LContent := TFile.ReadAllText(FOutputPath, TEncoding.UTF8);
+  Assert.IsTrue(Pos('<td>Unknown supplier<br>Xyz: 1 unit (XyzGrid)</td><td>1</td>', LContent) > 0,
+    LContent);
+  Assert.IsTrue(Pos('<td>Project JEDI</td><td>1</td>', LContent) > 0, LContent);
+  Assert.AreEqual(0, Pos('Project JEDI<br>', LContent));
+end;
+
+procedure THtmlReportWriterTests.Write_DeliverableWithoutVersion_UsesProductVersion;
+var
+  LWriter: IHumanReadableReportWriter;
+  LContent: string;
+  LDll: TArtefactInfo;
+begin
+  FArtefacts.Clear;
+  FData.ProjectInfo.ProjectName := 'WernigApp';
+  FData.Metadata.ProductName := 'WernigApp';
+  FData.Metadata.ProductVersion := '16.0.0.7';
+  FData.Metadata.Licence := 'MIT';
+  var LSo := Default(TArtefactInfo);
+  LSo.RelativePath := 'Android\Release\libWernigApp.so';
+  LSo.ArtefactType := 'file';
+  LSo.FileSize := 4096;
+  LSo.Hash := 'ABCDEF';
+  FArtefacts.Add(LSo);
+  LDll := Default(TArtefactInfo);
+  LDll.RelativePath := 'vendor.dll';
+  LDll.ArtefactType := 'library';
+  LDll.Version := '9.9.9';
+  LDll.FileSize := 2048;
+  LDll.Hash := '123456';
+  FArtefacts.Add(LDll);
+  LWriter := THtmlReportWriter.Create;
+  Assert.IsTrue(LWriter.Write(FOutputPath, FData, THumanReadableReportConfig.Default));
+  LContent := TFile.ReadAllText(FOutputPath, TEncoding.UTF8);
+  Assert.IsTrue(Pos('<td>libWernigApp.so</td><td>16.0.0.7</td>', LContent) > 0,
+    'The licence table uses the product version');
+  Assert.IsTrue(Pos('<td>vendor.dll</td><td></td>', LContent) > 0,
+    'A third-party DLL does not inherit the product version in the licence table');
+  Assert.IsTrue(Pos('<td>Android\Release\libWernigApp.so</td><td>file</td><td>16.0.0.7</td>',
+    LContent) > 0, 'The artefacts table uses the product version');
+  Assert.IsTrue(Pos('<td>vendor.dll</td><td>library</td><td>9.9.9</td>', LContent) > 0,
+    'The artefacts table keeps the third-party version');
 end;
 
 procedure THtmlReportWriterTests.Write_ContentOverview_OmitsUnitList;

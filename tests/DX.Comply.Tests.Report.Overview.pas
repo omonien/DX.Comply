@@ -65,6 +65,13 @@ type
     [Test]
     procedure Licences_LibPrefix_MatchesProject;
     /// <summary>
+    /// A product deliverable with no version of its own, such as an Android
+    /// shared library, uses the product version in the licence table. A
+    /// third-party file does not. A version already on the deliverable is kept.
+    /// </summary>
+    [Test]
+    procedure Licences_DeliverableWithoutVersion_UsesProductVersion;
+    /// <summary>
     /// Embarcadero RTL, VCL and FMX units are grouped under that origin
     /// label. A third-party unit and a neighboring file stay unlicensed.
     /// Issue #165.
@@ -80,6 +87,19 @@ type
     procedure Licences_OwnCode_InheritsProductLicence;
     [Test]
     procedure Suppliers_FromManifestVendor_UnknownOtherwise;
+    /// <summary>
+    /// A third-party file that matches own_code_* is the project's own
+    /// code, so it is not an unknown supplier. A unit that stays unknown
+    /// is named on that row. Issue #176.
+    /// </summary>
+    [Test]
+    procedure Suppliers_OwnCodeOutsideProject_IsNamedWhenUnknown;
+    /// <summary>
+    /// Unknown supplier lines group by prefix and shorten long lists the
+    /// same way as the console warnings.
+    /// </summary>
+    [Test]
+    procedure UnknownSupplierLines_GroupsByPrefix_AndShortens;
     [Test]
     procedure WithoutManifest_GroupedByPrefix;
     [Test]
@@ -110,6 +130,7 @@ implementation
 
 uses
   System.SysUtils,
+  DX.Comply.CraChecks,
   DX.Comply.Report.Overview;
 
 const
@@ -593,6 +614,78 @@ begin
   Assert.AreEqual(2, FindGroup(LOverview.Origins, 'Local project').Count);
 end;
 
+procedure TReportOverviewTests.Suppliers_OwnCodeOutsideProject_IsNamedWhenUnknown;
+const
+  cJson = '{"components":[{"name":"JVCL","version":"3.5","vendor":"Project JEDI",' +
+    '"licence":"MPL-1.1","units_prefix":["Jv"]}],' +
+    '"own_code_units":["SharedHelper"],"own_code_prefixes":["Acme"],' +
+    '"own_code_folders":["C:\\Libs\\Mine"]}';
+begin
+  FData.Metadata.ComponentManifestJson := cJson;
+  FData.Metadata.Licence := 'MIT';
+  AddUnit('JvComponent', 'Third party');
+  AddUnit('SharedHelper', 'Third party');
+  AddUnit('AcmeGrid', 'Third party');
+  AddUnit('MineUnit', 'Third party');
+  var LMine := FArtefacts[FArtefacts.Count - 1];
+  LMine.SourcePath := 'C:\Libs\Mine\MineUnit.pas';
+  FArtefacts[FArtefacts.Count - 1] := LMine;
+  AddUnit('XyzGrid', 'Third party');
+
+  var LOverview := BuildReportOverview(FData);
+  Assert.AreEqual(2, LOverview.ThirdPartyUnitCount);
+  Assert.AreEqual(1, FindGroup(LOverview.Suppliers, 'Project JEDI').Count);
+  Assert.AreEqual('JvComponent', FindGroup(LOverview.Suppliers, 'Project JEDI').NamesText);
+  Assert.AreEqual(NativeInt(0), NativeInt(Length(FindGroup(LOverview.Suppliers, 'Project JEDI').Detail)));
+
+  var LUnknown := FindGroup(LOverview.Suppliers, cUnknownSupplierTitle);
+  Assert.AreEqual(1, LUnknown.Count);
+  Assert.AreEqual('XyzGrid', LUnknown.NamesText);
+  Assert.AreEqual(NativeInt(1), NativeInt(Length(LUnknown.Detail)));
+  Assert.AreEqual('Xyz: 1 unit (XyzGrid)', LUnknown.Detail[0]);
+  Assert.AreEqual(0, Pos('SharedHelper', LUnknown.NamesText));
+  Assert.AreEqual(0, Pos('AcmeGrid', LUnknown.NamesText));
+  Assert.AreEqual(0, Pos('MineUnit', LUnknown.NamesText));
+
+  Assert.AreEqual(1, LOverview.WithoutManifestCount);
+  Assert.AreEqual('XyzGrid', FindGroup(LOverview.WithoutManifest, 'Xyz').NamesText);
+  Assert.AreEqual(0, FindGroup(LOverview.WithoutManifest, 'Shared').Count);
+  Assert.AreEqual(5, FindGroup(LOverview.Origins, 'Third party').Count);
+
+  var LProduct := FindLicence(LOverview.Licences, 'MIT');
+  Assert.IsTrue(Pos('SharedHelper', LicenceNames(LProduct)) > 0, 'own_code_units');
+  Assert.IsTrue(Pos('AcmeGrid', LicenceNames(LProduct)) > 0, 'own_code_prefixes');
+  Assert.IsTrue(Pos('MineUnit', LicenceNames(LProduct)) > 0, 'own_code_folders');
+end;
+
+procedure TReportOverviewTests.UnknownSupplierLines_GroupsByPrefix_AndShortens;
+var
+  LNames: TArray<string>;
+  LLines: TArray<string>;
+  i: Integer;
+begin
+  LLines := FormatUnknownSupplierLines(nil);
+  Assert.AreEqual(NativeInt(0), NativeInt(Length(LLines)));
+
+  LLines := FormatUnknownSupplierLines(['JvComponent', 'jvEdit', 'XyzGrid']);
+  Assert.AreEqual(NativeInt(2), NativeInt(Length(LLines)));
+  Assert.AreEqual('Jv: 2 units (JvComponent, jvEdit)', LLines[0]);
+  Assert.AreEqual('Xyz: 1 unit (XyzGrid)', LLines[1]);
+
+  LLines := FormatUnknownSupplierLines(['JvOne', 'JvTwo', 'JvThree', 'JvFour', 'JvFive', 'JvSix']);
+  Assert.AreEqual(NativeInt(1), NativeInt(Length(LLines)));
+  Assert.AreEqual('Jv: 6 units (JvOne, JvTwo, JvThree, JvFour, JvFive, ...)', LLines[0]);
+
+  SetLength(LNames, 11);
+  for i := 1 to 11 do
+    LNames[i - 1] := 'Lib' + IntToStr(i) + '.Core';
+  LLines := FormatUnknownSupplierLines(LNames);
+  Assert.AreEqual(NativeInt(cMaxComponentWarningGroups + 1), NativeInt(Length(LLines)));
+  Assert.AreEqual('Lib1: 1 unit (Lib1.Core)', LLines[0]);
+  Assert.AreEqual('Lib10: 1 unit (Lib10.Core)', LLines[9]);
+  Assert.AreEqual('1 more group, 1 unit', LLines[10]);
+end;
+
 procedure TReportOverviewTests.WithoutManifestLine_CountsAndEmptyWithoutThirdParty;
 begin
   AddUnit('Main', 'Local project');
@@ -601,6 +694,81 @@ begin
   AddUnit('XyzGrid', 'Third party');
   var LLine := ThirdPartyWithoutManifestLine(FArtefacts, cManifest);
   Assert.IsTrue(LLine.StartsWith('1 of 2 third-party units have no component manifest row.'), LLine);
+end;
+
+procedure TReportOverviewTests.Licences_DeliverableWithoutVersion_UsesProductVersion;
+
+  function VersionOf(const AOverview: TReportOverview; const AName: string): string;
+  var
+    LGroup: TLicenceGroup;
+    I: Integer;
+  begin
+    for LGroup in AOverview.Licences do
+      for I := 0 to High(LGroup.Components) do
+        if SameText(LGroup.Components[I].Name, AName) then
+          Exit(LGroup.Components[I].Version);
+    Assert.Fail(AName + ' must appear in the licence table');
+  end;
+
+  procedure AddVersioned(const APath, AType, AVersion: string; AFromFileDate: Boolean);
+  var
+    LArtefact: TArtefactInfo;
+  begin
+    LArtefact := Default(TArtefactInfo);
+    LArtefact.RelativePath := APath;
+    LArtefact.ArtefactType := AType;
+    LArtefact.Version := AVersion;
+    LArtefact.VersionFromFileDate := AFromFileDate;
+    FArtefacts.Add(LArtefact);
+  end;
+
+var
+  LOverview: TReportOverview;
+  LGroup: TLicenceGroup;
+  I, LCopies: Integer;
+begin
+  FData.Metadata.ProductName := 'WernigApp';
+  FData.Metadata.ProductVersion := '16.0.0.7';
+  FData.Metadata.Licence := 'MIT';
+  FData.ProjectInfo.ProjectName := 'WernigApp';
+  AddFile('Android\Release\libWernigApp.so', 'file');
+  AddFile('copy\libWernigApp.so', 'file');
+  AddVersioned('vendor.dll', 'library', '9.9.9', False);
+  AddFile('plugin.dll', 'library');
+  LOverview := BuildReportOverview(FData);
+  LCopies := 0;
+  for LGroup in LOverview.Licences do
+    for I := 0 to High(LGroup.Components) do
+      if SameText(LGroup.Components[I].Name, 'libWernigApp.so') then
+      begin
+        Assert.AreEqual('16.0.0.7', LGroup.Components[I].Version);
+        Inc(LCopies);
+      end;
+  Assert.AreEqual(2, LCopies, 'Both copies of the built program use the product version');
+  Assert.AreEqual('', VersionOf(LOverview, 'WernigApp (product)'));
+  Assert.AreEqual('', VersionOf(LOverview, 'vendor.dll'),
+    'A third-party DLL does not inherit the product version');
+  Assert.AreEqual('', VersionOf(LOverview, 'plugin.dll'));
+
+  FArtefacts.Clear;
+  AddVersioned('libWernigApp.so', 'file', '2026-01-01T00:00:00Z', True);
+  LOverview := BuildReportOverview(FData);
+  Assert.AreEqual('16.0.0.7', VersionOf(LOverview, 'libWernigApp.so'),
+    'A file-date stand-in is not a version of the built program');
+
+  FArtefacts.Clear;
+  AddVersioned('libWernigApp.so', 'file', '3.2.1', False);
+  LOverview := BuildReportOverview(FData);
+  Assert.AreEqual('3.2.1', VersionOf(LOverview, 'libWernigApp.so'),
+    'A version already on the built program is kept');
+
+  FArtefacts.Clear;
+  FData.Metadata.ProductVersion := '';
+  FData.ProjectInfo.Version := '4.5.6';
+  AddFile('libWernigApp.so', 'file');
+  LOverview := BuildReportOverview(FData);
+  Assert.AreEqual('4.5.6', VersionOf(LOverview, 'libWernigApp.so'),
+    'An empty header version falls back to the project version');
 end;
 
 procedure TReportOverviewTests.WithoutManifestLine_OmittedWhenNoneMissing;

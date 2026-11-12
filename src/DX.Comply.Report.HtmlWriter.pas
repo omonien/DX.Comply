@@ -48,6 +48,7 @@ implementation
 uses
   System.IOUtils,
   System.SysUtils,
+  DX.Comply.ComponentManifest,
   DX.Comply.Report.Overview,
   DX.Comply.Report.Support;
 
@@ -55,14 +56,24 @@ procedure THtmlReportWriter.AddArtefacts(Lines: TStrings; const AData: TComplian
 var
   LArtefact: TArtefactInfo;
   LPathCell: string;
+  LDeliverable: Integer;
+  LVersion: string;
+  I: Integer;
 begin
-  // Issue #90: Version is the PE FileVersion/ProductVersion (or product
-  // version) already stored on the artefact for CycloneDX consistency.
+  // Issue #90: Version is the PE FileVersion/ProductVersion already stored
+  // on the artefact. The built program with no version of its own uses the
+  // product version, the same value as the SBOM and the licence table.
   Lines.Add('<section id="artefacts"><h2>Artefacts</h2><div class="table-wrap"><table><thead><tr><th>Relative Path</th><th>Type</th><th>Version</th><th>Size</th><th>SHA-256</th></tr></thead><tbody>');
-  for LArtefact in AData.Artefacts do
+  LDeliverable := FindDeliverableTargetIndex(AData.Artefacts,
+    AData.ProjectInfo.ProjectName, AData.ProjectInfo.OutputFilePath);
+  for I := 0 to AData.Artefacts.Count - 1 do
   begin
+    LArtefact := AData.Artefacts[I];
     if LArtefact.ArtefactType = 'unit-evidence' then
       Continue;
+    LVersion := ComponentVersionFor(LArtefact,
+      IsSameDeliverableFile(AData.Artefacts, I, LDeliverable),
+      AData.Metadata.ProductVersion, AData.ProjectInfo.Version);
     LPathCell := EscapeHtml(SafeText(SafeText(LArtefact.RelativePath, LArtefact.ComponentName), LArtefact.FilePath));
     // Issue #59: a DLL found only in a system directory has no hash. Show
     // where it was found instead.
@@ -73,14 +84,14 @@ begin
       Lines.Add(Format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%d</td><td><code>%s</code></td></tr>', [
         LPathCell,
         EscapeHtml(SafeText(LArtefact.ArtefactType)),
-        EscapeHtml(SafeText(LArtefact.Version)),
+        EscapeHtml(SafeText(LVersion)),
         LArtefact.FileSize,
         EscapeHtml(SafeText(LArtefact.Hash))]))
     else
       Lines.Add(Format('<tr><td>%s</td><td>%s</td><td>%s</td><td>n/a</td><td><code>%s</code></td></tr>', [
         LPathCell,
         EscapeHtml(SafeText(LArtefact.ArtefactType)),
-        EscapeHtml(SafeText(LArtefact.Version)),
+        EscapeHtml(SafeText(LVersion)),
         EscapeHtml(SafeText(LArtefact.Hash))]));
   end;
   Lines.Add('</tbody></table></div></section>');
@@ -224,7 +235,12 @@ begin
     Lines.Add('<div class="table-wrap"><table><thead><tr><th>Supplier</th><th>Units</th></tr></thead><tbody>');
     for var LGroup in LOverview.Suppliers do
     begin
-      Lines.Add(Format('<tr><td>%s</td><td>%d</td></tr>', [EscapeHtml(LGroup.Title), LGroup.Count]));
+      // Unknown supplier names sit under the title, grouped by prefix.
+      // Issue #176.
+      var LLabel := EscapeHtml(LGroup.Title);
+      for var LLine in LGroup.Detail do
+        LLabel := LLabel + '<br>' + EscapeHtml(LLine);
+      Lines.Add(Format('<tr><td>%s</td><td>%d</td></tr>', [LLabel, LGroup.Count]));
     end;
     Lines.Add('</tbody></table></div>');
   end;

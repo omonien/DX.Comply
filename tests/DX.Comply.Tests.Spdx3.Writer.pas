@@ -72,6 +72,19 @@ type
     /// </summary>
     [Test]
     procedure Build_UnitLicences_EmbarcaderoAndOwnCode;
+    /// <summary>
+    /// A licence that already starts with LicenseRef- is not prefixed again
+    /// when the SPDX 2.3 document is converted.
+    /// </summary>
+    [Test]
+    procedure Build_LicenseRef_IsNotDoubled;
+    /// <summary>
+    /// The built program with no version of its own keeps the product version
+    /// after the SPDX 2.3 document is converted. A third-party file does not
+    /// receive it.
+    /// </summary>
+    [Test]
+    procedure Build_DeliverableWithoutVersion_UsesProductVersion;
     [Test]
     procedure Write_OutputPassesValidate;
 
@@ -424,6 +437,106 @@ begin
   end;
 end;
 
+procedure TSpdx3WriterTests.Build_LicenseRef_IsNotDoubled;
+  procedure AddUnit(const AName: string);
+  begin
+    AddArtefact(AName, 'unit-evidence', 'abc');
+  end;
+
+  function ExpressionFor(const ADoc: TJSONObject; const APackageName: string): string;
+  var
+    LRel: TJSONObject;
+    LTargets: TJSONArray;
+    LId: string;
+    I: Integer;
+  begin
+    Result := '';
+    LRel := FindRelationship(ADoc, PackageId(ADoc, APackageName), 'hasDeclaredLicense');
+    if LRel = nil then
+      Exit;
+    if not (LRel.GetValue('to') is TJSONArray) then
+      Exit;
+    LTargets := TJSONArray(LRel.GetValue('to'));
+    if LTargets.Count = 0 then
+      Exit;
+    LId := LTargets.Items[0].Value;
+    for I := 0 to High(Elements(ADoc, 'simplelicensing_LicenseExpression')) do
+      if Elements(ADoc, 'simplelicensing_LicenseExpression')[I].GetValue<string>('spdxId') = LId then
+        Exit(Elements(ADoc, 'simplelicensing_LicenseExpression')[I].GetValue<string>(
+          'simplelicensing_licenseExpression'));
+  end;
+
+  function HasLicenceText(const ADoc: TJSONObject; const AText: string): Boolean;
+  var
+    LItem: TJSONObject;
+  begin
+    Result := False;
+    for LItem in Elements(ADoc, 'simplelicensing_SimpleLicensingText') do
+      if LItem.GetValue<string>('simplelicensing_licenseText') = AText then
+        Exit(True);
+  end;
+
+  function HasCustomKey(const ADoc: TJSONObject; const AExpression, AKey: string): Boolean;
+  var
+    LItem, LEntry: TJSONObject;
+    LMap: TJSONArray;
+    I: Integer;
+  begin
+    Result := False;
+    for LItem in Elements(ADoc, 'simplelicensing_LicenseExpression') do
+    begin
+      if LItem.GetValue<string>('simplelicensing_licenseExpression') <> AExpression then
+        Continue;
+      if not (LItem.GetValue('simplelicensing_customIdToUri') is TJSONArray) then
+        Exit;
+      LMap := TJSONArray(LItem.GetValue('simplelicensing_customIdToUri'));
+      for I := 0 to LMap.Count - 1 do
+      begin
+        LEntry := LMap.Items[I] as TJSONObject;
+        if LEntry.GetValue<string>('key') = AKey then
+          Exit(True);
+      end;
+    end;
+  end;
+
+begin
+  FMetadata.Licence := 'LicenseRef-Proprietary';
+  FMetadata.ComponentManifestJson :=
+    '{"components":[' +
+    '{"name":"FreeLib","version":"1","vendor":"A","licence":"LicenseRef-Freeware-with-source",' +
+    '"type":"library","units_exact":["FreeUnit"]},' +
+    '{"name":"Spaced","version":"1","vendor":"A","licence":"LicenseRef-My Terms",' +
+    '"type":"library","units_exact":["SpaceUnit"]},' +
+    '{"name":"Plain","version":"1","vendor":"A","licence":"Freeware",' +
+    '"type":"library","units_exact":["PlainUnit"]},' +
+    '{"name":"Lower","version":"1","vendor":"A","licence":"licenseref-Internal",' +
+    '"type":"library","units_exact":["LowerUnit"]}' +
+    ']}';
+  AddArtefact('TestProject.exe', 'application', 'abc');
+  AddUnit('FreeUnit.pas');
+  AddUnit('SpaceUnit.pas');
+  AddUnit('PlainUnit.pas');
+  AddUnit('LowerUnit.pas');
+  var LDoc := Build;
+  try
+    Assert.AreEqual(0, Pos('LicenseRef-LicenseRef', LDoc.ToJSON));
+    Assert.AreEqual('LicenseRef-Proprietary', ExpressionFor(LDoc, 'TestProject.exe'));
+    Assert.AreEqual('LicenseRef-Freeware-with-source', ExpressionFor(LDoc, 'FreeLib'));
+    Assert.AreEqual('LicenseRef-My-Terms', ExpressionFor(LDoc, 'Spaced'));
+    Assert.AreEqual('LicenseRef-Freeware', ExpressionFor(LDoc, 'Plain'));
+    Assert.AreEqual('licenseref-Internal', ExpressionFor(LDoc, 'Lower'));
+    Assert.IsTrue(HasLicenceText(LDoc, 'LicenseRef-Proprietary'));
+    Assert.IsTrue(HasLicenceText(LDoc, 'LicenseRef-My Terms'));
+    Assert.IsTrue(HasLicenceText(LDoc, 'Freeware'));
+    Assert.IsTrue(HasLicenceText(LDoc, 'licenseref-Internal'));
+    Assert.IsTrue(HasCustomKey(LDoc, 'LicenseRef-Proprietary', 'LicenseRef-Proprietary'));
+    Assert.IsTrue(HasCustomKey(LDoc, 'licenseref-Internal', 'licenseref-Internal'),
+      'a lower-case prefix still points at its licence text');
+  finally
+    LDoc.Free;
+  end;
+end;
+
 procedure TSpdx3WriterTests.Write_Output_HasNoByteOrderMark;
 begin
   AddArtefact('TestProject.exe', 'application', 'abc');
@@ -513,6 +626,52 @@ begin
   Assert.IsTrue(IsSupportedSpdxVersion('3.0.1'));
   Assert.IsFalse(IsSupportedSpdxVersion('3.0'));
   Assert.IsFalse(IsSupportedSpdxVersion('SPDX-2.3'));
+end;
+
+procedure TSpdx3WriterTests.Build_DeliverableWithoutVersion_UsesProductVersion;
+
+  function PackageVersion(const ADoc: TJSONObject; const AName: string): string;
+  var
+    LPackage: TJSONObject;
+  begin
+    Result := '';
+    for LPackage in Elements(ADoc, 'software_Package') do
+      if LPackage.GetValue<string>('name') = AName then
+      begin
+        if LPackage.GetValue('software_packageVersion') = nil then
+          Exit('');
+        Exit(LPackage.GetValue<string>('software_packageVersion'));
+      end;
+    Assert.Fail(AName + ' must appear as a software_Package');
+  end;
+
+var
+  LDoc: TJSONObject;
+  LDll: TArtefactInfo;
+begin
+  FProjectInfo.ProjectName := 'WernigApp';
+  FMetadata.ProductVersion := '16.0.0.7';
+  AddArtefact('libWernigApp.so', 'file', 'abcd1234ef');
+  LDll := Default(TArtefactInfo);
+  LDll.FilePath := 'C:\Projects\build\vendor.dll';
+  LDll.RelativePath := 'vendor.dll';
+  LDll.ArtefactType := 'library';
+  LDll.Hash := 'abcd1234ef';
+  LDll.FileSize := 10;
+  LDll.Version := '9.9.9';
+  FArtefacts.Add(LDll);
+  AddArtefact('plugin.dll', 'library', 'abcd1234ef');
+  LDoc := Build;
+  try
+    Assert.AreEqual('16.0.0.7', PackageVersion(LDoc, 'libWernigApp.so'),
+      'A shared library with no version resource uses the product version');
+    Assert.AreEqual('9.9.9', PackageVersion(LDoc, 'vendor.dll'),
+      'A third-party DLL keeps its own version');
+    Assert.AreEqual('', PackageVersion(LDoc, 'plugin.dll'),
+      'A third-party file with no version stays without one');
+  finally
+    LDoc.Free;
+  end;
 end;
 
 procedure TSpdx3WriterTests.Spdx3RelationshipType_Maps;

@@ -12,7 +12,10 @@
 /// units, the same way own_code_units names those units one by one.
 ///
 /// Licence values are classified as an SPDX identifier, an SPDX expression,
-/// or a plain name. Package URLs for manifest libraries use pkg:delphi, which
+/// or a plain name. A value that already starts with LicenseRef- stays a
+/// name, so CycloneDX writes license.name. The SPDX writers keep that
+/// prefix and only sanitize the id characters. Package URLs for manifest
+/// libraries use pkg:delphi, which
 /// is not a registered PURL type. Scanned files keep the file: locator the
 /// writers already emit. An optional purl field on a row replaces the
 /// generated value.
@@ -216,6 +219,8 @@ procedure AppendCycloneDxLicencesXml(ALines: TStrings; const ALicence,
 /// <summary>
 /// SPDX 2.3 token for a licence value. NOASSERTION when empty.
 /// A name becomes LicenseRef- followed by a sanitized id.
+/// A value that already starts with LicenseRef- keeps that prefix.
+/// Only the characters after the prefix are sanitized.
 /// </summary>
 function SpdxLicenceTokenFor(const ALicence: string; out AKind: TLicenceKind): string;
 
@@ -237,6 +242,27 @@ function SpdxLicenceTokenFor(const ALicence: string; out AKind: TLicenceKind): s
 function ComponentLicenceFor(const AArtefact: TArtefactInfo;
   AIsDeliverable: Boolean; const AProductLicence: string;
   const AManifest: TComponentManifest): string;
+
+/// <summary>
+/// Version written on one SBOM component and in the report tables.
+/// A version already stored on the artefact is kept. A third-party file
+/// is left as it is, including an empty version and a file-date stand-in.
+/// The built program, and a second copy of that file, uses the product
+/// version when it has no version of its own. A file-date stand-in is not
+/// a version of its own. The product version is the SBOM header value, or
+/// the project version when the header is empty. That is the value the
+/// report header shows. A unit is not the built program.
+/// </summary>
+function ComponentVersionFor(const AArtefact: TArtefactInfo;
+  AIsDeliverable: Boolean; const AProductVersion, AProjectVersion: string): string;
+
+/// <summary>
+/// True when AWrittenVersion is the file modification time stored on
+/// AArtefact. A product version used in its place is not a file date, so
+/// the versionSource property must not be written for it.
+/// </summary>
+function ComponentVersionFromFileDate(const AArtefact: TArtefactInfo;
+  const AWrittenVersion: string): Boolean;
 
 /// <summary>
 /// Percent-encodes one purl segment. Unreserved characters are kept.
@@ -744,7 +770,12 @@ begin
   else
   begin
     LKind := ClassifyLicence(Result.Licence, LNormalised);
-    if (LKind = lkName) and not SameText(Result.Licence, 'Commercial') then
+    // Commercial is a plain name the manifest accepts on purpose.
+    // LicenseRef- is already an SPDX licence reference, in any letter
+    // case. The README and the header dialog suggest LicenseRef-Proprietary,
+    // so that form must not raise the unrecognised-identifier warning.
+    if (LKind = lkName) and not SameText(Result.Licence, 'Commercial') and
+      not StartsText('LicenseRef-', Trim(Result.Licence)) then
       AddWarning(AWarnings, LContext + ': licence "' + Result.Licence +
         '" is not a recognised SPDX identifier and will be written as a licence name');
   end;
@@ -2224,6 +2255,9 @@ begin
   begin
     // The row declares the licence, and it is also the distribution
     // licence we assert. Same id or name, once concluded and once declared.
+    // LicenseRef-* stays a name. CycloneDX 1.6 license.id is the SPDX
+    // license list, which does not include LicenseRef, so an id would
+    // fail the schema. A name stays valid.
     AddNamed('concluded');
     AddNamed('declared');
   end;
@@ -2269,6 +2303,7 @@ begin
       EscapeXml(LValue) + '</expression>')
   else
   begin
+    // Same choice as the JSON writer: LicenseRef-* is a name, not an id.
     EmitNamed('concluded');
     EmitNamed('declared');
   end;
@@ -2659,8 +2694,34 @@ begin
 end;
 
 function SpdxLicenceTokenFor(const ALicence: string; out AKind: TLicenceKind): string;
+const
+  cLicenseRefPrefix = 'LicenseRef-';
 var
   LValue: string;
+
+  function TokenForName(const AValue: string): string;
+  var
+    LId: string;
+  begin
+    // A value that already starts with LicenseRef- is kept, in the letter
+    // case it was written. Only the id characters are sanitized, so
+    // LicenseRef-Proprietary is not written as LicenseRef-LicenseRef-Proprietary.
+    if StartsText(cLicenseRefPrefix, AValue) then
+    begin
+      LId := SanitizeSpdxId(Copy(AValue, Length(cLicenseRefPrefix) + 1, MaxInt));
+      if LId = '' then
+        Result := 'LicenseRef-Custom'
+      else
+        Result := Copy(AValue, 1, Length(cLicenseRefPrefix)) + LId;
+    end
+    else
+    begin
+      Result := cLicenseRefPrefix + SanitizeSpdxId(AValue);
+      if Result = 'LicenseRef-' then
+        Result := 'LicenseRef-Custom';
+    end;
+  end;
+
 begin
   AKind := ClassifyLicence(ALicence, LValue);
   case AKind of
@@ -2669,9 +2730,7 @@ begin
     lkSpdxId, lkExpression:
       Result := LValue;
   else
-    Result := 'LicenseRef-' + SanitizeSpdxId(LValue);
-    if Result = 'LicenseRef-' then
-      Result := 'LicenseRef-Custom';
+    Result := TokenForName(LValue);
   end;
 end;
 
@@ -2714,6 +2773,37 @@ begin
 
   if IsEmbarcaderoOrigin(AArtefact.Origin) then
     Result := Trim(AArtefact.Origin);
+end;
+
+function ComponentVersionFor(const AArtefact: TArtefactInfo;
+  AIsDeliverable: Boolean; const AProductVersion, AProjectVersion: string): string;
+var
+  LProduct: string;
+begin
+  Result := Trim(AArtefact.Version);
+  // A third-party file keeps the version it has, including none and a
+  // file-date stand-in. The product version is not copied onto it.
+  if not AIsDeliverable then
+    Exit;
+  // A unit is not the built program. ComponentLicenceFor uses the same guard.
+  if SameText(AArtefact.ArtefactType, 'unit-evidence') then
+    Exit;
+  // A file-date stamp is the stand-in used when the file has no version
+  // resource. The header version replaces it on the built program only.
+  if (Result <> '') and not AArtefact.VersionFromFileDate then
+    Exit;
+  LProduct := Trim(AProductVersion);
+  if LProduct = '' then
+    LProduct := Trim(AProjectVersion);
+  if LProduct <> '' then
+    Result := LProduct;
+end;
+
+function ComponentVersionFromFileDate(const AArtefact: TArtefactInfo;
+  const AWrittenVersion: string): Boolean;
+begin
+  Result := AArtefact.VersionFromFileDate and (Trim(AWrittenVersion) <> '') and
+    SameText(Trim(AArtefact.Version), Trim(AWrittenVersion));
 end;
 
 function SpdxLicenceToken(const AEntry: TComponentEntry; out AKind: TLicenceKind): string;

@@ -50,10 +50,12 @@ type
     /// <summary>
     /// Builds one component. ALicence is written as licenses when it is not
     /// empty. The built program and own-code units use the product licence.
-    /// An Embarcadero unit uses its origin label.
+    /// An Embarcadero unit uses its origin label. AVersion is the version
+    /// to write. The built program uses the product version when it has
+    /// none of its own.
     /// </summary>
     function BuildComponent(const AArtefact: TArtefactInfo; const AIndex: Integer;
-      AUnresolvedSource: Boolean; const ALicence: string): TJSONObject;
+      AUnresolvedSource: Boolean; const ALicence, AVersion: string): TJSONObject;
     function BuildDependencies(const AArtefacts: TArtefactList;
       const AProjectBomRef, AOutputFilePath: string): TJSONArray;
   public
@@ -210,7 +212,8 @@ begin
 end;
 
 function TCycloneDxJsonWriter.BuildComponent(const AArtefact: TArtefactInfo;
-  const AIndex: Integer; AUnresolvedSource: Boolean; const ALicence: string): TJSONObject;
+  const AIndex: Integer; AUnresolvedSource: Boolean;
+  const ALicence, AVersion: string): TJSONObject;
 var
   LComponent, LHashes, LRef, LRefHash: TJSONObject;
   LHashArray, LProperties, LRefs, LRefHashes: TJSONArray;
@@ -248,10 +251,11 @@ begin
   LComponent.AddPair('name', ArtefactComponentName(AArtefact));
 
   // Version. Build mode and library mode both set the product or release
-  // version on the files they ship. A component without a known version has
-  // no version field. The hash is in hashes, not in version.
-  if Trim(AArtefact.Version) <> '' then
-    LComponent.AddPair('version', Trim(AArtefact.Version));
+  // version on the files they ship. The built program with no version of
+  // its own, such as an Android .so, uses the product version. A component
+  // that still has no version has no version field. The hash is in hashes.
+  if AVersion <> '' then
+    LComponent.AddPair('version', AVersion);
 
   // BOM reference
   LComponent.AddPair('bom-ref', 'comp-' + IntToStr(AIndex));
@@ -358,7 +362,8 @@ begin
   if AArtefact.Location <> '' then
     AddProperty('net.developer-experts.dx-comply:location', AArtefact.Location);
   // Issue #109: the version is the file modification time, not a real version.
-  if AArtefact.VersionFromFileDate then
+  // A product version used in place of that stand-in is not a file date.
+  if ComponentVersionFromFileDate(AArtefact, AVersion) then
     AddProperty(cVersionSourceProperty, cVersionSourceFileDate);
 
   // BSI TR-03183-2 file properties. Omitted when there is no file name,
@@ -449,6 +454,8 @@ var
   LManifest: TComponentManifest;
   LLicenceError: string;
   LLicence: string;
+  LVersion: string;
+  LIsDeliverable: Boolean;
 begin
   Result := False;
   if AOutputPath = '' then
@@ -492,11 +499,13 @@ begin
     end;
     for I := 0 to AArtefacts.Count - 1 do
     begin
-      LLicence := ComponentLicenceFor(AArtefacts[I],
-        IsSameDeliverableFile(AArtefacts, I, LRootIndex), AMetadata.Licence,
-        LManifest);
+      LIsDeliverable := IsSameDeliverableFile(AArtefacts, I, LRootIndex);
+      LLicence := ComponentLicenceFor(AArtefacts[I], LIsDeliverable,
+        AMetadata.Licence, LManifest);
+      LVersion := ComponentVersionFor(AArtefacts[I], LIsDeliverable,
+        AMetadata.ProductVersion, AProjectInfo.Version);
       LComponents.Add(BuildComponent(AArtefacts[I], I,
-        LGraph.Status[I] = uusMissingSource, LLicence));
+        LGraph.Status[I] = uusMissingSource, LLicence, LVersion));
     end;
     LRoot.AddPair('components', LComponents);
 

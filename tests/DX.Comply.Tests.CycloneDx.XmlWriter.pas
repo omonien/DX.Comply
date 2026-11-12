@@ -135,6 +135,12 @@ type
     /// </summary>
     [Test]
     procedure Write_UnitLicences_EmbarcaderoAndOwnCode;
+    /// <summary>
+    /// The built program with no version of its own uses the product version.
+    /// A third-party file does not.
+    /// </summary>
+    [Test]
+    procedure Write_DeliverableWithoutVersion_UsesProductVersion;
 
     /// <summary>Component hashes must precede purl.</summary>
     [Test]
@@ -792,6 +798,65 @@ begin
     'Own code stays without a licence when the product licence is empty');
   Assert.IsTrue(Pos('<name>Embarcadero RTL</name>',
     SliceComponent('System.SysUtils.pas')) > 0);
+end;
+
+procedure TCycloneDxXmlWriterTests.Write_DeliverableWithoutVersion_UsesProductVersion;
+var
+  LContent, LSlice: string;
+  LSo, LDll: TArtefactInfo;
+
+  function SliceComponent(const AName: string): string;
+  var
+    LNamePos, LStart, LEnd: Integer;
+  begin
+    LNamePos := Pos('<name>' + AName + '</name>', LContent);
+    Assert.IsTrue(LNamePos > 0, AName + ' must be a component');
+    LStart := LNamePos;
+    while (LStart > 1) and (Copy(LContent, LStart, 10) <> '<component') do
+      Dec(LStart);
+    LEnd := PosEx('</component>', LContent, LNamePos);
+    Assert.IsTrue(LEnd > LNamePos, AName + ' component must close');
+    Result := Copy(LContent, LStart, LEnd - LStart);
+  end;
+
+begin
+  FProjectInfo.ProjectName := 'WernigApp';
+  FMetadata.ProductVersion := '16.0.0.7';
+  FArtefacts.Add(MakeArtefact('libWernigApp.so', 'file', 'abcd1234ef', 1024));
+  LDll := MakeArtefact('vendor.dll', 'library', 'abcd1234ef', 2048);
+  LDll.Version := '9.9.9';
+  FArtefacts.Add(LDll);
+  FArtefacts.Add(MakeArtefact('plugin.dll', 'library', 'abcd1234ef', 512));
+  Assert.IsTrue(FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LContent := LoadOutputContent;
+  LSlice := SliceComponent('libWernigApp.so');
+  Assert.IsTrue(Pos('<version>16.0.0.7</version>', LSlice) > 0,
+    'A shared library with no version resource uses the product version');
+  Assert.AreEqual(0, Pos(cVersionSourceFileDate, LSlice));
+  Assert.IsTrue(Pos('<version>9.9.9</version>', SliceComponent('vendor.dll')) > 0,
+    'A third-party DLL keeps its own version');
+  Assert.AreEqual(0, Pos('<version>', SliceComponent('plugin.dll')),
+    'A third-party file with no version stays without one');
+
+  FArtefacts.Clear;
+  LSo := MakeArtefact('libWernigApp.so', 'file', 'abcd1234ef', 1024);
+  LSo.Version := '2026-01-01T00:00:00Z';
+  LSo.VersionFromFileDate := True;
+  FArtefacts.Add(LSo);
+  LDll := MakeArtefact('vendor.dll', 'library', 'abcd1234ef', 2048);
+  LDll.Version := '2026-01-02T00:00:00Z';
+  LDll.VersionFromFileDate := True;
+  FArtefacts.Add(LDll);
+  Assert.IsTrue(FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LContent := LoadOutputContent;
+  LSlice := SliceComponent('libWernigApp.so');
+  Assert.IsTrue(Pos('<version>16.0.0.7</version>', LSlice) > 0);
+  Assert.AreEqual(0, Pos(cVersionSourceFileDate, LSlice),
+    'The product version is not marked as a file date');
+  LSlice := SliceComponent('vendor.dll');
+  Assert.IsTrue(Pos('<version>2026-01-02T00:00:00Z</version>', LSlice) > 0);
+  Assert.IsTrue(Pos(cVersionSourceFileDate, LSlice) > 0,
+    'A third-party file keeps its file-date version');
 end;
 
 end.
