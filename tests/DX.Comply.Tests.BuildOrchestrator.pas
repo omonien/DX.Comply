@@ -43,6 +43,13 @@ type
     procedure CreatePlan_MapMissing_ForcesDetailedMapBuild;
 
     /// <summary>
+    /// MSBuild must be asked for the Delphi platform. Android32 builds as
+    /// Android. Android64 stays Android64.
+    /// </summary>
+    [Test]
+    procedure CreatePlan_Android32_UsesDelphiPlatformName;
+
+    /// <summary>
     /// An existing map file must prevent a redundant build execution.
     /// </summary>
     [Test]
@@ -244,6 +251,52 @@ begin
       'The requested Delphi version must be forwarded as a quoted argument');
     Assert.IsTrue(Pos('-ExtraProperty "DCC_MapFile=3"', LPlan.CommandLine) > 0,
       'The command line must forward the detailed map property as -ExtraProperty');
+  finally
+    LProjectInfo.Free;
+  end;
+end;
+
+procedure TBuildOrchestratorTests.CreatePlan_Android32_UsesDelphiPlatformName;
+var
+  LPlan: TDeepEvidenceBuildPlan;
+  LProjectInfo: TProjectInfo;
+begin
+  LProjectInfo := TProjectInfo.Create;
+  try
+    LProjectInfo.ProjectPath := 'C:\Repo\src\MyApp.dproj';
+    LProjectInfo.ProjectDir := 'C:\Repo\src';
+    LProjectInfo.Platform := 'Android32';
+    LProjectInfo.Configuration := 'Release';
+    LProjectInfo.MapFilePath := 'C:\Repo\src\Android\Release\libMyApp.so.map';
+
+    LPlan := FBuildOrchestrator.CreatePlan(LProjectInfo,
+      BuildOptions(debWhenMapMissing, '', 13));
+
+    Assert.AreEqual('Android', LPlan.Platform,
+      'The plan platform must be the Delphi name Android');
+    Assert.IsTrue(Pos('-Platform "Android"', LPlan.CommandLine) > 0,
+      'The command line must pass -Platform Android, but was: ' + LPlan.CommandLine);
+    Assert.IsTrue(Pos('-Platform "Android32"', LPlan.CommandLine) = 0,
+      'The command line must not pass Android32');
+    Assert.IsTrue(Pos('-Platform "Android64"', LPlan.CommandLine) = 0,
+      'A 32-bit plan must not pass Android64');
+  finally
+    LProjectInfo.Free;
+  end;
+
+  LProjectInfo := TProjectInfo.Create;
+  try
+    LProjectInfo.ProjectPath := 'C:\Repo\src\MyApp.dproj';
+    LProjectInfo.ProjectDir := 'C:\Repo\src';
+    LProjectInfo.Platform := 'Android64';
+    LProjectInfo.Configuration := 'Release';
+    LProjectInfo.MapFilePath := 'C:\Repo\src\Android64\Release\libMyApp.so.map';
+
+    LPlan := FBuildOrchestrator.CreatePlan(LProjectInfo, BuildOptions(debWhenMapMissing));
+
+    Assert.AreEqual('Android64', LPlan.Platform);
+    Assert.IsTrue(Pos('-Platform "Android64"', LPlan.CommandLine) > 0,
+      'Android64 must stay Android64, but was: ' + LPlan.CommandLine);
   finally
     LProjectInfo.Free;
   end;

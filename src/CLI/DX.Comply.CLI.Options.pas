@@ -893,6 +893,12 @@ begin
     Line('                                Reports with no report.output follow it.');
     Line('  --platform=<name>             Target platform (default: Win32)');
     Line('                                File key: platform');
+    Line('                                Android 32-bit is the platform Android.');
+    Line('                                The binary and the map are in');
+    Line('                                Android\<Config>, for example');
+    Line('                                Android\Release\libMyApp.so. Android32');
+    Line('                                is accepted and mapped to that folder.');
+    Line('                                Android64 stays Android64.');
     Line('  --config-name=<name>          Build configuration (default: Release)');
     Line('                                File key: configName');
     Line('                                For .dpr, .dpk, and .bdsproj, --platform');

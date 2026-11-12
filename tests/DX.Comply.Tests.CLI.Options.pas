@@ -1376,6 +1376,9 @@ begin
     'the optional-value notation stays in the option list');
   Assert.Contains(LHelp, 'checked in the current');
   Assert.Contains(LHelp, 'project folder');
+  Assert.Contains(LHelp, 'Android 32-bit is the platform Android');
+  Assert.Contains(LHelp, 'Android32');
+  Assert.Contains(LHelp, 'Android64 stays Android64');
 end;
 
 initialization

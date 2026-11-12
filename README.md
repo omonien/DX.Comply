@@ -119,6 +119,8 @@ dxcomply --project=MyApp.dproj --format=cyclonedx-json --output=bom.json --no-pa
 
 For Android, iOS, Linux, and macOS ARM, the linker writes an LLD map instead. Enable it with Project Options > Linker > Map file ARM > On; these targets have no Detailed setting. Android names the map `lib<Project>.so.map`, next to `lib<Project>.so`.
 
+A 32-bit Android build uses the platform name Android. The binary and the map are in `Android\<Config>`, for example `Android\Release\libMyApp.so` and `Android\Release\libMyApp.so.map`. `--platform=Android32` is accepted and mapped to that folder. Android64 stays `Android64\<Config>`. `$(Platform)` and `$(Config)` in `DCC_ExeOutput`, `DCC_BplOutput`, `DCC_DcpOutput`, and `DCC_DcuOutput` are expanded. When those settings are absent and the Delphi platform folder is already on disk, that folder is the output directory. Otherwise the project directory is used.
+
 If the MAP file is in a non-standard directory, use `--map-dir`:
 
 ```cmd
@@ -278,7 +280,7 @@ The same header also carries the product data that section 5.2.2 and CRA Annex I
 | Supplier | Name of the manufacturer. Falls back to CompanyName in the project version info | `--supplier=<name>` | `product.supplier` | Supplier / manufacturer |
 | Supplier URL | Contact URL of the manufacturer. Not needed when the supplier is an email address | `--supplier-url=<url>` | `product.supplierUrl` | Supplier URL |
 | Licence | Distribution licence as SPDX expression, for example `MIT` or `LicenseRef-Proprietary` | `--licence=<SPDX expression>` | `product.licence` | Licence |
-| Version | Product version. Falls back to the project version info | `--version=<version>` | `product.version` | Product version |
+| Version | Product version. Falls back to the project version info: FileVersion, or Major.Minor.Release.Build. On Android, versionName when FileVersion is absent. 16.0.0.7 keeps every digit | `--version=<version>` | `product.version` | Product version |
 
 There are three ways to set them. All of them end up in the same SBOM fields.
 
@@ -547,6 +549,14 @@ Add a row for it to your own components file and pass it with `--manifest`. The 
 
 No. `own_code_folders` names folders of your own units. `units_folder` on a row names the folder of a third-party package, including its subfolders. A unit known only by its name, with no source file found, is still matched by `units_exact`, `units_prefix`, `own_code_units`, or `own_code_prefixes`. See [Component manifest](#component-manifest).
 
+### The Android map or libMyApp.so is not found
+
+A 32-bit Android project writes `libMyApp.so` and `libMyApp.so.map` under `Android\<Config>`, for example `Android\Release`. The platform name is Android. `--platform=Android32` is accepted and uses that folder. Android64 uses `Android64\<Config>`. `DCC_ExeOutput` and the other output paths in the `.dproj` are used when they are set, including `$(Platform)` and `$(Config)`. When they are not set and that platform folder exists, it is used. Otherwise the project directory is used. If the files are somewhere else, pass `--map-dir`.
+
+### The Android version in the SBOM is 1.0.0.0 or 1.0.0.7
+
+Android stores the version as `versionName` in `VerInfo_Keys`, in the `Base_Android` or `Cfg_N_Android` property group. Android64 uses `Base_Android64` and `Cfg_N_Android64`. DX.Comply reads `versionName` when `FileVersion` is missing, and it keeps every component, so `16.0.0.7` stays `16.0.0.7`. A Windows project still uses `FileVersion`, or Major.Minor.Release.Build.
+
 ### Library SBOM vs product SBOM: which one do I keep?
 
 Keep both when both apply. The library author archives the `--library` SBOM for each source release. Each product manufacturer archives the build-mode SBOM for each shipped app version. Downstream SBOMs do not replace the manufacturer's archive duty.
@@ -573,7 +583,7 @@ No internet connection is required. All processing is local.
 | [CI Integration](docs/CI-Integration.md) | Command-line usage, GitHub Actions examples, CI configuration |
 | [Legacy Support](docs/LegacySupport.md) | MAP files from older Delphi versions, and which project files the CLI accepts |
 | [Library SBOM](docs/Library-SBOM.md) | Build mode and library mode, and what each SBOM contains |
-| [FAQ](#faq) | Common questions on library mode, old DLLs, generation time, and CRA archive |
+| [FAQ](#faq) | Common questions on library mode, old DLLs, Android output and version, generation time, and CRA archive |
 | [Example SBOM (JSON)](docs/examples/ConwaysLifeFMX.cdx.json) | CycloneDX 1.6 from ConwaysLifeFMX in RADStudio13Demos, Release/Win32 with a map file |
 | [Component manifest sample](docs/samples/components.sample.json) | Optional components.json (supplier, licence, version, type, package URL, copyright, folders) |
 

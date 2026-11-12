@@ -626,6 +626,17 @@ function PrimaryOutputFileName(const APlatform, AProjectName, ADllSuffix: string
   AKind: TPrimaryOutputKind): string;
 
 /// <summary>
+/// Delphi output folder for APlatform, and the suffix of Base_ and Cfg_N_
+/// property groups. The 32-bit Android target is the platform Android.
+/// Android32, Android32Arm, and AndroidArm are accepted and map to that folder.
+/// Android64, Android64Arm, and AndroidARM64 stay Android64. Every other
+/// name is the folder Delphi already uses (Win32, Win64, Win64x, OSX32,
+/// OSX64, OSXARM64, iOSSimulator, iOSDevice32, iOSDevice64, iOSSimARM64,
+/// Linux64, LinuxARM64).
+/// </summary>
+function PlatformOutputDirectoryName(const APlatform: string): string;
+
+/// <summary>
 /// Artefact type of the binary this project builds: application, library,
 /// or package.
 /// </summary>
@@ -1081,6 +1092,22 @@ begin
     (LExt = '.tgz') or (LExt = '.rar') or (LExt = '.jar') or
     (LExt = '.nupkg') or (LExt = '.iso') or (LExt = '.cab') or
     LName.EndsWith('.tar.gz') or LName.EndsWith('.tar.bz2');
+end;
+
+function PlatformOutputDirectoryName(const APlatform: string): string;
+var
+  LPlatform: string;
+begin
+  // $(Platform) in a .dproj is this folder. The TargetedPlatforms bit for
+  // 32-bit Android is often called Android32, and that name is not a
+  // directory. Android 64-bit already matches its folder.
+  LPlatform := Trim(APlatform);
+  if SameText(LPlatform, 'Android32') or SameText(LPlatform, 'Android32Arm') or
+     SameText(LPlatform, 'AndroidArm') then
+    Exit('Android');
+  if SameText(LPlatform, 'Android64Arm') or SameText(LPlatform, 'AndroidARM64') then
+    Exit('Android64');
+  Result := LPlatform;
 end;
 
 function PlatformOutputFamily(const APlatform: string): string;
