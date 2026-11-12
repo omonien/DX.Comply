@@ -96,6 +96,12 @@ type
     /// </summary>
     [Test]
     procedure Licences_OneRowPerComponent_SortedWithVersionAndCopyright;
+    /// <summary>
+    /// A library is listed when its units are classified as local project
+    /// code and the file name is only the part after the last dot. Issue #172.
+    /// </summary>
+    [Test]
+    procedure Licences_OwnCodeOrigin_ListsMatchedLibrary;
     [Test]
     procedure WithoutManifestLine_OmittedWhenNoneMissing;
   end;
@@ -547,6 +553,44 @@ begin
   Assert.AreEqual(1, LProduct.Count);
   AssertComponent(LProduct, 0, 'Demo (product)', '', '');
   Assert.AreEqual('', LProduct.Note);
+end;
+
+procedure TReportOverviewTests.Licences_OwnCodeOrigin_ListsMatchedLibrary;
+const
+  cTms = '{"components":[' +
+    '{"name":"TMS FNC Core","version":"4.2.3.7","vendor":"TMS Software",' +
+    '"licence":"LicenseRef-Proprietary","type":"library","units_prefix":["FMX.TMSFNC"]},' +
+    '{"name":"TMS FNC UI Pack","version":"7.1.2.2","vendor":"TMS Software",' +
+    '"licence":"LicenseRef-Proprietary","type":"library","units_prefix":["FMX.TMSFNC"]}]}';
+begin
+  FData.Metadata.ComponentManifestJson := cTms;
+  FData.Metadata.Licence := 'MIT';
+  var LButton := Default(TArtefactInfo);
+  LButton.RelativePath := 'TMSFNCButton.dcu';
+  LButton.UnitName := 'FMX.TMSFNCButton';
+  LButton.ArtefactType := 'unit-evidence';
+  LButton.Origin := 'Local project';
+  FArtefacts.Add(LButton);
+  var LTypes := Default(TArtefactInfo);
+  LTypes.RelativePath := 'TMSFNCTypes.dcu';
+  LTypes.UnitName := 'FMX.TMSFNCTypes';
+  LTypes.ArtefactType := 'unit-evidence';
+  LTypes.Origin := 'Local project';
+  FArtefacts.Add(LTypes);
+
+  var LOverview := BuildReportOverview(FData);
+  Assert.AreEqual<Integer>(FArtefacts.Count + 1, LOverview.TotalComponents);
+  var LLicence := FindLicence(LOverview.Licences, 'LicenseRef-Proprietary');
+  Assert.AreEqual(1, LLicence.Count);
+  Assert.AreEqual('TMS FNC Core', LLicence.Components[0].Name);
+  Assert.AreEqual('4.2.3.7', LLicence.Components[0].Version);
+  Assert.AreEqual('TMS FNC Core', LicenceNames(LLicence));
+  var LNone := FindLicence(LOverview.Licences, cNoLicenceGroupTitle);
+  Assert.AreEqual(0, LNone.Count);
+  var LLibrary := FindGroup(LOverview.Origins, cManifestLibraryOrigin);
+  Assert.AreEqual(1, LLibrary.Count);
+  Assert.AreEqual('TMS FNC Core 4.2.3.7', LLibrary.NamesText);
+  Assert.AreEqual(2, FindGroup(LOverview.Origins, 'Local project').Count);
 end;
 
 procedure TReportOverviewTests.WithoutManifestLine_CountsAndEmptyWithoutThirdParty;

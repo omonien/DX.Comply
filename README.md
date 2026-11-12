@@ -444,7 +444,7 @@ The first hit wins, in this order:
 1. `units_exact` (the first matching row).
 2. `own_code_units`.
 3. The longest matching folder, from `units_folder` and `own_code_folders` together. `units_exclude` keeps a unit out of that row's folders as well as its prefixes. On a tie the first component row wins, and a component folder wins over an own-code folder of the same length.
-4. `units_prefix`. Among prefixes the longest one wins, whatever the order of the rows, so a row with `Neslib.Xml` gets `Neslib.Xml.Reader` even when a row with `Neslib` comes first. On equal length the first row wins.
+4. `units_prefix`. A prefix matches when the unit name starts with it. A trailing dot is not required, so `FMX.TMSFNC` matches `FMX.TMSFNCButton` and `FMX.TMSFNC.Types`. Among prefixes the longest one wins, whatever the order of the rows, so a row with `Neslib.Xml` gets `Neslib.Xml.Reader` even when a row with `Neslib` comes first. When two rows use the same prefix, the units go to the first row in the file. The log names both rows and that prefix. Give the other row `units_exact`, or a longer `units_prefix`. Matching uses the unit name from the MAP file. That still works when the file on disk is only the part after the last dot, so the library is listed even when those units are classified as local project code.
 5. `own_code_prefixes`.
 
 `units_exclude` lists unit names that the prefixes and folders of that row do not match. This helps with a short prefix: `"units_prefix": ["Ab"], "units_exclude": ["AboutBox"]` gives every `Ab*` unit to the row except `AboutBox`, which can still match another row or stay unmatched. The same list keeps a unit out of a `units_folder` on that row. For a unit with a Delphi scope, write the name either way: `Vcl.Skia` and `Skia` both keep the unit `Vcl.Skia` out of a row with the prefix `Skia`. A prefix shorter than 3 characters gets a warning, but it is still applied.
@@ -461,7 +461,7 @@ There is no required `purl` field. When it is absent, DX.Comply writes `pkg:delp
 
 `copyright` is an optional string on each component. Use a year, such as `"2020"`, or any other copyright text. It is not a timestamp. Leave it out when you have nothing to record; the row stays valid. DX.Comply stores the text and does not use it to match units. When the text is set, it is written on the library component that row describes: CycloneDX JSON and XML `copyright`, SPDX 2.3 package `copyrightText`, and SPDX 3.0.1 `software_copyrightText` on the `software_Package` (the Software profile property `copyrightText`). A row that omits it, or sets only spaces, leaves those files as they are. CycloneDX has no `copyright` field, SPDX 2.3 keeps `copyrightText` as `NOASSERTION`, and SPDX 3.0.1 omits `software_copyrightText`. The HTML and Markdown licence summary shows the same text, and leaves the Copyright cell empty when the field is absent. The sample sets it on OmniThreadLibrary and leaves it off the other rows, so a report that matches those rows shows `2020` for OmniThreadLibrary and an empty Copyright cell for Spring4D, SynEdit and TMS VCL UI Pack. The OmniThreadLibrary component in the SBOM carries `2020`, and the other library components do not.
 
-A file that cannot be read (missing, not JSON, or not an object or array) stops generation. The message names the file and the reason. Missing fields, a short prefix, or an unrecognised licence name are warnings, and the SBOM is still written. A row with match rules that hits no unit is reported as a warning. The root `supplier` is the application publisher. It is used only when `--supplier` and `product.supplier` are both empty. Its URL is copied only when `--supplier-url` and `product.supplierUrl` are also empty.
+A file that cannot be read (missing, not JSON, or not an object or array) stops generation. The message names the file and the reason. Invalid JSON also names the line and the position. Missing fields, a short prefix, or an unrecognised licence name are warnings, and the SBOM is still written. A row with match rules that hits no unit is reported as a warning. The root `supplier` is the application publisher. It is used only when `--supplier` and `product.supplier` are both empty. Its URL is copied only when `--supplier-url` and `product.supplierUrl` are also empty.
 
 ### Libraries that ship no metadata
 
@@ -560,6 +560,10 @@ The HTML page title and the heading, and the Markdown heading, start with the pr
 ### Do I have to list every unit in the component manifest?
 
 No. `own_code_folders` names folders of your own units. `units_folder` on a row names the folder of a third-party package, including its subfolders. A unit known only by its name, with no source file found, is still matched by `units_exact`, `units_prefix`, `own_code_units`, or `own_code_prefixes`. See [Component manifest](#component-manifest).
+
+### Two component rows use the same units_prefix. Which units go where?
+
+The units go to the first row in the file. The log names both rows and the shared prefix. Give the other row `units_exact`, or a longer `units_prefix`. A prefix does not need a trailing dot: `FMX.TMSFNC` matches `FMX.TMSFNCButton` and `FMX.TMSFNC.Types`. A row that still matches no unit is reported as matched no units. The row that does match is listed in the report even when those units are classified as local project code.
 
 ### The Android map or libMyApp.so is not found
 

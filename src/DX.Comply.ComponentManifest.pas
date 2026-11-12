@@ -252,7 +252,10 @@ function BuildDelphiPurl(const AName, AVersion, AOverride: string): string;
 
 /// <summary>
 /// Parses manifest JSON. AError is set when the text is not usable.
+/// Invalid JSON names the source file, the line and the position.
 /// Schema gaps are warnings on a successfully loaded manifest.
+/// A prefix used by more than one row is a warning. The units go to the
+/// first row in the file.
 /// </summary>
 function TryParseComponentManifest(const AJson, ASourceName: string;
   out AManifest: TComponentManifest; out AError: string): Boolean;
@@ -281,7 +284,10 @@ function ResolveManifestPath(const AProjectDir, AManifestFile: string): string;
 /// a folder beats a prefix, and a library prefix beats own_code_prefixes.
 /// The longest matching folder wins, then the longest matching prefix.
 /// On a tie the first row wins, and a component folder beats an own-code
-/// folder of the same length. The name is tried as written and with its
+/// folder of the same length. A units_prefix matches when the unit name
+/// starts with it. A trailing dot is not required. The longest matching
+/// prefix wins, and the same prefix on more than one row assigns the units
+/// to the first row in the file. The name is tried as written and with its
 /// scope prefix removed. ASourcePath is the unit's source file. Folder
 /// rules do not match when it is empty.
 /// </summary>
@@ -296,10 +302,21 @@ function MatchManifestUnit(const AManifest: TComponentManifest;
 function ArtefactFolderPath(const AArtefact: TArtefactInfo): string;
 
 /// <summary>
-/// Unit name of a unit-evidence artefact, from its file name.
-/// Empty when the artefact is not unit evidence.
+/// Unit name of a unit-evidence artefact. The stored unit name when it is
+/// set, otherwise the file name without its extension. Empty when the
+/// artefact is not unit evidence.
 /// </summary>
 function ArtefactUnitName(const AArtefact: TArtefactInfo): string;
+
+/// <summary>
+/// Adds a unit-evidence artefact for a MAP unit that has no file, when that
+/// unit matches a library row. Returns False when the name is empty, the
+/// unit does not match a library, or an artefact for that unit is already
+/// present. Units that do not match a library are left out.
+/// </summary>
+function TryAddNameOnlyLibraryUnit(const AManifest: TComponentManifest;
+  const AUnitName, AOrigin, AEvidence, AConfidence: string;
+  const AArtefacts: TArtefactList): Boolean;
 
 /// <summary>
 /// Groups unit-evidence artefacts that match a library row.
@@ -554,6 +571,9 @@ function ArtefactUnitName(const AArtefact: TArtefactInfo): string;
 begin
   Result := '';
   if not SameText(AArtefact.ArtefactType, 'unit-evidence') then
+    Exit;
+  Result := Trim(AArtefact.UnitName);
+  if Result <> '' then
     Exit;
   Result := TPath.GetFileNameWithoutExtension(AArtefact.RelativePath);
   if Result = '' then
@@ -1116,6 +1136,475 @@ begin
   end;
 end;
 
+type
+  /// <summary>
+  /// Finds the first JSON syntax error so a bad components file can name
+  /// the line and the column. System.JSON drops that position when it
+  /// returns nil.
+  /// </summary>
+  TJsonSyntaxScan = class
+  private
+    FText: string;
+    FPos: Integer;
+    FLine: Integer;
+    FCol: Integer;
+    FFailed: Boolean;
+    FErrLine: Integer;
+    FErrCol: Integer;
+    function AtEnd: Boolean;
+    function Cur: Char;
+    procedure Advance;
+    procedure Fail;
+    procedure SkipWs;
+    procedure ParseValue;
+    procedure ParseObject;
+    procedure ParseArray;
+    procedure ParseString;
+    procedure ParseNumber;
+    procedure ParseLiteral(const ALiteral: string);
+    function IsDigit(AChar: Char): Boolean;
+    function IsIdentChar(AChar: Char): Boolean;
+  public
+    constructor Create(const AText: string);
+    procedure Run;
+    function HasError: Boolean;
+    function ErrorLine: Integer;
+    function ErrorColumn: Integer;
+  end;
+
+constructor TJsonSyntaxScan.Create(const AText: string);
+begin
+  inherited Create;
+  FText := AText;
+  FPos := 1;
+  FLine := 1;
+  FCol := 1;
+  FErrLine := 1;
+  FErrCol := 1;
+  if (FText <> '') and (FText[1] = #$FEFF) then
+    FPos := 2;
+end;
+
+function TJsonSyntaxScan.AtEnd: Boolean;
+begin
+  Result := FPos > Length(FText);
+end;
+
+function TJsonSyntaxScan.Cur: Char;
+begin
+  if AtEnd then
+    Result := #0
+  else
+    Result := FText[FPos];
+end;
+
+function TJsonSyntaxScan.IsDigit(AChar: Char): Boolean;
+begin
+  Result := (AChar >= '0') and (AChar <= '9');
+end;
+
+function TJsonSyntaxScan.IsIdentChar(AChar: Char): Boolean;
+begin
+  Result := ((AChar >= 'A') and (AChar <= 'Z')) or
+    ((AChar >= 'a') and (AChar <= 'z')) or IsDigit(AChar) or (AChar = '_');
+end;
+
+procedure TJsonSyntaxScan.Advance;
+begin
+  if AtEnd then
+    Exit;
+  if FText[FPos] = #13 then
+  begin
+    Inc(FPos);
+    if (not AtEnd) and (FText[FPos] = #10) then
+      Inc(FPos);
+    Inc(FLine);
+    FCol := 1;
+  end
+  else if FText[FPos] = #10 then
+  begin
+    Inc(FPos);
+    Inc(FLine);
+    FCol := 1;
+  end
+  else
+  begin
+    Inc(FPos);
+    Inc(FCol);
+  end;
+end;
+
+procedure TJsonSyntaxScan.Fail;
+begin
+  if FFailed then
+    Exit;
+  FFailed := True;
+  FErrLine := FLine;
+  FErrCol := FCol;
+end;
+
+procedure TJsonSyntaxScan.SkipWs;
+begin
+  while (not AtEnd) and ((Cur = ' ') or (Cur = #9) or (Cur = #10) or (Cur = #13)) do
+    Advance;
+end;
+
+procedure TJsonSyntaxScan.ParseLiteral(const ALiteral: string);
+var
+  I: Integer;
+begin
+  if FFailed then
+    Exit;
+  for I := 1 to Length(ALiteral) do
+  begin
+    if AtEnd or (Cur <> ALiteral[I]) then
+    begin
+      Fail;
+      Exit;
+    end;
+    Advance;
+  end;
+  if (not AtEnd) and IsIdentChar(Cur) then
+    Fail;
+end;
+
+procedure TJsonSyntaxScan.ParseNumber;
+begin
+  if FFailed then
+    Exit;
+  if (not AtEnd) and (Cur = '-') then
+    Advance;
+  if AtEnd or not IsDigit(Cur) then
+  begin
+    Fail;
+    Exit;
+  end;
+  while (not AtEnd) and IsDigit(Cur) do
+    Advance;
+  if (not AtEnd) and (Cur = '.') then
+  begin
+    Advance;
+    if AtEnd or not IsDigit(Cur) then
+    begin
+      Fail;
+      Exit;
+    end;
+    while (not AtEnd) and IsDigit(Cur) do
+      Advance;
+  end;
+  if (not AtEnd) and ((Cur = 'e') or (Cur = 'E')) then
+  begin
+    Advance;
+    if (not AtEnd) and ((Cur = '+') or (Cur = '-')) then
+      Advance;
+    if AtEnd or not IsDigit(Cur) then
+    begin
+      Fail;
+      Exit;
+    end;
+    while (not AtEnd) and IsDigit(Cur) do
+      Advance;
+  end;
+end;
+
+procedure TJsonSyntaxScan.ParseString;
+var
+  LHex: Integer;
+begin
+  if FFailed then
+    Exit;
+  if AtEnd or (Cur <> '"') then
+  begin
+    Fail;
+    Exit;
+  end;
+  Advance;
+  while not AtEnd do
+  begin
+    if Cur = '"' then
+    begin
+      Advance;
+      Exit;
+    end;
+    if (Cur = #10) or (Cur = #13) then
+    begin
+      Fail;
+      Exit;
+    end;
+    if Cur = '\' then
+    begin
+      Advance;
+      if AtEnd then
+      begin
+        Fail;
+        Exit;
+      end;
+      if Cur = 'u' then
+      begin
+        Advance;
+        for LHex := 1 to 4 do
+        begin
+          if AtEnd or not (IsDigit(Cur) or
+            ((Cur >= 'a') and (Cur <= 'f')) or
+            ((Cur >= 'A') and (Cur <= 'F'))) then
+          begin
+            Fail;
+            Exit;
+          end;
+          Advance;
+        end;
+      end
+      else
+        Advance;
+      Continue;
+    end;
+    Advance;
+  end;
+  Fail;
+end;
+
+procedure TJsonSyntaxScan.ParseObject;
+begin
+  if FFailed then
+    Exit;
+  Advance;
+  SkipWs;
+  if (not AtEnd) and (Cur = '}') then
+  begin
+    Advance;
+    Exit;
+  end;
+  while not FFailed do
+  begin
+    if AtEnd or (Cur <> '"') then
+    begin
+      Fail;
+      Exit;
+    end;
+    ParseString;
+    if FFailed then
+      Exit;
+    SkipWs;
+    if AtEnd or (Cur <> ':') then
+    begin
+      Fail;
+      Exit;
+    end;
+    Advance;
+    ParseValue;
+    if FFailed then
+      Exit;
+    SkipWs;
+    if AtEnd then
+    begin
+      Fail;
+      Exit;
+    end;
+    if Cur = '}' then
+    begin
+      Advance;
+      Exit;
+    end;
+    if Cur <> ',' then
+    begin
+      Fail;
+      Exit;
+    end;
+    Advance;
+    SkipWs;
+  end;
+end;
+
+procedure TJsonSyntaxScan.ParseArray;
+begin
+  if FFailed then
+    Exit;
+  Advance;
+  SkipWs;
+  if (not AtEnd) and (Cur = ']') then
+  begin
+    Advance;
+    Exit;
+  end;
+  while not FFailed do
+  begin
+    ParseValue;
+    if FFailed then
+      Exit;
+    SkipWs;
+    if AtEnd then
+    begin
+      Fail;
+      Exit;
+    end;
+    if Cur = ']' then
+    begin
+      Advance;
+      Exit;
+    end;
+    if Cur <> ',' then
+    begin
+      Fail;
+      Exit;
+    end;
+    Advance;
+    SkipWs;
+  end;
+end;
+
+procedure TJsonSyntaxScan.ParseValue;
+begin
+  if FFailed then
+    Exit;
+  SkipWs;
+  if AtEnd then
+  begin
+    Fail;
+    Exit;
+  end;
+  case Cur of
+    '{': ParseObject;
+    '[': ParseArray;
+    '"': ParseString;
+    't': ParseLiteral('true');
+    'f': ParseLiteral('false');
+    'n': ParseLiteral('null');
+    '-', '0'..'9': ParseNumber;
+  else
+    Fail;
+  end;
+end;
+
+procedure TJsonSyntaxScan.Run;
+begin
+  ParseValue;
+  if FFailed then
+    Exit;
+  SkipWs;
+  if not AtEnd then
+    Fail;
+end;
+
+function TJsonSyntaxScan.HasError: Boolean;
+begin
+  Result := FFailed;
+end;
+
+function TJsonSyntaxScan.ErrorLine: Integer;
+begin
+  Result := FErrLine;
+end;
+
+function TJsonSyntaxScan.ErrorColumn: Integer;
+begin
+  Result := FErrCol;
+end;
+
+function DescribeInvalidJson(const AJson, ASourceName: string): string;
+var
+  LScan: TJsonSyntaxScan;
+begin
+  LScan := TJsonSyntaxScan.Create(AJson);
+  try
+    LScan.Run;
+    if LScan.HasError then
+    begin
+      if ASourceName = '' then
+        Result := 'Invalid JSON at line ' + IntToStr(LScan.ErrorLine) +
+          ', position ' + IntToStr(LScan.ErrorColumn)
+      else
+        Result := 'Invalid JSON in "' + ASourceName + '" at line ' +
+          IntToStr(LScan.ErrorLine) + ', position ' + IntToStr(LScan.ErrorColumn);
+    end
+    else if ASourceName = '' then
+      Result := 'Invalid JSON'
+    else
+      Result := 'Invalid JSON in "' + ASourceName + '"';
+  finally
+    LScan.Free;
+  end;
+end;
+
+procedure WarnSharedPrefixes(const AManifest: TComponentManifest;
+  AWarnings: TList<string>);
+var
+  LOrder: TList<string>;
+  LGroups: TObjectDictionary<string, TList<Integer>>;
+  LShown: TDictionary<string, string>;
+  LIndexes: TList<Integer>;
+  LNames: TArray<string>;
+  LKey: string;
+  I, J: Integer;
+
+  function ComponentLabel(AIndex: Integer): string;
+  begin
+    Result := Trim(AManifest.Components[AIndex].Name);
+    if Result = '' then
+      Result := 'component[' + IntToStr(AIndex) + ']'
+    else
+      Result := '"' + Result + '"';
+  end;
+
+  function JoinLabels(const ALabels: TArray<string>): string;
+  var
+    K: Integer;
+  begin
+    Result := '';
+    for K := 0 to High(ALabels) do
+    begin
+      if K = 0 then
+        Result := ALabels[K]
+      else if K = High(ALabels) then
+        Result := Result + ' and ' + ALabels[K]
+      else
+        Result := Result + ', ' + ALabels[K];
+    end;
+  end;
+
+begin
+  LOrder := TList<string>.Create;
+  LGroups := TObjectDictionary<string, TList<Integer>>.Create([doOwnsValues]);
+  LShown := TDictionary<string, string>.Create;
+  try
+    for I := 0 to High(AManifest.Components) do
+      for J := 0 to High(AManifest.Components[I].Prefixes) do
+      begin
+        LKey := LowerCase(AManifest.Components[I].Prefixes[J]);
+        if LKey = '' then
+          Continue;
+        if not LGroups.TryGetValue(LKey, LIndexes) then
+        begin
+          LIndexes := TList<Integer>.Create;
+          LGroups.Add(LKey, LIndexes);
+          LOrder.Add(LKey);
+          LShown.Add(LKey, AManifest.Components[I].Prefixes[J]);
+        end;
+        if LIndexes.IndexOf(I) < 0 then
+          LIndexes.Add(I);
+      end;
+
+    for I := 0 to LOrder.Count - 1 do
+    begin
+      LKey := LOrder[I];
+      LIndexes := LGroups[LKey];
+      if LIndexes.Count < 2 then
+        Continue;
+      SetLength(LNames, LIndexes.Count);
+      for J := 0 to LIndexes.Count - 1 do
+        LNames[J] := ComponentLabel(LIndexes[J]);
+      AddWarning(AWarnings, 'units_prefix "' + LShown[LKey] +
+        '" is shared by ' + JoinLabels(LNames) +
+        '. Units that start with it are assigned to ' + LNames[0] +
+        ', the first row in the file. Use units_exact or a more specific ' +
+        'units_prefix for the other rows.');
+    end;
+  finally
+    LShown.Free;
+    LGroups.Free;
+    LOrder.Free;
+  end;
+end;
+
 function ParseComponentManifest(const AJson, ASourceName: string;
   out AManifest: TComponentManifest; out AError: string): Boolean;
 var
@@ -1134,7 +1623,7 @@ begin
   LValue := TJSONObject.ParseJSONValue(AJson);
   if LValue = nil then
   begin
-    AError := 'Invalid JSON';
+    AError := DescribeInvalidJson(AJson, ASourceName);
     Exit;
   end;
 
@@ -1159,6 +1648,7 @@ begin
     begin
       AManifest.Loaded := True;
       AManifest.SourcePath := ASourceName;
+      WarnSharedPrefixes(AManifest, LWarnings);
       // Relative folders are resolved from the components file. A label such
       // as "test" has no directory, so only absolute folders apply then.
       ResolveManifestFolders(AManifest, LWarnings, BaseDirFromSourceName(ASourceName));
@@ -1330,7 +1820,8 @@ var
   LBestLength: Integer;
 begin
   // The longest matching prefix wins, whatever the row order, so "Neslib.Xml"
-  // beats "Neslib" (issue #129). On equal length the first row wins.
+  // beats "Neslib" (issue #129). A prefix matches the start of the unit name.
+  // A trailing dot is not required. On equal length the first row wins.
   Result := -1;
   LBestLength := 0;
   LLower := LowerCase(AUnitName);
@@ -1500,6 +1991,50 @@ begin
   if IsOwnCodePrefix(AManifest, AUnitName) or
     ((not SameText(LStripped, AUnitName)) and IsOwnCodePrefix(AManifest, LStripped)) then
     Result.Kind := mmOwnCode;
+end;
+
+function ArtefactListHasUnit(const AArtefacts: TArtefactList;
+  const AUnitName: string): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  if not Assigned(AArtefacts) then
+    Exit;
+  for I := 0 to AArtefacts.Count - 1 do
+    if SameText(ArtefactUnitName(AArtefacts[I]), AUnitName) then
+      Exit(True);
+end;
+
+function TryAddNameOnlyLibraryUnit(const AManifest: TComponentManifest;
+  const AUnitName, AOrigin, AEvidence, AConfidence: string;
+  const AArtefacts: TArtefactList): Boolean;
+var
+  LName: string;
+  LArtefact: TArtefactInfo;
+  LMatch: TManifestMatch;
+begin
+  Result := False;
+  if not AManifest.Loaded or not Assigned(AArtefacts) then
+    Exit;
+  LName := Trim(AUnitName);
+  if LName = '' then
+    Exit;
+  if ArtefactListHasUnit(AArtefacts, LName) then
+    Exit;
+  LMatch := MatchManifestUnit(AManifest, LName);
+  if LMatch.Kind <> mmLibrary then
+    Exit;
+  LArtefact := Default(TArtefactInfo);
+  LArtefact.UnitName := LName;
+  LArtefact.RelativePath := LName + '.pas';
+  LArtefact.ArtefactType := 'unit-evidence';
+  LArtefact.Origin := AOrigin;
+  LArtefact.Evidence := AEvidence;
+  LArtefact.Confidence := AConfidence;
+  LArtefact.FileSize := -1;
+  AArtefacts.Add(LArtefact);
+  Result := True;
 end;
 
 function BuildManifestPlan(const AManifest: TComponentManifest;
