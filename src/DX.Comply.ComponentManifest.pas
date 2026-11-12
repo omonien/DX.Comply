@@ -12,7 +12,10 @@
 /// units, the same way own_code_units names those units one by one.
 ///
 /// Licence values are classified as an SPDX identifier, an SPDX expression,
-/// or a plain name. A value that already starts with LicenseRef- stays a
+/// or a plain name. An expression is recognised only when every operand is
+/// a known SPDX id or a LicenseRef id, so English words such as "with",
+/// "and", and "or" do not turn a name into an expression. A value that
+/// already starts with LicenseRef- and is not such an expression stays a
 /// name, so CycloneDX writes license.name. The SPDX writers keep that
 /// prefix and only sanitize the id characters. Package URLs for manifest
 /// libraries use pkg:delphi, which
@@ -198,6 +201,9 @@ function StripDelphiScopePrefix(const AUnitName: string): string;
 
 /// <summary>
 /// Classifies a licence value. Recognised SPDX ids are returned in canonical case.
+/// OR, AND, and WITH make an expression only when each operand is a known
+/// SPDX id or a LicenseRef id. A name that merely contains those English
+/// words stays a name.
 /// </summary>
 function ClassifyLicence(const AValue: string; out ANormalised: string): TLicenceKind;
 
@@ -472,10 +478,142 @@ begin
   Result := AUnitName;
 end;
 
+function IsKnownSpdxId(const AToken: string): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := Low(cKnownSpdxIds) to High(cKnownSpdxIds) do
+    if SameText(AToken, cKnownSpdxIds[I]) then
+      Exit(True);
+end;
+
+function IsLicenseRefToken(const AToken: string): Boolean;
+const
+  cPrefix = 'LicenseRef-';
+var
+  LRest: string;
+  LIndex: Integer;
+begin
+  Result := False;
+  if not StartsText(cPrefix, AToken) then
+    Exit;
+  LRest := Copy(AToken, Length(cPrefix) + 1, MaxInt);
+  if LRest = '' then
+    Exit;
+  for LIndex := 1 to Length(LRest) do
+    if not CharInSet(LRest[LIndex], ['A'..'Z', 'a'..'z', '0'..'9', '.', '-']) then
+      Exit;
+  Result := True;
+end;
+
+function IsSpdxLicenceExpression(const AValue: string): Boolean;
+var
+  LPos: Integer;
+  LOperators: Integer;
+
+  function ParseExpr: Boolean; forward;
+
+  procedure SkipSpace;
+  begin
+    while (LPos <= Length(AValue)) and (AValue[LPos] = ' ') do
+      Inc(LPos);
+  end;
+
+  function AtEnd: Boolean;
+  begin
+    Result := LPos > Length(AValue);
+  end;
+
+  function StartsWithWord(const AWord: string): Boolean;
+  var
+    LNext: Integer;
+  begin
+    Result := False;
+    if not StartsText(AWord, Copy(AValue, LPos, Length(AWord))) then
+      Exit;
+    LNext := LPos + Length(AWord);
+    // "or" inside a longer token, such as GPL-2.0-or-later, is not an operator.
+    if (LNext <= Length(AValue)) and CharInSet(AValue[LNext],
+      ['A'..'Z', 'a'..'z', '0'..'9', '.', '-', '+']) then
+      Exit;
+    Result := True;
+  end;
+
+  function TakeOperator: Boolean;
+  var
+    LMark: Integer;
+  begin
+    LMark := LPos;
+    SkipSpace;
+    if StartsWithWord('OR') then
+      Inc(LPos, 2)
+    else if StartsWithWord('AND') then
+      Inc(LPos, 3)
+    else if StartsWithWord('WITH') then
+      Inc(LPos, 4)
+    else
+    begin
+      LPos := LMark;
+      Exit(False);
+    end;
+    Result := True;
+  end;
+
+  function ReadToken: string;
+  var
+    LStart: Integer;
+  begin
+    LStart := LPos;
+    while (LPos <= Length(AValue)) and CharInSet(AValue[LPos],
+      ['A'..'Z', 'a'..'z', '0'..'9', '.', '-', '+']) do
+      Inc(LPos);
+    Result := Copy(AValue, LStart, LPos - LStart);
+  end;
+
+  function ParseOperand: Boolean;
+  var
+    LToken: string;
+  begin
+    SkipSpace;
+    if AtEnd then
+      Exit(False);
+    if AValue[LPos] = '(' then
+    begin
+      Inc(LPos);
+      Result := ParseExpr;
+      SkipSpace;
+      if AtEnd or (AValue[LPos] <> ')') then
+        Exit(False);
+      Inc(LPos);
+      Exit;
+    end;
+    LToken := ReadToken;
+    Result := (LToken <> '') and (IsKnownSpdxId(LToken) or IsLicenseRefToken(LToken));
+  end;
+
+  function ParseExpr: Boolean;
+  begin
+    Result := ParseOperand;
+    while Result and TakeOperator do
+    begin
+      Inc(LOperators);
+      Result := ParseOperand;
+    end;
+  end;
+
+begin
+  // A single id, including one wrapped in parentheses, is not an expression.
+  LPos := 1;
+  LOperators := 0;
+  Result := ParseExpr;
+  SkipSpace;
+  Result := Result and AtEnd and (LOperators > 0);
+end;
+
 function ClassifyLicence(const AValue: string; out ANormalised: string): TLicenceKind;
 var
   I: Integer;
-  LPadded: string;
 begin
   ANormalised := Trim(AValue);
   if ANormalised = '' then
@@ -488,8 +626,9 @@ begin
       Exit(lkSpdxId);
     end;
 
-  LPadded := ' ' + UpperCase(ANormalised) + ' ';
-  if LPadded.Contains(' OR ') or LPadded.Contains(' AND ') or LPadded.Contains(' WITH ') then
+  // "Freeware with source" and "Free and open" contain the operator words
+  // but the operands are not SPDX ids, so they stay names and are sanitized.
+  if IsSpdxLicenceExpression(ANormalised) then
     Exit(lkExpression);
 
   Result := lkName;

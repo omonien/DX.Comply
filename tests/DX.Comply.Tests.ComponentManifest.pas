@@ -853,6 +853,17 @@ begin
   Assert.AreEqual('MPL-1.1 OR LGPL-2.1-or-later', LValue);
   LKind := ClassifyLicence('mit and apache-2.0', LValue);
   Assert.AreEqual(Ord(lkExpression), Ord(LKind));
+  LKind := ClassifyLicence('LicenseRef-Mine OR MIT', LValue);
+  Assert.AreEqual(Ord(lkExpression), Ord(LKind));
+  Assert.AreEqual('LicenseRef-Mine OR MIT', LValue);
+  LKind := ClassifyLicence('(MIT OR Apache-2.0) AND GPL-2.0-only', LValue);
+  Assert.AreEqual(Ord(lkExpression), Ord(LKind));
+  LKind := ClassifyLicence('LicenseRef-Freeware with source', LValue);
+  Assert.AreEqual(Ord(lkName), Ord(LKind), 'English "with" is not an operator');
+  LKind := ClassifyLicence('Freeware with source', LValue);
+  Assert.AreEqual(Ord(lkName), Ord(LKind));
+  LKind := ClassifyLicence('Free and open', LValue);
+  Assert.AreEqual(Ord(lkName), Ord(LKind));
 end;
 
 procedure TComponentManifestTests.Licence_Commercial_IsName;
@@ -892,6 +903,13 @@ begin
   Assert.AreEqual('licenseref-Proprietary', SpdxLicenceTokenFor('  licenseref-Proprietary  ', LKind));
   Assert.AreEqual('LicenseRef-Freeware-with-source',
     SpdxLicenceTokenFor('LicenseRef-Freeware with source', LKind));
+  Assert.AreEqual(Ord(lkName), Ord(LKind));
+  Assert.AreEqual('LicenseRef-Freeware-with-source',
+    SpdxLicenceTokenFor('Freeware with source', LKind));
+  Assert.AreEqual(Ord(lkName), Ord(LKind));
+  Assert.AreEqual('LicenseRef-Free-and-open',
+    SpdxLicenceTokenFor('Free and open', LKind));
+  Assert.AreEqual(Ord(lkName), Ord(LKind));
   Assert.AreEqual('LicenseRef-Proprietary', SpdxLicenceTokenFor('Proprietary', LKind));
   Assert.AreEqual('LicenseRef-Custom', SpdxLicenceTokenFor('LicenseRef-', LKind));
   Assert.AreEqual('LicenseRef-Custom', SpdxLicenceTokenFor('!!!', LKind));

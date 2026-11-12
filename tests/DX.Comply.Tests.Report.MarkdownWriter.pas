@@ -337,7 +337,7 @@ begin
   Assert.IsTrue(Pos('| Declared licence | Components | Name | Version | Copyright | Note |', LContent) > 0);
   Assert.AreEqual(0, Pos('| Declared licence | Components | Names | Note |', LContent));
   Assert.IsTrue(Pos('| Proprietary | 2 | Demo (product) |  |  |  |', LContent) > 0);
-  Assert.IsTrue(Pos('| | | Demo.exe |  |  | |', LContent) > 0);
+  Assert.IsTrue(Pos('| | | Demo.exe | 1.2.3.4 |  | |', LContent) > 0);
   Assert.IsTrue(Pos('| No licence information | 1 | JvComponent |  |  |  |', LContent) > 0);
   Assert.IsTrue(Pos('## Third-party units without manifest', LContent) > 0);
   Assert.IsTrue(Pos('| Jv | 1 | supplier, version, licence | JvComponent |', LContent) > 0);

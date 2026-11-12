@@ -395,7 +395,7 @@ begin
   Assert.AreEqual(0, Pos('<th>Names</th><th>Note</th>', LContent));
   Assert.IsTrue(Pos('<td rowspan="2">Proprietary</td><td rowspan="2">2</td><td>Demo (product)</td><td></td><td></td><td rowspan="2"></td>',
     LContent) > 0);
-  Assert.IsTrue(Pos('<tr><td>Demo.dll</td><td></td><td></td></tr>', LContent) > 0);
+  Assert.IsTrue(Pos('<tr><td>Demo.dll</td><td>2.0.0.1</td><td></td></tr>', LContent) > 0);
   Assert.IsTrue(Pos('<td>No licence information</td><td>1</td><td>JvComponent</td><td></td><td></td><td></td>',
     LContent) > 0);
   Assert.IsTrue(Pos('<section id="third-party-units-without-manifest">', LContent) > 0);
