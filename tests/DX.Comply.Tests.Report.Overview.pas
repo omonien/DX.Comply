@@ -322,6 +322,9 @@ end;
 procedure TReportOverviewTests.Licences_EmbarcaderoUnits_UseOriginLabel;
 begin
   FData.Metadata.Licence := 'MIT';
+  // Demo.exe is the product. vendor.dll is then a neighboring file.
+  FData.ProjectInfo.ProjectName := 'Demo';
+  AddFile('Demo.exe', 'application');
   AddUnit('System.SysUtils', 'Embarcadero RTL');
   AddUnit('Winapi.Windows', 'Embarcadero RTL');
   AddUnit('Vcl.Forms', 'Embarcadero VCL');
@@ -330,7 +333,7 @@ begin
   AddFile('vendor.dll', 'library');
   var LOverview := BuildReportOverview(FData);
   var LRtl := FindLicence(LOverview.Licences, 'Embarcadero RTL');
-  Assert.AreEqual(NativeInt(2), NativeInt(LRtl.Count));
+  Assert.AreEqual(NativeInt(2), NativeInt(LRtl.Count), LicenceNames(LRtl));
   Assert.IsTrue(Pos('System.SysUtils', LicenceNames(LRtl)) > 0);
   Assert.IsTrue(Pos('Winapi.Windows', LicenceNames(LRtl)) > 0);
   var LVcl := FindLicence(LOverview.Licences, 'Embarcadero VCL');

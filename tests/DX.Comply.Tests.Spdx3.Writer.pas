@@ -20,6 +20,7 @@ interface
 
 uses
   System.SysUtils,
+  System.Generics.Collections,
   System.IOUtils,
   System.JSON,
   System.RegularExpressions,

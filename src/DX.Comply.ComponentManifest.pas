@@ -2155,10 +2155,13 @@ var
   LMatch: TManifestMatch;
 begin
   LProduct := Trim(AProductLicence);
-  if AIsDeliverable then
+  Result := '';
+  // A deliverable match applies to the built program. A unit keeps the
+  // own-code and origin rules below.
+  if AIsDeliverable and
+    not SameText(AArtefact.ArtefactType, 'unit-evidence') then
     Exit(LProduct);
 
-  Result := '';
   if not SameText(AArtefact.ArtefactType, 'unit-evidence') then
     Exit;
 
