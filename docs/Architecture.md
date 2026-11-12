@@ -106,6 +106,8 @@ Every unit found in the MAP file is classified by origin:
 | Local project | Resolved path under the project directory or under a project search path outside the Delphi folder, a DCU in the output folder without a source elsewhere in the search path, or no known Embarcadero namespace. A DCU in the output folder takes the origin of its `.pas` when that source is found in the search path |
 | Third party | Resolved path outside the project and outside the Embarcadero folders, including other folders below the Delphi root such as `Extras` |
 
+A unit whose origin is Embarcadero RTL, Embarcadero VCL or Embarcadero FMX carries that label as its licence in the HTML and Markdown reports and in CycloneDX and SPDX. Own-code units carry `product.licence` when it is set. When it is not set, an Embarcadero unit still uses its origin label and other own-code units stay without a licence.
+
 ## SBOM output structure
 
 Each resolved unit is emitted as a CycloneDX `component` with `type: "library"`, carrying:

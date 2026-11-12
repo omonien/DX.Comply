@@ -222,6 +222,13 @@ type
     /// </summary>
     [Test]
     procedure Write_ProductLicence_OnUntypedProjectExe;
+    /// <summary>
+    /// Embarcadero units carry their origin label. Own-code units carry the
+    /// product licence. A third-party unit and a neighboring file do not.
+    /// Issues #165 and #166.
+    /// </summary>
+    [Test]
+    procedure Write_UnitLicences_EmbarcaderoAndOwnCode;
   end;
 
 implementation
@@ -1215,6 +1222,111 @@ begin
     LComponent := (LJson.GetValue('metadata') as TJSONObject).GetValue('component') as TJSONObject;
     Assert.IsNull(LComponent.GetValue('licenses'),
       'An empty licence writes no licenses element');
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TCycloneDxWriterTests.Write_UnitLicences_EmbarcaderoAndOwnCode;
+var
+  LJson, LComponent: TJSONObject;
+  LComponents: TJSONArray;
+  LUnit: TArtefactInfo;
+
+  function ComponentNamed(const AName: string): TJSONObject;
+  var
+    I: Integer;
+  begin
+    Result := nil;
+    for I := 0 to LComponents.Count - 1 do
+      if SameText(TJSONObject(LComponents.Items[I]).GetValue<string>('name'), AName) then
+        Exit(TJSONObject(LComponents.Items[I]));
+  end;
+
+  function LicenceText(AComponent: TJSONObject): string;
+  var
+    LLicences: TJSONArray;
+    LChoice, LLicence: TJSONObject;
+  begin
+    Result := '';
+    if not (AComponent.GetValue('licenses') is TJSONArray) then
+      Exit;
+    LLicences := TJSONArray(AComponent.GetValue('licenses'));
+    if LLicences.Count = 0 then
+      Exit;
+    LChoice := LLicences.Items[0] as TJSONObject;
+    if LChoice.GetValue('expression') <> nil then
+      Exit(LChoice.GetValue<string>('expression'));
+    LLicence := LChoice.GetValue('license') as TJSONObject;
+    if LLicence = nil then
+      Exit;
+    if LLicence.GetValue('id') <> nil then
+      Exit(LLicence.GetValue<string>('id'));
+    if LLicence.GetValue('name') <> nil then
+      Result := LLicence.GetValue<string>('name');
+  end;
+
+  procedure AddUnit(const AName, AOrigin, ASource: string);
+  begin
+    LUnit := MakeArtefact(AName, 'unit-evidence', 'abcd1234ef', 32);
+    LUnit.Origin := AOrigin;
+    LUnit.SourcePath := ASource;
+    FArtefacts.Add(LUnit);
+  end;
+
+begin
+  FMetadata.Licence := 'MIT';
+  FMetadata.ComponentManifestJson :=
+    '{"components":[{"name":"Wrapped","version":"1","vendor":"A","licence":"Apache-2.0",' +
+    '"type":"library","units_exact":["Data.DB"]}],' +
+    '"own_code_units":["MainForm"],"own_code_prefixes":["App"],' +
+    '"own_code_folders":["' +
+    StringReplace('C:\DXComplyFolderTest\src', '\', '\\', [rfReplaceAll]) + '"]}';
+  FArtefacts.Add(MakeArtefact('TestApp.exe', 'application', 'abcd1234ef', 1024));
+  AddUnit('System.SysUtils.pas', 'Embarcadero RTL', '');
+  AddUnit('Vcl.Forms.pas', 'Embarcadero VCL', '');
+  AddUnit('FMX.Forms.pas', 'Embarcadero FMX', '');
+  AddUnit('MainForm.pas', 'Local project', '');
+  AddUnit('AppSettings.pas', 'Local project', '');
+  AddUnit('Helper.pas', 'Local project', 'C:\DXComplyFolderTest\src\Helper.pas');
+  AddUnit('LocalOnly.pas', 'Local project', '');
+  AddUnit('Data.DB.pas', 'Embarcadero RTL', '');
+  FArtefacts.Add(MakeArtefact('vendor.dll', 'library', 'abcd1234ef', 64));
+  Assert.IsTrue(FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  Assert.IsTrue(FWriter.Validate(TFile.ReadAllText(FOutputFile, TEncoding.UTF8)));
+  LJson := LoadOutputJson;
+  Assert.IsNotNull(LJson);
+  try
+    LComponents := LJson.GetValue('components') as TJSONArray;
+    Assert.AreEqual('MIT', LicenceText(ComponentNamed('TestApp.exe')));
+    LComponent := ComponentNamed('System.SysUtils.pas');
+    Assert.AreEqual('Embarcadero RTL', LicenceText(LComponent));
+    Assert.IsTrue(Pos('"hashes"', LComponent.ToJSON) < Pos('"licenses"', LComponent.ToJSON),
+      'The unit licence follows the hashes');
+    Assert.AreEqual('Embarcadero VCL', LicenceText(ComponentNamed('Vcl.Forms.pas')));
+    Assert.AreEqual('Embarcadero FMX', LicenceText(ComponentNamed('FMX.Forms.pas')));
+    Assert.AreEqual('MIT', LicenceText(ComponentNamed('MainForm.pas')));
+    Assert.AreEqual('MIT', LicenceText(ComponentNamed('AppSettings.pas')));
+    Assert.AreEqual('MIT', LicenceText(ComponentNamed('Helper.pas')));
+    Assert.IsNull(ComponentNamed('LocalOnly.pas').GetValue('licenses'));
+    Assert.IsNull(ComponentNamed('vendor.dll').GetValue('licenses'));
+    Assert.IsNull(ComponentNamed('Data.DB.pas').GetValue('licenses'),
+      'A unit matched to a manifest library does not also take the origin label');
+    Assert.AreEqual('Apache-2.0', LicenceText(ComponentNamed('Wrapped')));
+  finally
+    LJson.Free;
+  end;
+
+  FMetadata.Licence := '';
+  Assert.IsTrue(FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LJson := LoadOutputJson;
+  Assert.IsNotNull(LJson);
+  try
+    LComponents := LJson.GetValue('components') as TJSONArray;
+    Assert.IsNull(ComponentNamed('TestApp.exe').GetValue('licenses'));
+    Assert.IsNull(ComponentNamed('MainForm.pas').GetValue('licenses'),
+      'Own code stays without a licence when the product licence is empty');
+    Assert.AreEqual('Embarcadero RTL', LicenceText(ComponentNamed('System.SysUtils.pas')));
   finally
     LJson.Free;
   end;

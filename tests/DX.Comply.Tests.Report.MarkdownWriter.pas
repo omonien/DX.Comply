@@ -84,6 +84,13 @@ type
     /// </summary>
     [Test]
     procedure Write_LicenceTable_OneRowPerComponent;
+    /// <summary>
+    /// The Markdown heading starts with the project name, matching the HTML
+    /// title. The product name is used when the project name is empty.
+    /// Issue #167.
+    /// </summary>
+    [Test]
+    procedure Write_Heading_PrefixesProjectName;
   end;
 
 implementation
@@ -216,7 +223,7 @@ begin
   Assert.IsTrue(TFile.Exists(FOutputPath));
 
   LContent := TFile.ReadAllText(FOutputPath, TEncoding.UTF8);
-  Assert.IsTrue(Pos('# DX.Comply SBOM Report', LContent) > 0);
+  Assert.IsTrue(Pos('# Demo - DX.Comply SBOM Report', LContent) > 0);
   Assert.IsTrue(Pos('This report lists the units, packages and DLL names DX.Comply could see in the build', LContent) > 0);
   Assert.IsTrue(Pos('Internal structural check passed', LContent) > 0);
   Assert.IsTrue(Pos('## Report Context', LContent) > 0);
@@ -399,6 +406,31 @@ begin
     LContent) > 0, 'a one-component group keeps the review note on its row');
   Assert.IsTrue(Pos('| Proprietary | 2 | Demo (product) |  |  |  |', LContent) > 0);
   Assert.IsTrue(LVsoft < Pos('| MPL-1.1 | 1 | JVCL |', LContent), 'licence groups stay in title order');
+end;
+
+procedure TMarkdownReportWriterTests.Write_Heading_PrefixesProjectName;
+var
+  LWriter: IHumanReadableReportWriter;
+  LContent: string;
+begin
+  FData.ProjectInfo.ProjectName := 'XmlConvert';
+  FData.Metadata.ProductName := 'Ignored';
+  LWriter := TMarkdownReportWriter.Create;
+  Assert.IsTrue(LWriter.Write(FOutputPath, FData, THumanReadableReportConfig.Default));
+  LContent := TFile.ReadAllText(FOutputPath, TEncoding.UTF8);
+  Assert.IsTrue(Pos('# XmlConvert - DX.Comply SBOM Report', LContent) > 0);
+
+  FData.ProjectInfo.ProjectName := '';
+  FData.Metadata.ProductName := 'Catalog';
+  Assert.IsTrue(LWriter.Write(FOutputPath, FData, THumanReadableReportConfig.Default));
+  LContent := TFile.ReadAllText(FOutputPath, TEncoding.UTF8);
+  Assert.IsTrue(Pos('# Catalog - DX.Comply SBOM Report', LContent) > 0);
+
+  FData.Metadata.ProductName := '';
+  Assert.IsTrue(LWriter.Write(FOutputPath, FData, THumanReadableReportConfig.Default));
+  LContent := TFile.ReadAllText(FOutputPath, TEncoding.UTF8);
+  Assert.IsTrue(Pos('# DX.Comply SBOM Report', LContent) > 0);
+  Assert.AreEqual(0, Pos('#  - DX.Comply', LContent));
 end;
 
 initialization

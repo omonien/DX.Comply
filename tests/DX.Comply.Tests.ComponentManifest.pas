@@ -144,6 +144,20 @@ type
     procedure Licence_Expression_IsExpression;
     [Test]
     procedure Licence_Commercial_IsName;
+    /// <summary>
+    /// Embarcadero RTL, VCL and FMX units use that origin label as their
+    /// licence. Another file keeps none. Issue #165.
+    /// </summary>
+    [Test]
+    procedure ComponentLicence_EmbarcaderoOrigin_UsesOriginLabel;
+    /// <summary>
+    /// own_code_units, own_code_prefixes and own_code_folders inherit the
+    /// product licence. With no product licence they stay empty, except an
+    /// Embarcadero unit, which keeps its origin label. A library row leaves
+    /// the unit empty. Issue #166.
+    /// </summary>
+    [Test]
+    procedure ComponentLicence_OwnCode_UsesProductLicence;
 
     [Test]
     procedure Purl_EncodesSpaceAsPercent20;
@@ -761,6 +775,88 @@ begin
   Assert.AreEqual('Proprietary', LValue);
   LKind := ClassifyLicence('', LValue);
   Assert.AreEqual(Ord(lkNone), Ord(LKind));
+end;
+
+procedure TComponentManifestTests.ComponentLicence_EmbarcaderoOrigin_UsesOriginLabel;
+var
+  LUnit, LFile: TArtefactInfo;
+  LManifest: TComponentManifest;
+begin
+  LManifest := Default(TComponentManifest);
+  LUnit := Default(TArtefactInfo);
+  LUnit.RelativePath := 'System.SysUtils.pas';
+  LUnit.ArtefactType := 'unit-evidence';
+  LUnit.Origin := 'Embarcadero RTL';
+  Assert.AreEqual('Embarcadero RTL', ComponentLicenceFor(LUnit, False, 'MIT', LManifest));
+  LUnit.RelativePath := 'Winapi.Windows.pas';
+  Assert.AreEqual('Embarcadero RTL', ComponentLicenceFor(LUnit, False, '', LManifest),
+    'Other Embarcadero units use the same origin label');
+  LUnit.RelativePath := 'Vcl.Forms.pas';
+  LUnit.Origin := 'Embarcadero VCL';
+  Assert.AreEqual('Embarcadero VCL', ComponentLicenceFor(LUnit, False, '', LManifest));
+  LUnit.RelativePath := 'FMX.Forms.pas';
+  LUnit.Origin := 'Embarcadero FMX';
+  Assert.AreEqual('Embarcadero FMX', ComponentLicenceFor(LUnit, False, 'MIT', LManifest));
+  LUnit.Origin := 'Third party';
+  Assert.AreEqual('', ComponentLicenceFor(LUnit, False, 'MIT', LManifest));
+  LFile := Default(TArtefactInfo);
+  LFile.RelativePath := 'vendor.dll';
+  LFile.ArtefactType := 'library';
+  LFile.Origin := 'Embarcadero RTL';
+  Assert.AreEqual('', ComponentLicenceFor(LFile, False, 'MIT', LManifest),
+    'A file that is not unit evidence does not take the origin label');
+end;
+
+procedure TComponentManifestTests.ComponentLicence_OwnCode_UsesProductLicence;
+var
+  LManifest: TComponentManifest;
+  LUnit, LExe: TArtefactInfo;
+begin
+  LManifest := ParseManifest(
+    '{"components":[{"name":"Wrapped","version":"1","vendor":"A","licence":"MIT",' +
+    '"type":"library","units_exact":["Data.DB"]}],' +
+    '"own_code_units":["MainForm","System.SysUtils"],' +
+    '"own_code_prefixes":["App"],' +
+    '"own_code_folders":["' + JsonPath('C:\DXComplyFolderTest\src') + '"]}');
+
+  LUnit := Default(TArtefactInfo);
+  LUnit.ArtefactType := 'unit-evidence';
+  LUnit.Origin := 'Local project';
+  LUnit.RelativePath := 'MainForm.pas';
+  Assert.AreEqual('Apache-2.0', ComponentLicenceFor(LUnit, False, 'Apache-2.0', LManifest));
+  LUnit.RelativePath := 'AppSettings.pas';
+  Assert.AreEqual('Apache-2.0', ComponentLicenceFor(LUnit, False, ' Apache-2.0 ', LManifest),
+    'An own_code_prefixes unit inherits the trimmed product licence');
+  LUnit.RelativePath := 'Helper.pas';
+  LUnit.SourcePath := 'C:\DXComplyFolderTest\src\Helper.pas';
+  Assert.AreEqual('Apache-2.0', ComponentLicenceFor(LUnit, False, 'Apache-2.0', LManifest),
+    'An own_code_folders unit inherits the product licence');
+  LUnit.SourcePath := '';
+  LUnit.RelativePath := 'LocalOnly.pas';
+  Assert.AreEqual('', ComponentLicenceFor(LUnit, False, 'Apache-2.0', LManifest),
+    'A local unit that is not own code stays without a licence');
+
+  LUnit.RelativePath := 'System.SysUtils.pas';
+  LUnit.Origin := 'Embarcadero RTL';
+  Assert.AreEqual('Apache-2.0', ComponentLicenceFor(LUnit, False, 'Apache-2.0', LManifest),
+    'Own code wins over the Embarcadero origin when a product licence is set');
+  Assert.AreEqual('Embarcadero RTL', ComponentLicenceFor(LUnit, False, '', LManifest),
+    'Without a product licence an Embarcadero own-code unit keeps its origin label');
+  LUnit.RelativePath := 'MainForm.pas';
+  LUnit.Origin := 'Local project';
+  Assert.AreEqual('', ComponentLicenceFor(LUnit, False, '', LManifest),
+    'Without a product licence other own-code units stay empty');
+
+  LUnit.RelativePath := 'Data.DB.pas';
+  LUnit.Origin := 'Embarcadero RTL';
+  Assert.AreEqual('', ComponentLicenceFor(LUnit, False, 'Apache-2.0', LManifest),
+    'A manifest library keeps the unit licence empty');
+
+  LExe := Default(TArtefactInfo);
+  LExe.RelativePath := 'Demo.exe';
+  LExe.ArtefactType := 'application';
+  Assert.AreEqual('MIT', ComponentLicenceFor(LExe, True, ' MIT ', LManifest));
+  Assert.AreEqual('', ComponentLicenceFor(LExe, True, '', LManifest));
 end;
 
 procedure TComponentManifestTests.Purl_EncodesSpaceAsPercent20;

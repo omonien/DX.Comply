@@ -287,15 +287,17 @@ var
   Lines: TStringList;
   LFormalSbomReference: string;
   LWarningsCount: Integer;
+  LTitle: string;
 begin
   ForceDirectories(TPath.GetDirectoryName(AOutputPath));
   LWarningsCount := 0;
   if Assigned(AData.Warnings) then
     LWarningsCount := AData.Warnings.Count;
   LFormalSbomReference := RelativeOutputReference(AOutputPath, AData.SbomOutputPath);
+  LTitle := HumanReadableReportTitle(AData.ProjectInfo.ProjectName, AData.Metadata.ProductName);
   Lines := TStringList.Create;
   try
-    Lines.Add('# ' + HumanReadableReportTitle);
+    Lines.Add('# ' + LTitle);
     Lines.Add('');
     Lines.Add('_' + HumanReadableReportSubtitle + '_');
     Lines.Add('');

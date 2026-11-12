@@ -11,6 +11,8 @@
 /// (third-party units without manifest) and #157 (the log line is omitted
 /// when no unit is missing). Issue #156 lists each component of a
 /// licence group on its own row, with the manifest version and copyright.
+/// Embarcadero units use their origin label as the licence (issue #165).
+/// Own-code units use the product licence when one is set (issue #166).
 /// </remarks>
 ///
 /// <copyright>
@@ -537,11 +539,16 @@ begin
         var LArtefact := AData.Artefacts[i];
         var LName := ArtefactDisplayName(LArtefact);
         LOrigins.Add(OriginTitle(LArtefact), LName);
-        // Units in a manifest library are covered by the library's licence.
-        if IsSameDeliverableFile(AData.Artefacts, i, LDeliverable) and
-          (Trim(AData.Metadata.Licence) <> '') then
+        // The built program uses the product licence. Own-code units do too
+        // when that licence is set. Embarcadero units use their origin label.
+        // A manifest library covers its units, so those units are not listed
+        // again here (issues #131, #155, #165, #166).
+        var LComponentLicence := ComponentLicenceFor(LArtefact,
+          IsSameDeliverableFile(AData.Artefacts, i, LDeliverable),
+          AData.Metadata.Licence, LManifest);
+        if LComponentLicence <> '' then
         begin
-          LLicences.Add(Trim(AData.Metadata.Licence), LName, '', '');
+          LLicences.Add(LComponentLicence, LName, '', '');
         end
         else if not LGrouped.ContainsKey(i) then
         begin
