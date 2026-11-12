@@ -994,6 +994,7 @@ begin
     LArtefact := Default(TArtefactInfo);
     LArtefact.FilePath := LResolvedUnit.ResolvedPath;
     LArtefact.SourcePath := LResolvedUnit.SourcePath;
+    LArtefact.UnitName := LResolvedUnit.UnitName;
     LArtefact.RelativePath := TPath.GetFileName(LResolvedUnit.ResolvedPath);
     LArtefact.Hash := LResolvedUnit.SecondaryHashSha256;
     LArtefact.HashSha512 := LResolvedUnit.PrimaryHashSha512;
@@ -3478,6 +3479,19 @@ begin
 
       if LManifest.Loaded then
       begin
+        // A MAP unit with no file is still in the unit list. Add it when a
+        // library row matches, so that row is not reported as having no units.
+        if FConfig.IncludeCompositionEvidence and
+          Assigned(LCompositionEvidence.Units) then
+          for var LNameOnly in LCompositionEvidence.Units do
+          begin
+            if Trim(LNameOnly.ResolvedPath) = '' then
+              TryAddNameOnlyLibraryUnit(LManifest, LNameOnly.UnitName,
+                UnitOriginKindToString(LNameOnly.OriginKind),
+                UnitEvidenceKindToString(LNameOnly.EvidenceKind),
+                ResolutionConfidenceToString(LNameOnly.Confidence),
+                LArtefacts);
+          end;
         LDormantWarnings := DormantComponentWarnings(LManifest,
           BuildManifestPlan(LManifest, LArtefacts));
         for LWarningIndex := 0 to High(LDormantWarnings) do

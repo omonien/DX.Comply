@@ -36,6 +36,11 @@ type
     /// unit is known only by name, or only as a DCU in an output folder.
     /// </summary>
     SourcePath: string;
+    /// <summary>
+    /// MAP or project unit name. Prefix and exact rules use this when it is
+    /// set. Empty means the file name of RelativePath without its extension.
+    /// </summary>
+    UnitName: string;
     /// <summary>Relative path from the project root.</summary>
     RelativePath: string;
     /// <summary>File size in bytes.</summary>

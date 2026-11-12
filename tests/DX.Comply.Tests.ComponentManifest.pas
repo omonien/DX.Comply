@@ -4,10 +4,11 @@
 /// </summary>
 ///
 /// <remarks>
-/// Covers matching (exact beats prefix, first row wins, scope stripping,
-/// case, own-code folders, component folders), licence classification, PURL
-/// generation, writer output, optional copyright text in CycloneDX, SPDX 2.3
-/// and SPDX 3.0.1, and the CLI / config precedence for --manifest.
+/// Covers matching (exact beats prefix, first row wins, shared prefixes,
+/// scope stripping, case, own-code folders, component folders), licence
+/// classification, PURL generation, writer output, optional copyright text
+/// in CycloneDX, SPDX 2.3 and SPDX 3.0.1, and the CLI / config precedence
+/// for --manifest.
 /// </remarks>
 ///
 /// <copyright>
@@ -66,6 +67,12 @@ type
     procedure Match_FirstExactRowWins;
     [Test]
     procedure Match_FirstPrefixRowWins;
+    /// <summary>
+    /// The same units_prefix assigns units to the first row and warns.
+    /// A prefix matches without a trailing dot. Issue #172.
+    /// </summary>
+    [Test]
+    procedure Match_SharedPrefix_FirstRowWins_AndWarns;
     /// <summary>The longest prefix wins whatever the row order. Issue #129.</summary>
     [Test]
     procedure Match_LongestPrefixWins_RegardlessOfOrder;
@@ -135,6 +142,12 @@ type
     /// <summary>Grouping uses the source path, not a DCU in the output folder.</summary>
     [Test]
     procedure Plan_UsesSourcePathNotOutputDcu;
+    /// <summary>
+    /// The MAP unit name matches when the file name is only the last segment,
+    /// and a name with no file is added when a library row matches. Issue #172.
+    /// </summary>
+    [Test]
+    procedure Plan_UnitName_AndNameOnly_AssignedToFirstSharedPrefix;
 
     [Test]
     procedure Licence_SpdxId_IsCanonical;
@@ -170,6 +183,11 @@ type
 
     [Test]
     procedure Parse_InvalidJson_SetsError;
+    /// <summary>
+    /// An unquoted value names the file, the line and the position. Issue #172.
+    /// </summary>
+    [Test]
+    procedure Parse_UnquotedValue_NamesFileAndPosition;
     [Test]
     procedure Parse_RootMustBeObjectOrArray;
     [Test]
@@ -554,6 +572,69 @@ begin
   Assert.AreEqual(0, LMatch.ComponentIndex, 'The first prefix row must win');
 end;
 
+procedure TComponentManifestTests.Match_SharedPrefix_FirstRowWins_AndWarns;
+const
+  cCoreFirst = 'units_prefix "FMX.TMSFNC" is shared by "TMS FNC Core" and ' +
+    '"TMS FNC UI Pack". Units that start with it are assigned to ' +
+    '"TMS FNC Core", the first row in the file. Use units_exact or a more ' +
+    'specific units_prefix for the other rows.';
+  cPackFirst = 'units_prefix "FMX.TMSFNC" is shared by "TMS FNC UI Pack" and ' +
+    '"TMS FNC Core". Units that start with it are assigned to ' +
+    '"TMS FNC UI Pack", the first row in the file. Use units_exact or a more ' +
+    'specific units_prefix for the other rows.';
+var
+  LManifest: TComponentManifest;
+  LMatch: TManifestMatch;
+
+  function SharedWarning(const AManifest: TComponentManifest): string;
+  var
+    I: Integer;
+  begin
+    Result := '';
+    for I := 0 to High(AManifest.Warnings) do
+      if Pos('units_prefix "', AManifest.Warnings[I]) > 0 then
+        Exit(AManifest.Warnings[I]);
+  end;
+
+begin
+  LManifest := ParseManifest(
+    '{"components":[' +
+    '{"name":"TMS FNC Core","version":"4.2.3.7","vendor":"TMS Software",' +
+    '"licence":"LicenseRef-Proprietary","type":"library","units_prefix":["FMX.TMSFNC"]},' +
+    '{"name":"TMS FNC UI Pack","version":"7.1.2.2","vendor":"TMS Software",' +
+    '"licence":"LicenseRef-Proprietary","type":"library","units_prefix":["FMX.TMSFNC"]},' +
+    '{"name":"TMS FNC Charts","version":"1.0.0","vendor":"TMS Software",' +
+    '"licence":"LicenseRef-Proprietary","type":"library","units_prefix":["FMX.TMSFNCCharts"]}' +
+    ']}');
+  Assert.AreEqual(cCoreFirst, SharedWarning(LManifest));
+
+  LMatch := MatchManifestUnit(LManifest, 'FMX.TMSFNCButton');
+  Assert.AreEqual(NativeInt(Ord(mmLibrary)), NativeInt(Ord(LMatch.Kind)));
+  Assert.AreEqual(0, LMatch.ComponentIndex,
+    'A prefix without a trailing dot must match the unit name');
+  LMatch := MatchManifestUnit(LManifest, 'FMX.TMSFNC.Types');
+  Assert.AreEqual(0, LMatch.ComponentIndex);
+  LMatch := MatchManifestUnit(LManifest, 'fmx.tmsfncbutton');
+  Assert.AreEqual(0, LMatch.ComponentIndex, 'Prefix matching ignores case');
+  LMatch := MatchManifestUnit(LManifest, 'FMX.TMSFNCCharts.Core');
+  Assert.AreEqual(2, LMatch.ComponentIndex, 'The longer prefix still wins');
+  LMatch := MatchManifestUnit(LManifest, 'TMSFNCButton');
+  Assert.AreEqual(NativeInt(Ord(mmNone)), NativeInt(Ord(LMatch.Kind)),
+    'The shortened file name does not start with FMX.TMSFNC');
+
+  LManifest := ParseManifest(
+    '{"components":[' +
+    '{"name":"TMS FNC UI Pack","version":"7.1.2.2","vendor":"TMS Software",' +
+    '"licence":"LicenseRef-Proprietary","type":"library","units_prefix":["FMX.TMSFNC"]},' +
+    '{"name":"TMS FNC Core","version":"4.2.3.7","vendor":"TMS Software",' +
+    '"licence":"LicenseRef-Proprietary","type":"library","units_prefix":["FMX.TMSFNC"]}' +
+    ']}');
+  Assert.AreEqual(cPackFirst, SharedWarning(LManifest));
+  LMatch := MatchManifestUnit(LManifest, 'FMX.TMSFNCButton');
+  Assert.AreEqual(0, LMatch.ComponentIndex);
+  Assert.AreEqual('TMS FNC UI Pack', LManifest.Components[LMatch.ComponentIndex].Name);
+end;
+
 procedure TComponentManifestTests.Match_LongestPrefixWins_RegardlessOfOrder;
 var
   LManifest: TComponentManifest;
@@ -893,6 +974,21 @@ begin
   Assert.IsFalse(TryParseComponentManifest('{', 'components.json', LManifest, LError));
   Assert.IsTrue(Pos('Invalid JSON', LError) > 0, LError);
   Assert.IsFalse(LManifest.Loaded);
+end;
+
+procedure TComponentManifestTests.Parse_UnquotedValue_NamesFileAndPosition;
+var
+  LManifest: TComponentManifest;
+  LError: string;
+  LJson: string;
+begin
+  LJson := '{' + #10 +
+    '  "name": "TMS FNC Core",' + #10 +
+    '  "vendor_url": https://www.tmssoftware.com' + #10 +
+    '}';
+  Assert.IsFalse(TryParseComponentManifest(LJson, 'components.json', LManifest, LError));
+  Assert.IsFalse(LManifest.Loaded);
+  Assert.AreEqual('Invalid JSON in "components.json" at line 3, position 17', LError);
 end;
 
 procedure TComponentManifestTests.Parse_RootMustBeObjectOrArray;
@@ -2096,6 +2192,49 @@ begin
     'The source path and a .pas file match. The output DCU with no source path does not');
   Assert.AreEqual(0, LPlan.GroupedArtefactIndexes[0]);
   Assert.AreEqual(2, LPlan.GroupedArtefactIndexes[1]);
+end;
+
+procedure TComponentManifestTests.Plan_UnitName_AndNameOnly_AssignedToFirstSharedPrefix;
+var
+  LManifest: TComponentManifest;
+  LPlan: TManifestPlan;
+  LArtefact: TArtefactInfo;
+  LDormant: TArray<string>;
+begin
+  LManifest := ParseManifest(
+    '{"components":[' +
+    '{"name":"TMS FNC Core","version":"4.2.3.7","vendor":"TMS Software",' +
+    '"licence":"LicenseRef-Proprietary","type":"library","units_prefix":["FMX.TMSFNC"]},' +
+    '{"name":"TMS FNC UI Pack","version":"7.1.2.2","vendor":"TMS Software",' +
+    '"licence":"LicenseRef-Proprietary","type":"library","units_prefix":["FMX.TMSFNC"]}' +
+    ']}');
+
+  LArtefact := Default(TArtefactInfo);
+  LArtefact.RelativePath := 'TMSFNCButton.dcu';
+  LArtefact.UnitName := 'FMX.TMSFNCButton';
+  LArtefact.ArtefactType := 'unit-evidence';
+  LArtefact.Origin := 'Local project';
+  FArtefacts.Add(LArtefact);
+
+  Assert.IsTrue(TryAddNameOnlyLibraryUnit(LManifest, 'FMX.TMSFNCTypes',
+    'Local project', 'MAP', 'Heuristic', FArtefacts));
+  Assert.IsFalse(TryAddNameOnlyLibraryUnit(LManifest, 'FMX.TMSFNCTypes',
+    'Local project', 'MAP', 'Heuristic', FArtefacts),
+    'A unit that is already present is not added again');
+  Assert.IsFalse(TryAddNameOnlyLibraryUnit(LManifest, 'System.SysUtils',
+    'Embarcadero FMX', 'MAP', 'Heuristic', FArtefacts),
+    'A name that matches no library row stays out of the SBOM');
+
+  LPlan := BuildManifestPlan(LManifest, FArtefacts);
+  Assert.AreEqual(NativeInt(1), NativeInt(Length(LPlan.Libraries)));
+  Assert.AreEqual(0, LPlan.Libraries[0].ComponentIndex);
+  Assert.AreEqual(NativeInt(2), NativeInt(Length(LPlan.GroupedArtefactIndexes)));
+
+  LDormant := DormantComponentWarnings(LManifest, LPlan);
+  Assert.AreEqual(NativeInt(1), NativeInt(Length(LDormant)));
+  Assert.IsTrue(Pos('component "TMS FNC UI Pack" matched no units', LDormant[0]) > 0,
+    LDormant[0]);
+  Assert.AreEqual(0, Pos('TMS FNC Core', LDormant[0]));
 end;
 
 initialization
