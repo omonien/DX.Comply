@@ -159,13 +159,23 @@ Then invoke in CI mode:
 dxcomply --project=src/MyApp.dproj --ci --config=.dxcomply.json --no-pause
 ```
 
+`dxcomply.exe` looks for a relative `--config` path, including the default `.dxcomply.json`, in the current directory first. If that file is not there and `--project` is set, it looks in the project folder. An absolute `--config` path is used as given. The folder that contains `dxcomply.exe` is not searched. When `--ci` is set and no file is found, `dxcomply.exe` prints a warning that lists the paths it tried and then continues. That warning does not change the exit code. `--strict` still exits with code 3 only when a CRA/BSI warning was raised.
+
+A batch file often starts in a working directory that is not the project folder. Begin the batch file with:
+
+```
+cd /d %~dp0
+```
+
+That sets the working directory to the folder that contains the batch file, so a relative `.dxcomply.json` next to the batch file is found on the first check. With `--project` pointing at the `.dproj`, `dxcomply.exe` also finds a config file in the project folder when the working directory is somewhere else.
+
 When `--ci` is given and the config file exists, DX.Comply loads that file and then applies the options you actually passed on the command line. Precedence is:
 
 1. Built-in defaults.
 2. Values from `.dxcomply.json`.
 3. Command-line options that appear in the invocation. These win.
 
-A default you did not pass does not override the file. `dxcomply --ci --config-name=Debug` keeps Debug even if the file says `"configName": "Release"`. `dxcomply --ci --platform=Win64` keeps the file's `configName` and replaces only the platform. Without `--ci`, the file is not read. `--config` only changes the path used together with `--ci`.
+A default you did not pass does not override the file. `dxcomply --ci --config-name=Debug` keeps Debug even if the file says `"configName": "Release"`. `dxcomply --ci --platform=Win64` keeps the file's `configName` and replaces only the platform. Without `--ci`, the file is not read. `--config` only changes the path used together with `--ci`, using the lookup order above.
 
 The line printed after a successful run is the output path after that merge, including a `configName` or `platform` taken from the file.
 

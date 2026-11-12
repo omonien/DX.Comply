@@ -359,6 +359,12 @@ type
     procedure LoadConfig_ConfigNameAndPlatform;
 
     /// <summary>
+    /// product.supplier keeps an ampersand, including a name with two of them.
+    /// </summary>
+    [Test]
+    procedure LoadConfig_SupplierWithAmpersand_StaysIntact;
+
+    /// <summary>
     /// An spdxVersion the tool does not write is reported, and SPDX 2.3 is
     /// used. A supported value gives no warning.
     /// </summary>
@@ -2268,6 +2274,23 @@ function TEngineTests_WriteConfig(const ADir, AJson: string): string;
 begin
   Result := TPath.Combine(ADir, 'dxcomply.json');
   TFile.WriteAllText(Result, AJson, TEncoding.UTF8);
+end;
+
+procedure TEngineTests.LoadConfig_SupplierWithAmpersand_StaysIntact;
+const
+  cSupplier = 'ebm-papst Mulfingen GmbH & Co. KGaA & Co. KG';
+var
+  LGen: TDxComplyGenerator;
+  LPath: string;
+begin
+  LPath := TEngineTests_WriteConfig(FTempDir,
+    '{"product":{"supplier":"' + cSupplier + '"}}');
+  LGen := TDxComplyGenerator.Create;
+  try
+    Assert.AreEqual(cSupplier, LGen.LoadConfig(LPath).Supplier);
+  finally
+    LGen.Free;
+  end;
 end;
 
 procedure TEngineTests.LoadConfig_ConfigNameAndPlatform;

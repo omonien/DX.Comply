@@ -151,6 +151,13 @@ type
     procedure ExtractVerInfoKeyValue_DecodesXmlEntities;
 
     /// <summary>
+    /// Two &amp; entities in one CompanyName decode to the full name, and
+    /// the following keys stay in place.
+    /// </summary>
+    [Test]
+    procedure ExtractVerInfoKeyValue_TwoAmpersands_DecodesFullName;
+
+    /// <summary>
     /// An Android application scan expects libProject.so.map and does not
     /// accept a desktop Project.map in that directory. Win32 stays
     /// Project.map. Regression for issue #89.
@@ -860,6 +867,17 @@ begin
   Assert.AreEqual('', ExtractVerInfoKeyValue('CompanyName=$(Company);FileVersion=1.0', 'CompanyName'));
   Assert.AreEqual('', ExtractVerInfoKeyValue('FileVersion=1.0', 'CompanyName'));
   Assert.AreEqual('', ExtractVerInfoKeyValue('', 'CompanyName'));
+end;
+
+procedure TProjectScannerTests.ExtractVerInfoKeyValue_TwoAmpersands_DecodesFullName;
+const
+  cName = 'ebm-papst Mulfingen GmbH & Co. KGaA & Co. KG';
+  cKeys = 'CompanyName=ebm-papst Mulfingen GmbH &amp; Co. KGaA &amp; Co. KG;FileVersion=1.2.3.4;ProductName=Fan;';
+begin
+  Assert.AreEqual(cName, ExtractVerInfoKeyValue(cKeys, 'CompanyName'));
+  Assert.AreEqual('1.2.3.4', ExtractVerInfoKeyValue(cKeys, 'FileVersion'),
+    'The key after the two entities must still be found');
+  Assert.AreEqual('Fan', ExtractVerInfoKeyValue(cKeys, 'ProductName'));
 end;
 
 procedure TProjectScannerTests.ExtractVerInfoKeyValue_DecodesXmlEntities;

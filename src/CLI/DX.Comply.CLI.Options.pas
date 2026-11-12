@@ -35,6 +35,24 @@ const
 
 type
   /// <summary>
+  /// Result of looking up the config file for dxcomply.exe.
+  /// </summary>
+  TConfigPathResolution = record
+    /// <summary>
+    /// Absolute path of the file that exists. Empty when no file was found.
+    /// An absolute input that exists is returned unchanged.
+    /// </summary>
+    Path: string;
+    /// <summary>True when Path is a file that exists.</summary>
+    Found: Boolean;
+    /// <summary>
+    /// Absolute paths that were checked, in lookup order.
+    /// The --ci warning prints this list.
+    /// </summary>
+    Tried: TArray<string>;
+  end;
+
+  /// <summary>
   /// Parses command-line arguments for the DX.Comply CLI and exposes them as
   /// typed properties. Call Parse, check the result and ParseError, then read
   /// the properties or call ToSbomConfig.
@@ -141,6 +159,29 @@ type
     class function VersionLine: string; static;
     /// <summary>Writes the usage text to stdout.</summary>
     procedure PrintHelp;
+    /// <summary>
+    /// The usage text PrintHelp writes, including the version line.
+    /// Square brackets in the option list mark an optional value.
+    /// </summary>
+    class function HelpText: string; static;
+    /// <summary>
+    /// Resolves the config file dxcomply.exe will read.
+    /// An absolute AConfigFile is used as given.
+    /// A relative path, including the default .dxcomply.json, is checked in
+    /// AWorkingDirectory first (the process directory when that argument is
+    /// empty). When the file is not there and AProjectPath is set, the
+    /// project folder is checked next. The folder of dxcomply.exe is not used.
+    /// </summary>
+    class function ResolveConfigPath(const AConfigFile, AProjectPath: string;
+      const AWorkingDirectory: string = ''): TConfigPathResolution; static;
+    /// <summary>
+    /// Warning printed when ACiMode is set and ResolveConfigPath found no file.
+    /// Empty when ACiMode is false or a file was found, so the caller prints
+    /// nothing in those cases. The text is not a CRA/BSI warning. It does not
+    /// by itself select exit code 3.
+    /// </summary>
+    class function ConfigFileWarning(const ACiMode: Boolean;
+      const AResolution: TConfigPathResolution): string; static;
     /// <summary>Writes the tool version line to stdout.</summary>
     procedure PrintVersion;
     /// <summary>
@@ -224,6 +265,7 @@ type
 implementation
 
 uses
+  System.IOUtils,
   DX.Comply.Spdx3.Writer,
   DX.Comply.VersionInfo;
 
@@ -687,142 +729,288 @@ begin
   Result := 'Run ' + ExecutableName(AModulePath) + ' --help for usage.';
 end;
 
+// ---------------------------------------------------------------------------
+// Config file lookup
+// ---------------------------------------------------------------------------
+
+class function TCliOptions.ResolveConfigPath(const AConfigFile, AProjectPath,
+  AWorkingDirectory: string): TConfigPathResolution;
+var
+  LConfigFile: string;
+  LWorkingDirectory: string;
+  LCandidate: string;
+  LProjectDirectory: string;
+  LProjectPath: string;
+
+  procedure AddTried(const APath: string);
+  var
+    I: Integer;
+  begin
+    if APath = '' then
+      Exit;
+    for I := 0 to High(Result.Tried) do
+      if SameText(Result.Tried[I], APath) then
+        Exit;
+    SetLength(Result.Tried, Length(Result.Tried) + 1);
+    Result.Tried[High(Result.Tried)] := APath;
+  end;
+
+  function Normalize(const APath: string): string;
+  begin
+    Result := APath;
+    try
+      Result := TPath.GetFullPath(APath);
+    except
+      on EInOutArgumentException do
+        ;
+    end;
+  end;
+
+begin
+  Result.Path := '';
+  Result.Found := False;
+  SetLength(Result.Tried, 0);
+
+  LConfigFile := Trim(AConfigFile);
+  // Parse stores this name when --config is omitted. An empty argument
+  // uses the same default so the lookup still has a file name.
+  if LConfigFile = '' then
+    LConfigFile := '.dxcomply.json';
+
+  LWorkingDirectory := Trim(AWorkingDirectory);
+  if LWorkingDirectory = '' then
+    LWorkingDirectory := GetCurrentDir;
+
+  // An absolute path is the file the caller named. It is not combined with
+  // the working directory, the project folder, or the folder of dxcomply.exe.
+  if not TPath.IsRelativePath(LConfigFile) then
+  begin
+    AddTried(LConfigFile);
+    if TFile.Exists(LConfigFile) then
+    begin
+      Result.Path := LConfigFile;
+      Result.Found := True;
+    end;
+    Exit;
+  end;
+
+  LCandidate := Normalize(TPath.Combine(LWorkingDirectory, LConfigFile));
+  AddTried(LCandidate);
+  if TFile.Exists(LCandidate) then
+  begin
+    Result.Path := LCandidate;
+    Result.Found := True;
+    Exit;
+  end;
+
+  LProjectPath := Trim(AProjectPath);
+  if LProjectPath = '' then
+    Exit;
+
+  if TPath.IsRelativePath(LProjectPath) then
+    LProjectPath := TPath.Combine(LWorkingDirectory, LProjectPath);
+  LProjectPath := Normalize(LProjectPath);
+  LProjectDirectory := TPath.GetDirectoryName(LProjectPath);
+  if LProjectDirectory = '' then
+    Exit;
+
+  LCandidate := Normalize(TPath.Combine(LProjectDirectory, LConfigFile));
+  AddTried(LCandidate);
+  if TFile.Exists(LCandidate) then
+  begin
+    Result.Path := LCandidate;
+    Result.Found := True;
+  end;
+end;
+
+class function TCliOptions.ConfigFileWarning(const ACiMode: Boolean;
+  const AResolution: TConfigPathResolution): string;
+var
+  LPath: string;
+begin
+  Result := '';
+  if (not ACiMode) or AResolution.Found then
+    Exit;
+
+  Result := '[WARN ] No config file was found for --ci. dxcomply.exe continues without it.';
+  Result := Result + sLineBreak + '        Paths tried:';
+  for LPath in AResolution.Tried do
+    Result := Result + sLineBreak + '        ' + LPath;
+end;
+
 procedure TCliOptions.PrintHelp;
 var
-  LExe: string;
+  LLines: TStringList;
+  I: Integer;
 begin
-  LExe := ExecutableName;
-  PrintVersion;
-  Writeln;
-  Writeln('Usage:');
-  Writeln('  ' + LExe + ' --project=<path> [options]');
-  Writeln('  ' + LExe + ' --library --source-dir=<dir> [options]');
-  Writeln;
-  Writeln('Options:');
-  Writeln('  --project=<path>              Project file. Required in build mode:');
-  Writeln('                                .dproj, .dpr, .dpk, .bdsproj, or .groupproj.');
-  Writeln('                                Optional in library mode when at least');
-  Writeln('                                one --source-dir is set. Library mode');
-  Writeln('                                accepts .dproj, .dpk, or .dpr.');
-  Writeln('  --format=<format>             Output format (default: cyclonedx-json)');
-  Writeln('                                  cyclonedx-json (1.6) | cyclonedx-xml (1.6) | spdx-json');
-  Writeln('  --spdx-version=<version>      SPDX version for spdx-json: 2.3 (default) | 3.0.1');
-  Writeln('                                File key: spdxVersion');
-  Writeln('  --output=<path>               Output file path (default: bom.json).');
-  Writeln('                                A relative path uses the project');
-  Writeln('                                directory. This flag wins over outputDir.');
-  Writeln('                                File key output is the file path.');
-  Writeln('                                File key outputDir is a directory.');
-  Writeln('                                A bare output name is written there.');
-  Writeln('                                Reports with no report.output follow it.');
-  Writeln('  --platform=<name>             Target platform (default: Win32)');
-  Writeln('                                File key: platform');
-  Writeln('  --config-name=<name>          Build configuration (default: Release)');
-  Writeln('                                File key: configName');
-  Writeln('                                For .dpr, .dpk, and .bdsproj, --platform');
-  Writeln('                                and --config-name are not applied.');
-  Writeln('                                The defaults are not reported. A value');
-  Writeln('                                you set is reported and ignored.');
-  Writeln('  --product=<name>              Product name override');
-  Writeln('  --version=<version>           Product version override');
-  Writeln('  --version-from-git-tag        Product version from the latest git tag');
-  Writeln('                                of the project folder. A leading v or V');
-  Writeln('                                is removed. --version wins when both');
-  Writeln('                                are set. Without git or a tag, a warning');
-  Writeln('                                is printed and the usual version is used.');
-  Writeln('  --supplier=<name>             Supplier/company name');
-  Writeln('  --supplier-url=<url>          Supplier contact URL.');
-  Writeln('                                Used when the supplier is not an email.');
-  Writeln('                                File key: product.supplierUrl');
-  Writeln('  --licence=<SPDX expression>   Distribution licence of the product.');
-  Writeln('                                SPDX identifier, expression, or a name.');
-  Writeln('                                File key: product.licence');
-  Writeln('  --sbom-creator=<email-or-url> SBOM creator contact (BSI TR-03183-2).');
-  Writeln('                                An email address or an http(s) URL.');
-  Writeln('                                Omitted when you do not set it.');
-  Writeln('                                File key: sbomCreator');
-  Writeln('  --include=<pattern>           File include pattern (repeatable)');
-  Writeln('  --exclude=<pattern>           File exclude pattern (repeatable)');
-  Writeln('  --scan-dir=<path>             Also scan this directory for binaries');
-  Writeln('                                (repeatable). A plain path is not recursive.');
-  Writeln('                                A path that contains ** walks subdirectories.');
-  Writeln('  --scan-tree                   Deprecated: recursively scan the output');
-  Writeln('                                directory, as older versions did.');
-  Writeln('                                Kept for one release. Prefer --scan-dir.');
-  Writeln('  --library[=true|false]        SBOM for a source release, not a build.');
-  Writeln('                                No build, no MAP file, no binary scan.');
-  Writeln('                                File key: library');
-  Writeln('  --source-dir=<dir>            Source directory, walked recursively');
-  Writeln('                                (repeatable). Relative to the project');
-  Writeln('                                directory, or the current directory');
-  Writeln('                                when --project is omitted.');
-  Writeln('                                File key: sourceDirs');
-  Writeln('  --purl=<purl>                 Package URL of the root component.');
-  Writeln('                                File key: product.purl');
-  Writeln('  --repo-url=<url>              Repository URL. When --purl is empty');
-  Writeln('                                and this is https://github.com/owner/repo');
-  Writeln('                                (optional trailing .git or /), the purl');
-  Writeln('                                is pkg:github/owner/repo@version when a');
-  Writeln('                                version is known. Without a version,');
-  Writeln('                                no purl is written.');
-  Writeln('                                File key: product.repoUrl');
-  Writeln('  --manifest=<file>             Component manifest (components.json)');
-  Writeln('                                Groups third-party units into libraries');
-  Writeln('                                with supplier, licence, version, type');
-  Writeln('                                and PURL. Relative to the project directory.');
-  Writeln('                                Overrides the manifest key in .dxcomply.json');
-  Writeln('  --map-dir=<path>              Directory containing the pre-built MAP file');
-  Writeln('  --delphi7-root=<path>         Delphi 7 install directory (RootDir).');
-  Writeln('  --bds-version=<ver>           Delphi BDS version to use, e.g. 23.0 (default: BDS, then newest).');
-  Writeln('                                Optional. Used to resolve library units');
-  Writeln('                                for .dpr, .dpk, and .bdsproj projects.');
-  Writeln('  --no-composition-evidence     Omit source/DCU units from SBOM (binary-only)');
-  Writeln('  --include-platform-in-output  Append <Platform>.<Config> to the default');
-  Writeln('                                output filename (e.g. bom.Win64.Release.json).');
-  Writeln('                                The file stays in outputDir when that');
-  Writeln('                                directory is set. Ignored when --output');
-  Writeln('                                is supplied');
-  Writeln('  --report[=<format>]           Generate companion human-readable report');
-  Writeln('                                  markdown | html | both (default) | none');
-  Writeln('  --report-content=<content>    Sections of the report (not of the SBOM):');
-  Writeln('                                  all (default) | overview | units');
-  Writeln('                                overview: origin summary, licences and');
-  Writeln('                                third-party units without manifest.');
-  Writeln('                                units: the unit list with SHA-256 hashes.');
-  Writeln('                                File key: report.content');
-  Writeln('  --report-group-by-folder[=true|false]');
-  Writeln('                                Group third-party units without manifest');
-  Writeln('                                by unit prefix and source folder.');
-  Writeln('                                File key: report.groupByFolder');
-  Writeln('  --ci                          CI mode: use .dxcomply.json config file');
-  Writeln('  --strict[=true|false]         Write the SBOM, then exit with code 3 when');
-  Writeln('                                any CRA/BSI warning was raised.');
-  Writeln('                                File key: strict');
-  Writeln('  --config=<path>               Path to .dxcomply.json (default: .dxcomply.json)');
-  Writeln('  --help, -h                    Show this help');
-  Writeln('  --verbose                     Print all progress messages (default: errors only)');
-  Writeln('  --no-pause                    Suppress "Press Enter to quit" prompt');
-  Writeln;
-  Writeln('Config file (--ci, when the file exists):');
-  Writeln('  Built-in defaults are filled in first, then .dxcomply.json, then any');
-  Writeln('  option you actually pass. A passed option wins over the file. An');
-  Writeln('  option you omit keeps the file value (the default does not override');
-  Writeln('  the file). Without --ci the file is not read.');
-  Writeln;
-  Writeln('Exit codes:');
-  Writeln('  0  SBOM generated');
-  Writeln('  1  Generation failed');
-  Writeln('  2  Invalid arguments');
-  Writeln('  3  SBOM generated, but --strict and at least one CRA/BSI warning');
-  Writeln;
-  Writeln('Examples:');
-  Writeln('  ' + LExe + ' --project=src\MyApp.dproj --format=cyclonedx-json --output=bom.json');
-  Writeln('  ' + LExe + ' --project=src\MyApp.dproj --manifest=components.json --no-pause');
-  Writeln('  ' + LExe + ' --project=src\MyApp.dproj --sbom-creator=sbom@example.com --no-pause');
-  Writeln('  ' + LExe + ' --project=src\MyApp.dpr --delphi7-root=C:\Delphi7 --no-pause');
-  Writeln('  ' + LExe + ' --project=src\MyApp.dproj --ci --config=.dxcomply.json --no-pause');
-  Writeln('  ' + LExe + ' --project=src\MyApp.dproj --ci --config-name=Debug --no-pause');
-  Writeln('  ' + LExe + ' --library --project=Source\DEC60.dproj --source-dir=Source --licence=Apache-2.0 --no-pause');
+  LLines := TStringList.Create;
+  try
+    LLines.Text := HelpText;
+    for I := 0 to LLines.Count - 1 do
+      Writeln(LLines[I]);
+  finally
+    LLines.Free;
+  end;
+end;
+
+class function TCliOptions.HelpText: string;
+var
+  LLines: TStringList;
+  LExe: string;
+  procedure Line(const AText: string);
+  begin
+    LLines.Add(AText);
+  end;
+begin
+  LLines := TStringList.Create;
+  try
+    LExe := ExecutableName;
+    Line(VersionLine);
+    Line('');
+    Line('Usage:');
+    Line('  ' + LExe + ' --project=<path> [options]');
+    Line('  ' + LExe + ' --library --source-dir=<dir> [options]');
+    Line('');
+    Line('Square brackets mark an optional value, so --report equals --report=both');
+    Line('and --library equals --library=true.');
+    Line('');
+    Line('Options:');
+    Line('  --project=<path>              Project file. Required in build mode:');
+    Line('                                .dproj, .dpr, .dpk, .bdsproj, or .groupproj.');
+    Line('                                Optional in library mode when at least');
+    Line('                                one --source-dir is set. Library mode');
+    Line('                                accepts .dproj, .dpk, or .dpr.');
+    Line('  --format=<format>             Output format (default: cyclonedx-json)');
+    Line('                                  cyclonedx-json (1.6) | cyclonedx-xml (1.6) | spdx-json');
+    Line('  --spdx-version=<version>      SPDX version for spdx-json: 2.3 (default) | 3.0.1');
+    Line('                                File key: spdxVersion');
+    Line('  --output=<path>               Output file path (default: bom.json).');
+    Line('                                A relative path uses the project');
+    Line('                                directory. This flag wins over outputDir.');
+    Line('                                File key output is the file path.');
+    Line('                                File key outputDir is a directory.');
+    Line('                                A bare output name is written there.');
+    Line('                                Reports with no report.output follow it.');
+    Line('  --platform=<name>             Target platform (default: Win32)');
+    Line('                                File key: platform');
+    Line('  --config-name=<name>          Build configuration (default: Release)');
+    Line('                                File key: configName');
+    Line('                                For .dpr, .dpk, and .bdsproj, --platform');
+    Line('                                and --config-name are not applied.');
+    Line('                                The defaults are not reported. A value');
+    Line('                                you set is reported and ignored.');
+    Line('  --product=<name>              Product name override');
+    Line('  --version=<version>           Product version override');
+    Line('  --version-from-git-tag        Product version from the latest git tag');
+    Line('                                of the project folder. A leading v or V');
+    Line('                                is removed. --version wins when both');
+    Line('                                are set. Without git or a tag, a warning');
+    Line('                                is printed and the usual version is used.');
+    Line('  --supplier=<name>             Supplier/company name');
+    Line('  --supplier-url=<url>          Supplier contact URL.');
+    Line('                                Used when the supplier is not an email.');
+    Line('                                File key: product.supplierUrl');
+    Line('  --licence=<SPDX expression>   Distribution licence of the product.');
+    Line('                                SPDX identifier, expression, or a name.');
+    Line('                                File key: product.licence');
+    Line('  --sbom-creator=<email-or-url> SBOM creator contact (BSI TR-03183-2).');
+    Line('                                An email address or an http(s) URL.');
+    Line('                                Omitted when you do not set it.');
+    Line('                                File key: sbomCreator');
+    Line('  --include=<pattern>           File include pattern (repeatable)');
+    Line('  --exclude=<pattern>           File exclude pattern (repeatable)');
+    Line('  --scan-dir=<path>             Also scan this directory for binaries');
+    Line('                                (repeatable). A plain path is not recursive.');
+    Line('                                A path that contains ** walks subdirectories.');
+    Line('  --scan-tree                   Deprecated: recursively scan the output');
+    Line('                                directory, as older versions did.');
+    Line('                                Kept for one release. Prefer --scan-dir.');
+    Line('  --library[=true|false]        SBOM for a source release, not a build.');
+    Line('                                No build, no MAP file, no binary scan.');
+    Line('                                File key: library');
+    Line('  --source-dir=<dir>            Source directory, walked recursively');
+    Line('                                (repeatable). Relative to the project');
+    Line('                                directory, or the current directory');
+    Line('                                when --project is omitted.');
+    Line('                                File key: sourceDirs');
+    Line('  --purl=<purl>                 Package URL of the root component.');
+    Line('                                File key: product.purl');
+    Line('  --repo-url=<url>              Repository URL. When --purl is empty');
+    Line('                                and this is https://github.com/owner/repo');
+    Line('                                (optional trailing .git or /), the purl');
+    Line('                                is pkg:github/owner/repo@version when a');
+    Line('                                version is known. Without a version,');
+    Line('                                no purl is written.');
+    Line('                                File key: product.repoUrl');
+    Line('  --manifest=<file>             Component manifest (components.json)');
+    Line('                                Groups third-party units into libraries');
+    Line('                                with supplier, licence, version, type');
+    Line('                                and PURL. Relative to the project directory.');
+    Line('                                Overrides the manifest key in .dxcomply.json');
+    Line('  --map-dir=<path>              Directory containing the pre-built MAP file');
+    Line('  --delphi7-root=<path>         Delphi 7 install directory (RootDir).');
+    Line('  --bds-version=<ver>           Delphi BDS version to use, e.g. 23.0 (default: BDS, then newest).');
+    Line('                                Optional. Used to resolve library units');
+    Line('                                for .dpr, .dpk, and .bdsproj projects.');
+    Line('  --no-composition-evidence     Omit source/DCU units from SBOM (binary-only)');
+    Line('  --include-platform-in-output  Append <Platform>.<Config> to the default');
+    Line('                                output filename (e.g. bom.Win64.Release.json).');
+    Line('                                The file stays in outputDir when that');
+    Line('                                directory is set. Ignored when --output');
+    Line('                                is supplied');
+    Line('  --report[=<format>]           Generate companion human-readable report');
+    Line('                                  markdown | html | both (default) | none');
+    Line('  --report-content=<content>    Sections of the report (not of the SBOM):');
+    Line('                                  all (default) | overview | units');
+    Line('                                overview: origin summary, licences and');
+    Line('                                third-party units without manifest.');
+    Line('                                units: the unit list with SHA-256 hashes.');
+    Line('                                File key: report.content');
+    Line('  --report-group-by-folder[=true|false]');
+    Line('                                Group third-party units without manifest');
+    Line('                                by unit prefix and source folder.');
+    Line('                                File key: report.groupByFolder');
+    Line('  --ci                          CI mode: use .dxcomply.json config file');
+    Line('  --strict[=true|false]         Write the SBOM, then exit with code 3 when');
+    Line('                                any CRA/BSI warning was raised.');
+    Line('                                File key: strict');
+    Line('  --config=<path>               Path to .dxcomply.json (default: .dxcomply.json).');
+    Line('                                An absolute path is used as given.');
+    Line('                                A relative path is checked in the current');
+    Line('                                directory, then in the project folder');
+    Line('                                when --project is set.');
+    Line('  --help, -h                    Show this help');
+    Line('  --verbose                     Print all progress messages (default: errors only)');
+    Line('  --no-pause                    Suppress "Press Enter to quit" prompt');
+    Line('');
+    Line('Config file (--ci, when the file exists):');
+    Line('  Built-in defaults are filled in first, then .dxcomply.json, then any');
+    Line('  option you actually pass. A passed option wins over the file. An');
+    Line('  option you omit keeps the file value (the default does not override');
+    Line('  the file). Without --ci the file is not read. With --ci, a missing');
+    Line('  file is reported with the paths that were checked, and the run');
+    Line('  continues.');
+    Line('');
+    Line('Exit codes:');
+    Line('  0  SBOM generated');
+    Line('  1  Generation failed');
+    Line('  2  Invalid arguments');
+    Line('  3  SBOM generated, but --strict and at least one CRA/BSI warning');
+    Line('');
+    Line('Examples:');
+    Line('  ' + LExe + ' --project=src\MyApp.dproj --format=cyclonedx-json --output=bom.json');
+    Line('  ' + LExe + ' --project=src\MyApp.dproj --manifest=components.json --no-pause');
+    Line('  ' + LExe + ' --project=src\MyApp.dproj --sbom-creator=sbom@example.com --no-pause');
+    Line('  ' + LExe + ' --project=src\MyApp.dpr --delphi7-root=C:\Delphi7 --no-pause');
+    Line('  ' + LExe + ' --project=src\MyApp.dproj --ci --config=.dxcomply.json --no-pause');
+    Line('  ' + LExe + ' --project=src\MyApp.dproj --ci --config-name=Debug --no-pause');
+    Line('  ' + LExe + ' --library --project=Source\DEC60.dproj --source-dir=Source --licence=Apache-2.0 --no-pause');
+    Result := LLines.Text;
+    if (Result <> '') and Result.EndsWith(sLineBreak) then
+      SetLength(Result, Length(Result) - Length(sLineBreak));
+  finally
+    LLines.Free;
+  end;
 end;
 
 class function TCliOptions.VersionLine: string;

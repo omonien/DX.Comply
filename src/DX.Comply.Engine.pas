@@ -2278,6 +2278,7 @@ var
   LReportFormatStr: string;
   LWarnings: TJSONObject;
   LManifestValue: TJSONValue;
+  LSupplierValue: TJSONValue;
   LText: string;
   I: Integer;
 begin
@@ -2376,8 +2377,16 @@ begin
             Result.ProductName := LProduct.GetValue<string>('name');
           if LProduct.GetValue('version') <> nil then
             Result.ProductVersion := LProduct.GetValue<string>('version');
-          if LProduct.GetValue('supplier') <> nil then
-            Result.Supplier := LProduct.GetValue<string>('supplier');
+          // A supplier name can contain "&". TJSONString.Value is the text the
+          // parser stored. The generic string reader is not used for this field.
+          LSupplierValue := LProduct.GetValue('supplier');
+          if LSupplierValue <> nil then
+          begin
+            if LSupplierValue is TJSONString then
+              Result.Supplier := TJSONString(LSupplierValue).Value
+            else
+              Result.Supplier := LProduct.GetValue<string>('supplier');
+          end;
           if LProduct.GetValue('supplierUrl') <> nil then
             Result.SupplierUrl := Trim(LProduct.GetValue<string>('supplierUrl'));
           if LProduct.GetValue('licence') <> nil then
