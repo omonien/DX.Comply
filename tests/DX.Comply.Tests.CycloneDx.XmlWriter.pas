@@ -20,6 +20,7 @@ interface
 
 uses
   System.SysUtils,
+  System.StrUtils,
   System.IOUtils,
   System.Classes,
   System.Generics.Collections,
