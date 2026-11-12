@@ -367,6 +367,7 @@ implementation
 
 uses
   System.SysUtils,
+  System.StrUtils,
   System.IOUtils,
   System.Generics.Collections,
   System.RegularExpressions,
