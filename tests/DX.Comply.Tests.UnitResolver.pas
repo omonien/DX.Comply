@@ -150,9 +150,60 @@ type
     /// <summary>A DCU in the DCU output folder takes the origin of its source. Issue #133.</summary>
     [Test]
     procedure Resolve_DcuInOutputDir_UsesOriginOfSource;
+
+    /// <summary>
+    /// A unit under the install Extras folder that a manifest row names
+    /// (units_exact, units_folder, or units_prefix) is that component.
+    /// </summary>
+    [Test]
+    procedure Resolve_ExtrasDecWithManifest_MatchesComponent;
+    /// <summary>
+    /// The same Extras unit with no manifest row is third party.
+    /// </summary>
+    [Test]
+    procedure Resolve_ExtrasDecWithoutManifest_ClassifiesAsThirdParty;
+    /// <summary>
+    /// Product source trees stay Embarcadero: source\rtl, source\vcl,
+    /// source\fmx, and source\data.
+    /// </summary>
+    [Test]
+    procedure Resolve_ProductSourceFolders_StayEmbarcadero;
+    /// <summary>A GetIt catalog repository under the install is third party.</summary>
+    [Test]
+    procedure Resolve_CatalogRepositoryUnderInstall_ClassifiesAsThirdParty;
+    /// <summary>
+    /// The default GetIt catalog repository, under Documents, is third party.
+    /// </summary>
+    [Test]
+    procedure Resolve_CatalogRepositoryUnderDocuments_ClassifiesAsThirdParty;
+    /// <summary>
+    /// A DCU in a product lib folder is Embarcadero until a manifest row
+    /// matches it. The row then wins.
+    /// </summary>
+    [Test]
+    procedure Resolve_ProductLibDcuWithManifest_MatchesComponent;
+    /// <summary>A folder added under source or lib is third party.</summary>
+    [Test]
+    procedure Resolve_UserFoldersUnderInstall_ClassifyAsThirdParty;
+    /// <summary>
+    /// A unit under the Delphi install with no manifest row is third party
+    /// and is named on the Unknown supplier row. A manifest library keeps
+    /// its supplier. Own-code units stay off that row. A unit under
+    /// source\rtl stays Embarcadero.
+    /// </summary>
+    [Test]
+    procedure Resolve_UnmatchedInstallUnit_IsNamedUnknownSupplier;
   end;
 
 implementation
+
+uses
+  DX.Comply.ComponentManifest,
+  DX.Comply.CraChecks,
+  DX.Comply.Engine,
+  DX.Comply.Report.Intf,
+  DX.Comply.Report.Overview,
+  DX.Comply.Report.Support;
 
 procedure TUnitResolverTests.Setup;
 begin
@@ -1104,6 +1155,481 @@ begin
   finally
     if TDirectory.Exists(LTempDir) then
       TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+function ResolveInstallFile(const AResolver: IUnitResolver;
+  const AInstallRoot, AUnitDir, AUnitName, AFileName, AText: string;
+  AAsDcu: Boolean): TResolvedUnitInfo;
+var
+  LBuildEvidence: TBuildEvidence;
+  LCompositionEvidence: TCompositionEvidence;
+  LEvidenceItem: TBuildEvidenceItem;
+  LFilePath: string;
+  LProjectDir: string;
+  LProjectInfo: TProjectInfo;
+begin
+  Result := Default(TResolvedUnitInfo);
+  LProjectDir := TPath.Combine(TPath.GetDirectoryName(
+    ExcludeTrailingPathDelimiter(AInstallRoot)), 'Project');
+  TDirectory.CreateDirectory(LProjectDir);
+  TDirectory.CreateDirectory(AUnitDir);
+  LFilePath := TPath.Combine(AUnitDir, AFileName);
+  if AAsDcu then
+    TFile.WriteAllBytes(LFilePath, TBytes.Create($01, $02, $03, $04))
+  else
+    TFile.WriteAllText(LFilePath, AText);
+
+  LProjectInfo := TProjectInfo.Create;
+  LBuildEvidence := TBuildEvidence.Create;
+  try
+    LProjectInfo.ProjectDir := LProjectDir;
+    LProjectInfo.Platform := 'Win32';
+    LProjectInfo.Toolchain.ProductName := 'Embarcadero Delphi';
+    LProjectInfo.Toolchain.RootDir := AInstallRoot;
+    LProjectInfo.Toolchain.Version := '37.0';
+    LBuildEvidence.SearchPaths.Add(AUnitDir);
+
+    LEvidenceItem := Default(TBuildEvidenceItem);
+    LEvidenceItem.SourceKind := besMapFile;
+    LEvidenceItem.FilePath := TPath.Combine(LProjectDir, 'Demo.map');
+    LEvidenceItem.UnitName := AUnitName;
+    LBuildEvidence.EvidenceItems.Add(LEvidenceItem);
+
+    LCompositionEvidence := AResolver.Resolve(LProjectInfo, LBuildEvidence);
+    try
+      Assert.AreEqual(NativeInt(1), NativeInt(LCompositionEvidence.Units.Count),
+        AUnitName);
+      Result := LCompositionEvidence.Units[0];
+    finally
+      LCompositionEvidence.Free;
+    end;
+  finally
+    LBuildEvidence.Free;
+    LProjectInfo.Free;
+  end;
+end;
+
+function JsonPath(const APath: string): string;
+begin
+  Result := StringReplace(APath, '\', '\\', [rfReplaceAll]);
+  Result := StringReplace(Result, '"', '\"', [rfReplaceAll]);
+end;
+
+function DecManifest(const AMatchField, AMatchValue: string): string;
+begin
+  Result := '{"components":[{"name":"DEC","vendor":"Example","licence":"MIT",' +
+    '"type":"library","' + AMatchField + '":["' + AMatchValue + '"]}]}';
+end;
+
+function ArtefactFromResolved(const AUnit: TResolvedUnitInfo): TArtefactInfo;
+begin
+  Result := Default(TArtefactInfo);
+  Result.FilePath := AUnit.ResolvedPath;
+  Result.SourcePath := AUnit.SourcePath;
+  Result.UnitName := AUnit.UnitName;
+  Result.RelativePath := TPath.GetFileName(AUnit.ResolvedPath);
+  Result.ArtefactType := 'unit-evidence';
+  Result.Origin := UnitOriginKindToString(AUnit.OriginKind);
+end;
+
+procedure AssertDecComponent(const AJson, AUnitName, ASourcePath, ABecause: string);
+var
+  LError: string;
+  LManifest: TComponentManifest;
+  LMatch: TManifestMatch;
+begin
+  Assert.IsTrue(TryParseComponentManifest(AJson, '', LManifest, LError), LError);
+  LMatch := MatchManifestUnit(LManifest, AUnitName, ASourcePath);
+  Assert.AreEqual(NativeInt(Ord(mmLibrary)), NativeInt(Ord(LMatch.Kind)), ABecause);
+  Assert.IsTrue(LMatch.ComponentIndex >= 0, ABecause);
+  Assert.AreEqual('DEC', LManifest.Components[LMatch.ComponentIndex].Name, ABecause);
+end;
+
+procedure TUnitResolverTests.Resolve_ExtrasDecWithManifest_MatchesComponent;
+var
+  LDecDir: string;
+  LInstall: string;
+  LManifest: TComponentManifest;
+  LError: string;
+  LTemp: string;
+  LUnit: TResolvedUnitInfo;
+  LUnits: TResolvedUnitList;
+begin
+  LTemp := TPath.Combine(TPath.GetTempPath, TPath.GetRandomFileName);
+  LInstall := TPath.Combine(LTemp, 'Delphi');
+  LDecDir := TPath.Combine(LInstall, 'Extras\DEC');
+  try
+    LUnit := ResolveInstallFile(FResolver, LInstall, LDecDir, 'DECCipher',
+      'DECCipher.pas',
+      'unit DECCipher;' + sLineBreak + 'interface' + sLineBreak +
+      'implementation' + sLineBreak + 'end.', False);
+    Assert.AreEqual(uokThirdParty, LUnit.OriginKind,
+      'A unit under Extras is third party before the manifest is applied');
+    Assert.IsTrue(SameText(LUnit.SourcePath, TPath.Combine(LDecDir, 'DECCipher.pas')),
+      'The Extras source path is kept for a folder rule');
+
+    AssertDecComponent(DecManifest('units_exact', 'DECCipher'),
+      'DECCipher', LUnit.SourcePath, 'units_exact');
+    AssertDecComponent(DecManifest('units_prefix', 'DEC'),
+      'DECCipher', LUnit.SourcePath, 'units_prefix');
+    AssertDecComponent(DecManifest('units_folder', JsonPath(LDecDir)),
+      'DECCipher', LUnit.SourcePath, 'units_folder');
+
+    Assert.IsTrue(TryParseComponentManifest(DecManifest('units_folder', JsonPath(LDecDir)),
+      '', LManifest, LError), LError);
+    LUnits := TResolvedUnitList.Create;
+    try
+      LUnits.Add(LUnit);
+      ApplyManifestOverInstallOrigin(LManifest, LInstall, LUnits);
+      Assert.AreEqual(uokThirdParty, LUnits[0].OriginKind,
+        'A manifest match keeps an Extras unit as third party');
+    finally
+      LUnits.Free;
+    end;
+  finally
+    if TDirectory.Exists(LTemp) then
+      TDirectory.Delete(LTemp, True);
+  end;
+end;
+
+procedure TUnitResolverTests.Resolve_ExtrasDecWithoutManifest_ClassifiesAsThirdParty;
+var
+  LInstall: string;
+  LTemp: string;
+  LUnit: TResolvedUnitInfo;
+begin
+  LTemp := TPath.Combine(TPath.GetTempPath, TPath.GetRandomFileName);
+  LInstall := TPath.Combine(LTemp, 'Delphi');
+  try
+    LUnit := ResolveInstallFile(FResolver, LInstall,
+      TPath.Combine(LInstall, 'Extras\DEC'), 'DECCipher', 'DECCipher.pas',
+      'unit DECCipher;' + sLineBreak + 'interface' + sLineBreak +
+      'implementation' + sLineBreak + 'end.', False);
+    Assert.AreEqual(uokThirdParty, LUnit.OriginKind,
+      'Extras\DEC with no manifest row is third party, not Embarcadero RTL');
+  finally
+    if TDirectory.Exists(LTemp) then
+      TDirectory.Delete(LTemp, True);
+  end;
+end;
+
+procedure TUnitResolverTests.Resolve_ProductSourceFolders_StayEmbarcadero;
+var
+  LBuildEvidence: TBuildEvidence;
+  LCompositionEvidence: TCompositionEvidence;
+  LEvidenceItem: TBuildEvidenceItem;
+  LInstall: string;
+  LProjectDir: string;
+  LProjectInfo: TProjectInfo;
+  LTemp: string;
+  LUnit: TResolvedUnitInfo;
+  i: Integer;
+begin
+  LTemp := TPath.Combine(TPath.GetTempPath, TPath.GetRandomFileName);
+  LInstall := TPath.Combine(LTemp, 'Delphi');
+  LProjectDir := TPath.Combine(LTemp, 'Project');
+  TDirectory.CreateDirectory(TPath.Combine(LInstall, 'source\rtl\sys'));
+  TDirectory.CreateDirectory(TPath.Combine(LInstall, 'source\vcl'));
+  TDirectory.CreateDirectory(TPath.Combine(LInstall, 'source\fmx'));
+  TDirectory.CreateDirectory(TPath.Combine(LInstall, 'source\data'));
+  TDirectory.CreateDirectory(LProjectDir);
+  try
+    TFile.WriteAllText(TPath.Combine(LInstall, 'source\rtl\sys\System.SysUtils.pas'),
+      'unit System.SysUtils;' + sLineBreak + 'interface' + sLineBreak +
+      'implementation' + sLineBreak + 'end.');
+    TFile.WriteAllText(TPath.Combine(LInstall, 'source\vcl\Vcl.Forms.pas'),
+      'unit Vcl.Forms;' + sLineBreak + 'interface' + sLineBreak +
+      'implementation' + sLineBreak + 'end.');
+    TFile.WriteAllText(TPath.Combine(LInstall, 'source\fmx\FMX.Forms.pas'),
+      'unit FMX.Forms;' + sLineBreak + 'interface' + sLineBreak +
+      'implementation' + sLineBreak + 'end.');
+    TFile.WriteAllText(TPath.Combine(LInstall, 'source\data\Data.DB.pas'),
+      'unit Data.DB;' + sLineBreak + 'interface' + sLineBreak +
+      'implementation' + sLineBreak + 'end.');
+
+    LProjectInfo := TProjectInfo.Create;
+    LBuildEvidence := TBuildEvidence.Create;
+    try
+      LProjectInfo.ProjectDir := LProjectDir;
+      LProjectInfo.Platform := 'Win32';
+      LProjectInfo.Toolchain.ProductName := 'Embarcadero Delphi';
+      LProjectInfo.Toolchain.RootDir := LInstall;
+      LProjectInfo.Toolchain.Version := '37.0';
+      LBuildEvidence.SearchPaths.Add(TPath.Combine(LInstall, 'source\rtl\sys'));
+      LBuildEvidence.SearchPaths.Add(TPath.Combine(LInstall, 'source\vcl'));
+      LBuildEvidence.SearchPaths.Add(TPath.Combine(LInstall, 'source\fmx'));
+      LBuildEvidence.SearchPaths.Add(TPath.Combine(LInstall, 'source\data'));
+
+      LEvidenceItem := Default(TBuildEvidenceItem);
+      LEvidenceItem.SourceKind := besMapFile;
+      LEvidenceItem.FilePath := TPath.Combine(LProjectDir, 'Demo.map');
+      LEvidenceItem.UnitName := 'System.SysUtils';
+      LBuildEvidence.EvidenceItems.Add(LEvidenceItem);
+      LEvidenceItem.UnitName := 'Vcl.Forms';
+      LBuildEvidence.EvidenceItems.Add(LEvidenceItem);
+      LEvidenceItem.UnitName := 'FMX.Forms';
+      LBuildEvidence.EvidenceItems.Add(LEvidenceItem);
+      LEvidenceItem.UnitName := 'Data.DB';
+      LBuildEvidence.EvidenceItems.Add(LEvidenceItem);
+
+      LCompositionEvidence := FResolver.Resolve(LProjectInfo, LBuildEvidence);
+      try
+        Assert.AreEqual(NativeInt(4), NativeInt(LCompositionEvidence.Units.Count));
+        for i := 0 to LCompositionEvidence.Units.Count - 1 do
+        begin
+          LUnit := LCompositionEvidence.Units[i];
+          if SameText(LUnit.UnitName, 'System.SysUtils') then
+            Assert.AreEqual(uokEmbarcaderoRtl, LUnit.OriginKind,
+              'A unit under source\rtl stays Embarcadero RTL')
+          else if SameText(LUnit.UnitName, 'Vcl.Forms') then
+            Assert.AreEqual(uokEmbarcaderoVcl, LUnit.OriginKind,
+              'A unit under source\vcl stays Embarcadero VCL')
+          else if SameText(LUnit.UnitName, 'FMX.Forms') then
+            Assert.AreEqual(uokEmbarcaderoFmx, LUnit.OriginKind,
+              'A unit under source\fmx stays Embarcadero FMX')
+          else
+            Assert.AreEqual(uokEmbarcaderoRtl, LUnit.OriginKind,
+              'A unit under source\data stays Embarcadero RTL');
+        end;
+      finally
+        LCompositionEvidence.Free;
+      end;
+    finally
+      LBuildEvidence.Free;
+      LProjectInfo.Free;
+    end;
+  finally
+    if TDirectory.Exists(LTemp) then
+      TDirectory.Delete(LTemp, True);
+  end;
+end;
+
+procedure TUnitResolverTests.Resolve_CatalogRepositoryUnderInstall_ClassifiesAsThirdParty;
+var
+  LInstall: string;
+  LTemp: string;
+  LUnit: TResolvedUnitInfo;
+begin
+  LTemp := TPath.Combine(TPath.GetTempPath, TPath.GetRandomFileName);
+  LInstall := TPath.Combine(LTemp, 'Delphi');
+  try
+    LUnit := ResolveInstallFile(FResolver, LInstall,
+      TPath.Combine(LInstall, 'CatalogRepository\ICS\Source'),
+      'OverbyteIcsWSocket', 'OverbyteIcsWSocket.pas',
+      'unit OverbyteIcsWSocket;' + sLineBreak + 'interface' + sLineBreak +
+      'implementation' + sLineBreak + 'end.', False);
+    Assert.AreEqual(uokThirdParty, LUnit.OriginKind,
+      'A GetIt package under the install CatalogRepository is third party');
+  finally
+    if TDirectory.Exists(LTemp) then
+      TDirectory.Delete(LTemp, True);
+  end;
+end;
+
+procedure TUnitResolverTests.Resolve_CatalogRepositoryUnderDocuments_ClassifiesAsThirdParty;
+var
+  LInstall: string;
+  LTemp: string;
+  LUnit: TResolvedUnitInfo;
+begin
+  LTemp := TPath.Combine(TPath.GetTempPath, TPath.GetRandomFileName);
+  LInstall := TPath.Combine(LTemp, 'ProgramFiles\Embarcadero\Studio\37.0');
+  try
+    // Default GetIt location: Documents\Embarcadero\Studio\<version>\CatalogRepository
+    LUnit := ResolveInstallFile(FResolver, LInstall,
+      TPath.Combine(LTemp, 'Documents\Embarcadero\Studio\37.0\CatalogRepository\ICS\Source'),
+      'OverbyteIcsWSocket', 'OverbyteIcsWSocket.pas',
+      'unit OverbyteIcsWSocket;' + sLineBreak + 'interface' + sLineBreak +
+      'implementation' + sLineBreak + 'end.', False);
+    Assert.AreEqual(uokThirdParty, LUnit.OriginKind,
+      'A GetIt package under Documents is third party');
+  finally
+    if TDirectory.Exists(LTemp) then
+      TDirectory.Delete(LTemp, True);
+  end;
+end;
+
+procedure TUnitResolverTests.Resolve_ProductLibDcuWithManifest_MatchesComponent;
+var
+  LError: string;
+  LInstall: string;
+  LManifest: TComponentManifest;
+  LTemp: string;
+  LUnit: TResolvedUnitInfo;
+  LUnits: TResolvedUnitList;
+begin
+  LTemp := TPath.Combine(TPath.GetTempPath, TPath.GetRandomFileName);
+  LInstall := TPath.Combine(LTemp, 'Delphi');
+  try
+    LUnit := ResolveInstallFile(FResolver, LInstall,
+      TPath.Combine(LInstall, 'lib\Win32\release'), 'DECCipher', 'DECCipher.dcu',
+      '', True);
+    Assert.AreEqual(uokEmbarcaderoRtl, LUnit.OriginKind,
+      'A DCU in the product lib folder is Embarcadero when no row matches');
+
+    Assert.IsTrue(TryParseComponentManifest(DecManifest('units_prefix', 'DEC'),
+      '', LManifest, LError), LError);
+    AssertDecComponent(DecManifest('units_prefix', 'DEC'),
+      'DECCipher', LUnit.SourcePath, 'units_prefix');
+    LUnits := TResolvedUnitList.Create;
+    try
+      LUnits.Add(LUnit);
+      ApplyManifestOverInstallOrigin(LManifest, LInstall, LUnits);
+      Assert.AreEqual(uokThirdParty, LUnits[0].OriginKind,
+        'A matching manifest row wins over the product lib location');
+    finally
+      LUnits.Free;
+    end;
+  finally
+    if TDirectory.Exists(LTemp) then
+      TDirectory.Delete(LTemp, True);
+  end;
+end;
+
+procedure TUnitResolverTests.Resolve_UserFoldersUnderInstall_ClassifyAsThirdParty;
+var
+  LInstall: string;
+  LTemp: string;
+  LSource: TResolvedUnitInfo;
+  LLib: TResolvedUnitInfo;
+begin
+  LTemp := TPath.Combine(TPath.GetTempPath, TPath.GetRandomFileName);
+  LInstall := TPath.Combine(LTemp, 'Delphi');
+  try
+    LSource := ResolveInstallFile(FResolver, LInstall,
+      TPath.Combine(LInstall, 'source\DEC'), 'DECCipher', 'DECCipher.pas',
+      'unit DECCipher;' + sLineBreak + 'interface' + sLineBreak +
+      'implementation' + sLineBreak + 'end.', False);
+    LLib := ResolveInstallFile(FResolver, LInstall,
+      TPath.Combine(LInstall, 'lib\DEC'), 'DECUtil', 'DECUtil.dcu', '', True);
+    Assert.AreEqual(uokThirdParty, LSource.OriginKind,
+      'A folder added under source is third party');
+    Assert.AreEqual(uokThirdParty, LLib.OriginKind,
+      'A folder added under lib is third party');
+  finally
+    if TDirectory.Exists(LTemp) then
+      TDirectory.Delete(LTemp, True);
+  end;
+end;
+
+procedure TUnitResolverTests.Resolve_UnmatchedInstallUnit_IsNamedUnknownSupplier;
+const
+  cManifestJson =
+    '{"components":[{"name":"DEC","vendor":"Example","licence":"MIT",' +
+    '"units_prefix":["DEC"]}],"own_code_units":["MyHelper"]}';
+var
+  LArtefacts: TArtefactList;
+  LData: TComplianceReportData;
+  LDec: TResolvedUnitInfo;
+  LError: string;
+  LExample: TReportGroup;
+  LHelper: TResolvedUnitInfo;
+  LIcs: TResolvedUnitInfo;
+  LInstall: string;
+  LManifest: TComponentManifest;
+  LOverview: TReportOverview;
+  LRtl: TResolvedUnitInfo;
+  LTemp: string;
+  LUnits: TResolvedUnitList;
+  LUnknown: TReportGroup;
+  LWarnings: TArray<string>;
+
+  function PasText(const AUnitName: string): string;
+  begin
+    Result := 'unit ' + AUnitName + ';' + sLineBreak + 'interface' + sLineBreak +
+      'implementation' + sLineBreak + 'end.';
+  end;
+
+  function FindSupplier(const AOverview: TReportOverview;
+    const ATitle: string): TReportGroup;
+  var
+    i: Integer;
+  begin
+    Result := Default(TReportGroup);
+    for i := 0 to High(AOverview.Suppliers) do
+      if SameText(AOverview.Suppliers[i].Title, ATitle) then
+        Exit(AOverview.Suppliers[i]);
+  end;
+
+begin
+  LTemp := TPath.Combine(TPath.GetTempPath, TPath.GetRandomFileName);
+  LInstall := TPath.Combine(LTemp, 'ProgramFiles\Embarcadero\Studio\37.0');
+  LArtefacts := TArtefactList.Create;
+  LUnits := TResolvedUnitList.Create;
+  try
+    LDec := ResolveInstallFile(FResolver, LInstall,
+      TPath.Combine(LInstall, 'Extras\DEC'), 'DECCipher', 'DECCipher.pas',
+      PasText('DECCipher'), False);
+    LIcs := ResolveInstallFile(FResolver, LInstall,
+      TPath.Combine(LInstall, 'CatalogRepository\ICS\Source'),
+      'OverbyteIcsWSocket', 'OverbyteIcsWSocket.pas',
+      PasText('OverbyteIcsWSocket'), False);
+    LHelper := ResolveInstallFile(FResolver, LInstall,
+      TPath.Combine(LInstall, 'Extras\Mine'), 'MyHelper', 'MyHelper.pas',
+      PasText('MyHelper'), False);
+    LRtl := ResolveInstallFile(FResolver, LInstall,
+      TPath.Combine(LInstall, 'source\rtl\sys'), 'System.SysUtils',
+      'System.SysUtils.pas', PasText('System.SysUtils'), False);
+
+    LUnits.Add(LDec);
+    LUnits.Add(LIcs);
+    LUnits.Add(LHelper);
+    LUnits.Add(LRtl);
+    Assert.IsTrue(TryParseComponentManifest(cManifestJson, '', LManifest, LError),
+      LError);
+    ApplyManifestOverInstallOrigin(LManifest, LInstall, LUnits);
+
+    Assert.AreEqual(uokThirdParty, LUnits[0].OriginKind,
+      'A manifest library under Extras stays third party');
+    Assert.AreEqual(uokThirdParty, LUnits[1].OriginKind,
+      'A GetIt unit under the install with no row is third party');
+    Assert.AreEqual(uokThirdParty, LUnits[2].OriginKind,
+      'An own-code unit under Extras is still third party by location');
+    Assert.AreEqual(uokEmbarcaderoRtl, LUnits[3].OriginKind,
+      'A unit under source\rtl stays Embarcadero RTL');
+
+    LArtefacts.Add(ArtefactFromResolved(LUnits[0]));
+    LArtefacts.Add(ArtefactFromResolved(LUnits[1]));
+    LArtefacts.Add(ArtefactFromResolved(LUnits[2]));
+    LArtefacts.Add(ArtefactFromResolved(LUnits[3]));
+    Assert.AreEqual('Third party', LArtefacts[1].Origin);
+    Assert.AreEqual('Embarcadero RTL', LArtefacts[3].Origin);
+
+    LData := Default(TComplianceReportData);
+    LData.Metadata.ProductName := 'Demo';
+    LData.Metadata.ComponentManifestJson := cManifestJson;
+    LData.Artefacts := LArtefacts;
+    LOverview := BuildReportOverview(LData);
+
+    Assert.AreEqual(2, LOverview.ThirdPartyUnitCount,
+      'The library unit and the unmatched unit count as third party');
+    Assert.AreEqual(1, LOverview.WithoutManifestCount,
+      'Only the unmatched unit is missing a manifest row');
+    LUnknown := FindSupplier(LOverview, cUnknownSupplierTitle);
+    Assert.AreEqual(1, LUnknown.Count);
+    Assert.AreEqual('OverbyteIcsWSocket', LUnknown.NamesText);
+    Assert.AreEqual(NativeInt(1), NativeInt(Length(LUnknown.Detail)));
+    Assert.AreEqual('Overbyte: 1 unit (OverbyteIcsWSocket)', LUnknown.Detail[0]);
+    Assert.AreEqual(0, Pos('DECCipher', LUnknown.NamesText));
+    Assert.AreEqual(0, Pos('MyHelper', LUnknown.NamesText));
+    Assert.AreEqual(0, Pos('System.SysUtils', LUnknown.NamesText));
+    LExample := FindSupplier(LOverview, 'Example');
+    Assert.AreEqual(1, LExample.Count);
+    Assert.AreEqual('DECCipher', LExample.NamesText);
+
+    LWarnings := BuildThirdPartyComponentWarnings(TSbomConfig.Default,
+      LManifest, LArtefacts);
+    Assert.AreEqual(NativeInt(1), NativeInt(Length(LWarnings)));
+    Assert.IsTrue(Pos('OverbyteIcsWSocket', LWarnings[0]) > 0, LWarnings[0]);
+    Assert.AreEqual(0, Pos('DECCipher', LWarnings[0]));
+    Assert.AreEqual(0, Pos('MyHelper', LWarnings[0]));
+    Assert.AreEqual(0, Pos('System.SysUtils', LWarnings[0]));
+  finally
+    LUnits.Free;
+    LArtefacts.Free;
+    if TDirectory.Exists(LTemp) then
+      TDirectory.Delete(LTemp, True);
   end;
 end;
 

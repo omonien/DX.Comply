@@ -21,8 +21,9 @@ interface
 uses
   System.Generics.Defaults,
   System.Generics.Collections,
-  DX.Comply.Engine.Intf,
-  DX.Comply.BuildEvidence.Intf;
+  DX.Comply.BuildEvidence.Intf,
+  DX.Comply.ComponentManifest,
+  DX.Comply.Engine.Intf;
 
 type
   /// <summary>
@@ -77,8 +78,9 @@ type
     /// </summary>
     function IsPathUnderDirectory(const APath, ABaseDirectory: string): Boolean;
     /// <summary>
-    /// True when APath lies in one of the folders Embarcadero ships below the
-    /// Delphi root (source, lib, include, bin, bin64, imports, ObjRepos, Redist).
+    /// True when APath lies in a product source tree or a product lib folder
+    /// below the Delphi root. Extras, a GetIt catalog repository, and any
+    /// other folder under the install are not included.
     /// </summary>
     function IsEmbarcaderoShippedPath(const APath, ARootDir: string): Boolean;
     /// <summary>
@@ -129,6 +131,15 @@ type
     function Resolve(const AProjectInfo: TProjectInfo;
       const ABuildEvidence: TBuildEvidence): TCompositionEvidence;
   end;
+
+/// <summary>
+/// A units_exact, units_prefix, or units_folder match names a third-party
+/// library. That match wins over a Delphi-install location that classified
+/// the unit as Embarcadero. The origin becomes Third party. A unit that
+/// does not match, including a product RTL unit, is left as resolved.
+/// </summary>
+procedure ApplyManifestOverInstallOrigin(const AManifest: TComponentManifest;
+  const AInstallRoot: string; const AUnits: TResolvedUnitList);
 
 implementation
 
@@ -291,9 +302,9 @@ begin
               IsPathUnderDirectory(LSearchPath, AProjectInfo.Toolchain.RootDir)) then
         Exit(uokLocalProject);
 
-  // Only the folders Embarcadero ships count as Embarcadero. A library that
-  // was installed into another folder below the Delphi root, such as
-  // Extras\madExcept, is third-party code (issue #134).
+  // Only product source trees and product lib folders count as Embarcadero.
+  // Extras, a GetIt catalog repository, and a folder added under the
+  // install are third-party code (issue #134).
   if IsEmbarcaderoShippedPath(AResolvedPath, AProjectInfo.Toolchain.RootDir) then
   begin
     if StartsText('Vcl.', AUnitName) or (Pos('\source\vcl\', LowerCase(AResolvedPath)) > 0) then
@@ -412,7 +423,7 @@ begin
   Result := uokLocalProject;
 end;
 
-function TUnitResolver.IsPathUnderDirectory(const APath, ABaseDirectory: string): Boolean;
+function PathIsUnderDirectory(const APath, ABaseDirectory: string): Boolean;
 var
   LNormalizedBase: string;
   LNormalizedPath: string;
@@ -427,20 +438,192 @@ begin
     SameText(ExcludeTrailingPathDelimiter(LNormalizedBase), LNormalizedPath);
 end;
 
-function TUnitResolver.IsEmbarcaderoShippedPath(const APath, ARootDir: string): Boolean;
-const
-  cShippedFolders: array[0..7] of string = ('source', 'lib', 'include', 'bin',
-    'bin64', 'imports', 'ObjRepos', 'Redist');
+function TUnitResolver.IsPathUnderDirectory(const APath, ABaseDirectory: string): Boolean;
+begin
+  Result := PathIsUnderDirectory(APath, ABaseDirectory);
+end;
+
+type
+  TFirstSegment = record
+    Name: string;
+    HasMore: Boolean;
+  end;
+
+function FirstPathSegment(const APath, ABaseDirectory: string): TFirstSegment;
 var
-  LFolder: string;
+  LBase: string;
+  LPath: string;
+  LRest: string;
+  LSlash: Integer;
+begin
+  Result.Name := '';
+  Result.HasMore := False;
+  if not PathIsUnderDirectory(APath, ABaseDirectory) then
+    Exit;
+
+  LBase := ExcludeTrailingPathDelimiter(LowerCase(TPath.GetFullPath(ABaseDirectory)));
+  LPath := LowerCase(TPath.GetFullPath(APath));
+  if NativeInt(Length(LPath)) <= NativeInt(Length(LBase)) then
+    Exit;
+
+  LRest := Copy(LPath, Length(LBase) + 1, MaxInt);
+  if StartsText('\', LRest) or StartsText('/', LRest) then
+    LRest := Copy(LRest, 2, MaxInt);
+  if NativeInt(Length(LRest)) = 0 then
+    Exit;
+
+  LSlash := Pos('\', LRest);
+  if LSlash = 0 then
+    LSlash := Pos('/', LRest);
+  if LSlash = 0 then
+    Result.Name := LRest
+  else
+  begin
+    Result.Name := Copy(LRest, 1, LSlash - 1);
+    Result.HasMore := NativeInt(Length(LRest)) > NativeInt(LSlash);
+  end;
+end;
+
+function IsReleaseOrDebugFolder(const AName: string): Boolean;
+begin
+  Result := SameText(AName, 'release') or SameText(AName, 'debug');
+end;
+
+function IsDelphiLibPlatform(const AName: string): Boolean;
+const
+  cPlatforms: array[0..21] of string = (
+    'win32', 'win64', 'win64x', 'winarm64',
+    'linux32', 'linux64', 'linuxarm64',
+    'osx32', 'osx64', 'osxarm64', 'macos64', 'macosarm64',
+    'android', 'android32', 'android64',
+    'iosdevice', 'iosdevice32', 'iosdevice64',
+    'iossim32', 'iossim64', 'iossimarm64', 'iossimulator');
+var
+  i: Integer;
 begin
   Result := False;
-  if not IsPathUnderDirectory(APath, ARootDir) then
-    Exit;
-  for LFolder in cShippedFolders do
-  begin
-    if IsPathUnderDirectory(APath, TPath.Combine(ARootDir, LFolder)) then
+  for i := Low(cPlatforms) to High(cPlatforms) do
+    if SameText(AName, cPlatforms[i]) then
       Exit(True);
+end;
+
+function IsEmbarcaderoSourcePath(const APath, ARootDir: string): Boolean;
+const
+  // First-level folders of the product source tree. A library copied into
+  // source\, or installed under Extras or CatalogRepository, is not here.
+  cSourceFolders: array[0..23] of string = (
+    'rtl', 'vcl', 'fmx', 'data', 'databinding', 'dataexplorer',
+    'dunit', 'dunitx', 'experts', 'flatbox2d', 'ibx',
+    'indy', 'indy10', 'indyimpl', 'internet', 'property editors',
+    'soap', 'tethering', 'toolsapi', 'visualizers', 'xml',
+    'db', 'websnap', 'clx');
+var
+  i: Integer;
+  LFolder: TFirstSegment;
+  LSource: string;
+begin
+  Result := False;
+  LSource := TPath.Combine(ARootDir, 'source');
+  if not PathIsUnderDirectory(APath, LSource) then
+    Exit;
+  LFolder := FirstPathSegment(APath, LSource);
+  if LFolder.Name = '' then
+    Exit;
+  for i := Low(cSourceFolders) to High(cSourceFolders) do
+    if SameText(LFolder.Name, cSourceFolders[i]) then
+      Exit(True);
+end;
+
+function IsEmbarcaderoLibPath(const APath, ARootDir: string): Boolean;
+var
+  LFirst: TFirstSegment;
+  LLib: string;
+  LSecond: TFirstSegment;
+begin
+  // Product DCUs live in lib\<platform>\release, lib\<platform>\debug,
+  // directly in lib\<platform>, or (older installs) directly in lib.
+  // lib\<package>\... is a library added under the install.
+  Result := False;
+  LLib := TPath.Combine(ARootDir, 'lib');
+  if not PathIsUnderDirectory(APath, LLib) then
+    Exit;
+
+  LFirst := FirstPathSegment(APath, LLib);
+  if LFirst.Name = '' then
+    Exit;
+  if not LFirst.HasMore then
+    Exit(True);
+  if IsReleaseOrDebugFolder(LFirst.Name) then
+    Exit(True);
+
+  // release and debug count only under a product platform folder.
+  // lib\SomeLibrary\release is a folder added under the install.
+  LSecond := FirstPathSegment(APath, TPath.Combine(LLib, LFirst.Name));
+  if not IsDelphiLibPlatform(LFirst.Name) then
+    Exit;
+  if IsReleaseOrDebugFolder(LSecond.Name) then
+    Exit(True);
+  if not LSecond.HasMore then
+    Exit(True);
+end;
+
+function TUnitResolver.IsEmbarcaderoShippedPath(const APath, ARootDir: string): Boolean;
+begin
+  Result := IsEmbarcaderoSourcePath(APath, ARootDir) or
+    IsEmbarcaderoLibPath(APath, ARootDir);
+end;
+
+function ManifestSourcePath(const AUnit: TResolvedUnitInfo): string;
+begin
+  // Same path the manifest folder rule uses: the recorded source, or the
+  // resolved .pas. A DCU in the output folder has no folder match without
+  // a source path.
+  Result := Trim(AUnit.SourcePath);
+  if Result <> '' then
+    Exit;
+  if SameText(TPath.GetExtension(AUnit.ResolvedPath), '.pas') then
+    Result := AUnit.ResolvedPath;
+end;
+
+function InstallLocationPath(const AUnit: TResolvedUnitInfo): string;
+begin
+  Result := Trim(AUnit.SourcePath);
+  if Result = '' then
+    Result := AUnit.ResolvedPath;
+end;
+
+procedure ApplyManifestOverInstallOrigin(const AManifest: TComponentManifest;
+  const AInstallRoot: string; const AUnits: TResolvedUnitList);
+var
+  i: Integer;
+  LLocation: string;
+  LMatch: TManifestMatch;
+  LUnit: TResolvedUnitInfo;
+begin
+  if not AManifest.Loaded or not Assigned(AUnits) then
+    Exit;
+  if Trim(AInstallRoot) = '' then
+    Exit;
+
+  for i := 0 to AUnits.Count - 1 do
+  begin
+    LUnit := AUnits[i];
+    if not (LUnit.OriginKind in [uokEmbarcaderoRtl, uokEmbarcaderoVcl,
+      uokEmbarcaderoFmx]) then
+      Continue;
+
+    LLocation := InstallLocationPath(LUnit);
+    if not PathIsUnderDirectory(LLocation, AInstallRoot) and
+      not PathIsUnderDirectory(LUnit.ResolvedPath, AInstallRoot) then
+      Continue;
+
+    LMatch := MatchManifestUnit(AManifest, LUnit.UnitName,
+      ManifestSourcePath(LUnit));
+    if LMatch.Kind <> mmLibrary then
+      Continue;
+
+    LUnit.OriginKind := uokThirdParty;
+    AUnits[i] := LUnit;
   end;
 end;
 
