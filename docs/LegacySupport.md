@@ -107,7 +107,7 @@ The critical part is `/p:DCC_MapFile=3`. This tells MSBuild to produce the detai
 
 ## MAP File Directory Override
 
-If the MAP file is not in the default output directory that DX.Comply derives from the `.dproj`, you can specify the directory explicitly:
+If the MAP file is not in the default output directory that DX.Comply derives from the `.dproj`, you can specify the directory explicitly. For a 32-bit Android `.dproj` that directory is `Android\<Config>` (`Android32` is accepted and mapped there). Android64 stays `Android64\<Config>`. `$(Platform)` and `$(Config)` in the output paths are expanded.
 
 ```cmd
 dxcomply --project=MyApp.dproj --map-dir=C:\builds\output --output=bom.json --no-pause

@@ -50,7 +50,7 @@ Every SBOM generation follows the same pipeline, regardless of whether it was tr
 | `DX.Comply.Engine.pas` | `TDxComplyGenerator` facade. Orchestrates the full pipeline |
 | `DX.Comply.Engine.Intf.pas` | Shared types: `TProjectInfo`, `TArtefactInfo`, `TSbomMetadata` |
 | `DX.Comply.ComponentManifest.pas` | Optional components.json: match units to libraries, licences, package URLs, and copyright |
-| `DX.Comply.ProjectScanner.pas` | Regex-based `.dproj` parser. Extracts paths, toolchain, version, DllSuffix |
+| `DX.Comply.ProjectScanner.pas` | Regex-based `.dproj` parser. Extracts paths, toolchain, version, DllSuffix. The 32-bit Android folder is Android. Android versionName is used when FileVersion is absent |
 | `DX.Comply.BuildOrchestrator.pas` | Plan construction and script-based build execution (used by CLI fallback) |
 | `DX.Comply.BuildEvidence.Reader.pas` | Reads MAP files, compiler CFG/RSP files; collects evidence items |
 | `DX.Comply.MapFile.Reader.pas` | Extracts unit names from MAP segment entries (`M=Unit`) and line-number sections |

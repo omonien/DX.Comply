@@ -158,6 +158,87 @@ type
     procedure ExtractVerInfoKeyValue_TwoAmpersands_DecodesFullName;
 
     /// <summary>
+    /// Android32, Android32Arm, and AndroidArm use the folder Android.
+    /// Android64Arm and AndroidARM64 use Android64. Other Delphi platform
+    /// names are already the folder name.
+    /// </summary>
+    [Test]
+    procedure PlatformOutputDirectoryName_MapsAndroidFolders;
+
+    /// <summary>
+    /// A dotted version keeps every character of each component. 16 stays 16.
+    /// </summary>
+    [Test]
+    procedure PreserveDottedVersion_KeepsEveryComponent;
+
+    /// <summary>
+    /// A 32-bit Android scan writes under Android\Config, including a custom
+    /// DCC_ExeOutput prefix. The reported platform stays Android32.
+    /// </summary>
+    [Test]
+    procedure Scan_Android32_OutputUsesAndroidFolder;
+
+    /// <summary>
+    /// Android64 keeps the folder Android64. It is not folded into Android.
+    /// </summary>
+    [Test]
+    procedure Scan_Android64_OutputStaysAndroid64;
+
+    /// <summary>
+    /// When libMyApp.so and its map already exist under Android\Release,
+    /// an Android32 scan uses those files.
+    /// </summary>
+    [Test]
+    procedure Scan_Android32_FindsFilesInAndroidFolder;
+
+    /// <summary>
+    /// When the Delphi folder has no binary and the caller's folder does,
+    /// that existing file is used.
+    /// </summary>
+    [Test]
+    procedure Scan_Android32_FallsBackToCallerFolder;
+
+    /// <summary>
+    /// With no DCC_ExeOutput, an existing Android\Config directory is the
+    /// output directory.
+    /// </summary>
+    [Test]
+    procedure Scan_Android_NoExeOutput_UsesExistingPlatformFolder;
+
+    /// <summary>
+    /// With no DCC_ExeOutput and no platform folder on disk, the project
+    /// directory is the output directory.
+    /// </summary>
+    [Test]
+    procedure Scan_Android_NoExeOutput_UsesProjectDirectory;
+
+    /// <summary>
+    /// versionName in Base_Android replaces the default 1.0.0.x. A sibling
+    /// Android64 group is not applied. Android32 reads the same group.
+    /// </summary>
+    [Test]
+    procedure Scan_Android_VersionName_IsProductVersion;
+
+    /// <summary>
+    /// VerInfo_MajorVer in Cfg_2_Android is used when versionName and
+    /// FileVersion are both absent.
+    /// </summary>
+    [Test]
+    procedure Scan_Android_MajorVer_WhenKeysHaveNoVersion;
+
+    /// <summary>
+    /// FileVersion in the Android keys wins over versionName.
+    /// </summary>
+    [Test]
+    procedure Scan_Android_FileVersion_WinsOverVersionName;
+
+    /// <summary>
+    /// A Windows scan keeps FileVersion and does not read versionName.
+    /// </summary>
+    [Test]
+    procedure Scan_Win32_IgnoresAndroidVersionName;
+
+    /// <summary>
     /// An Android application scan expects libProject.so.map and does not
     /// accept a desktop Project.map in that directory. Win32 stays
     /// Project.map. Regression for issue #89.
@@ -880,6 +961,545 @@ begin
   Assert.AreEqual('Fan', ExtractVerInfoKeyValue(cKeys, 'ProductName'));
 end;
 
+function PathHasSegment(const APath, ASegment: string): Boolean;
+var
+  LPart: string;
+begin
+  Result := False;
+  for LPart in APath.Split(['\', '/']) do
+    if SameText(LPart, ASegment) then
+      Exit(True);
+end;
+
+function HasWarningText(const AProjectInfo: TProjectInfo; const AText: string): Boolean;
+var
+  LWarning: string;
+begin
+  Result := False;
+  for LWarning in AProjectInfo.Warnings do
+    if Pos(AText, LWarning) > 0 then
+      Exit(True);
+end;
+
+/// <summary>
+/// A Delphi 12/13 style Android application .dproj. AExeOutput is the
+/// DCC_ExeOutput element body. An empty value omits that element.
+/// ABplOutput, ADcpOutput, and ADcuOutput are the other output elements.
+/// </summary>
+function AndroidAppDproj(const AExeOutput: string;
+  const ABplOutput: string = ''; const ADcpOutput: string = '';
+  const ADcuOutput: string = ''): string;
+var
+  LOutput: string;
+begin
+  LOutput := '';
+  if AExeOutput <> '' then
+    LOutput := LOutput + '    <DCC_ExeOutput>' + AExeOutput + '</DCC_ExeOutput>' + sLineBreak;
+  if ABplOutput <> '' then
+    LOutput := LOutput + '    <DCC_BplOutput>' + ABplOutput + '</DCC_BplOutput>' + sLineBreak;
+  if ADcpOutput <> '' then
+    LOutput := LOutput + '    <DCC_DcpOutput>' + ADcpOutput + '</DCC_DcpOutput>' + sLineBreak;
+  if ADcuOutput <> '' then
+    LOutput := LOutput + '    <DCC_DcuOutput>' + ADcuOutput + '</DCC_DcuOutput>' + sLineBreak;
+  Result :=
+    '<?xml version="1.0" encoding="utf-8"?>' + sLineBreak +
+    '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">' + sLineBreak +
+    '  <PropertyGroup>' + sLineBreak +
+    '    <MainSource>MyApp.dpr</MainSource>' + sLineBreak +
+    '    <AppType>Application</AppType>' + sLineBreak +
+    '    <ProjectVersion>20.4</ProjectVersion>' + sLineBreak +
+    '    <TargetedPlatforms>288</TargetedPlatforms>' + sLineBreak +
+         LOutput +
+    '  </PropertyGroup>' + sLineBreak +
+    '  <ItemGroup>' + sLineBreak +
+    '    <BuildConfiguration Include="Release">' + sLineBreak +
+    '      <Key>Cfg_2</Key>' + sLineBreak +
+    '      <CfgParent>Base</CfgParent>' + sLineBreak +
+    '    </BuildConfiguration>' + sLineBreak +
+    '  </ItemGroup>' + sLineBreak +
+    '  <ProjectExtensions>' + sLineBreak +
+    '    <BorlandProject>' + sLineBreak +
+    '      <Platforms>' + sLineBreak +
+    '        <Platform value="Android">True</Platform>' + sLineBreak +
+    '        <Platform value="Android64">True</Platform>' + sLineBreak +
+    '      </Platforms>' + sLineBreak +
+    '    </BorlandProject>' + sLineBreak +
+    '  </ProjectExtensions>' + sLineBreak +
+    '</Project>';
+end;
+
+function WriteProject(const ADir, AXml: string): string;
+begin
+  ForceDirectories(ADir);
+  Result := TPath.Combine(ADir, 'MyApp.dproj');
+  TFile.WriteAllText(Result, AXml, TEncoding.UTF8);
+end;
+
+procedure TProjectScannerTests.PlatformOutputDirectoryName_MapsAndroidFolders;
+begin
+  Assert.AreEqual('Android', PlatformOutputDirectoryName('Android32'));
+  Assert.AreEqual('Android', PlatformOutputDirectoryName('android32'));
+  Assert.AreEqual('Android', PlatformOutputDirectoryName('Android32Arm'));
+  Assert.AreEqual('Android', PlatformOutputDirectoryName('AndroidArm'));
+  Assert.AreEqual('Android', PlatformOutputDirectoryName('Android'));
+  Assert.AreEqual('Android64', PlatformOutputDirectoryName('Android64'));
+  Assert.AreEqual('Android64', PlatformOutputDirectoryName('Android64Arm'));
+  Assert.AreEqual('Android64', PlatformOutputDirectoryName('AndroidARM64'));
+  Assert.AreEqual('Win32', PlatformOutputDirectoryName('Win32'));
+  Assert.AreEqual('Win64', PlatformOutputDirectoryName('Win64'));
+  Assert.AreEqual('Win64x', PlatformOutputDirectoryName('Win64x'));
+  Assert.AreEqual('OSX32', PlatformOutputDirectoryName('OSX32'));
+  Assert.AreEqual('OSX64', PlatformOutputDirectoryName('OSX64'));
+  Assert.AreEqual('OSXARM64', PlatformOutputDirectoryName('OSXARM64'));
+  Assert.AreEqual('iOSSimulator', PlatformOutputDirectoryName('iOSSimulator'));
+  Assert.AreEqual('iOSDevice32', PlatformOutputDirectoryName('iOSDevice32'));
+  Assert.AreEqual('iOSDevice64', PlatformOutputDirectoryName('iOSDevice64'));
+  Assert.AreEqual('iOSSimARM64', PlatformOutputDirectoryName('iOSSimARM64'));
+  Assert.AreEqual('Linux64', PlatformOutputDirectoryName('Linux64'));
+  Assert.AreEqual('LinuxARM64', PlatformOutputDirectoryName('LinuxARM64'));
+end;
+
+procedure TProjectScannerTests.PreserveDottedVersion_KeepsEveryComponent;
+begin
+  Assert.AreEqual('16.0.0.7', PreserveDottedVersion('16.0.0.7'));
+  Assert.AreEqual('16.0.0.7', PreserveDottedVersion(' 16.0.0.7 '));
+  Assert.AreEqual('16.0.0', PreserveDottedVersion('16.0.0'));
+  Assert.AreEqual('01.02.03.04', PreserveDottedVersion('01.02.03.04'));
+  Assert.AreEqual('16', PreserveDottedVersion('16'));
+  Assert.AreEqual('', PreserveDottedVersion(''));
+end;
+
+procedure TProjectScannerTests.Scan_Android32_OutputUsesAndroidFolder;
+var
+  LDproj: string;
+  LProjectInfo: TProjectInfo;
+  LScanner: IProjectScanner;
+  LTempDir: string;
+begin
+  LTempDir := MakeTempDir;
+  try
+    LDproj := WriteProject(LTempDir, AndroidAppDproj(
+      '.\Source\$(Platform)\$(Config)',
+      '.\bpl\$(Platform)\$(Config)',
+      '.\dcp\$(Platform)\$(Config)',
+      '.\dcu\$(Platform)\$(Config)'));
+    LScanner := TProjectScanner.Create;
+    LProjectInfo := LScanner.Scan(LDproj, 'Android32', 'Release');
+    try
+      Assert.AreEqual('Android32', LProjectInfo.Platform,
+        'The requested platform name is kept');
+      Assert.IsTrue(LProjectInfo.OutputFilePath.EndsWith(
+        '\Source\Android\Release\libMyApp.so', True),
+        'The binary must use the Android folder, but was: ' + LProjectInfo.OutputFilePath);
+      Assert.IsTrue(LProjectInfo.BplOutputDir.EndsWith('\bpl\Android\Release', True),
+        'DCC_BplOutput must expand $(Platform) to Android, but was: ' + LProjectInfo.BplOutputDir);
+      Assert.IsTrue(LProjectInfo.DcpOutputDir.EndsWith('\dcp\Android\Release', True),
+        'DCC_DcpOutput must expand $(Platform) to Android, but was: ' + LProjectInfo.DcpOutputDir);
+      Assert.IsTrue(LProjectInfo.DcuOutputDir.EndsWith('\dcu\Android\Release', True),
+        'DCC_DcuOutput must expand $(Platform) to Android, but was: ' + LProjectInfo.DcuOutputDir);
+      Assert.IsFalse(PathHasSegment(LProjectInfo.OutputFilePath, 'Android32'),
+        'Android32 must not be a path segment');
+      Assert.IsTrue(LProjectInfo.MapFilePath.EndsWith(
+        '\Source\Android\Release\libMyApp.so.map', True),
+        'The map must sit next to the binary, but was: ' + LProjectInfo.MapFilePath);
+      Assert.IsFalse(HasWarningText(LProjectInfo, 'TargetedPlatforms'),
+        'Android32 is the same target as Android');
+    finally
+      LProjectInfo.Free;
+    end;
+  finally
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_Android64_OutputStaysAndroid64;
+var
+  LDproj: string;
+  LProjectInfo: TProjectInfo;
+  LScanner: IProjectScanner;
+  LTempDir: string;
+begin
+  LTempDir := MakeTempDir;
+  try
+    LDproj := WriteProject(LTempDir, AndroidAppDproj('.\Source\$(Platform)\$(Config)'));
+    LScanner := TProjectScanner.Create;
+    LProjectInfo := LScanner.Scan(LDproj, 'Android64', 'Release');
+    try
+      Assert.IsTrue(LProjectInfo.OutputFilePath.EndsWith(
+        '\Source\Android64\Release\libMyApp.so', True),
+        'Android64 keeps its own folder, but was: ' + LProjectInfo.OutputFilePath);
+      Assert.IsTrue(PathHasSegment(LProjectInfo.OutputFilePath, 'Android64'));
+      Assert.IsFalse(PathHasSegment(LProjectInfo.OutputFilePath, 'Android'),
+        'Android64 must not be rewritten to Android');
+      Assert.IsTrue(LProjectInfo.MapFilePath.EndsWith(
+        '\Source\Android64\Release\libMyApp.so.map', True),
+        'The Android64 map stays in Android64, but was: ' + LProjectInfo.MapFilePath);
+    finally
+      LProjectInfo.Free;
+    end;
+  finally
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_Android32_FindsFilesInAndroidFolder;
+var
+  LBinDir: string;
+  LDproj: string;
+  LProjectInfo: TProjectInfo;
+  LScanner: IProjectScanner;
+  LTempDir: string;
+begin
+  LTempDir := MakeTempDir;
+  try
+    LDproj := WriteProject(LTempDir, AndroidAppDproj('.\Source\$(Platform)\$(Config)'));
+    LBinDir := TPath.Combine(LTempDir, 'Source\Android\Release');
+    ForceDirectories(LBinDir);
+    TFile.WriteAllText(TPath.Combine(LBinDir, 'libMyApp.so'), 'so', TEncoding.UTF8);
+    TFile.WriteAllText(TPath.Combine(LBinDir, 'libMyApp.so.map'), 'map', TEncoding.UTF8);
+    LScanner := TProjectScanner.Create;
+    LProjectInfo := LScanner.Scan(LDproj, 'Android32', 'Release');
+    try
+      Assert.AreEqual(TPath.Combine(LBinDir, 'libMyApp.so'), LProjectInfo.OutputFilePath,
+        'The existing Android binary is the output');
+      Assert.AreEqual(TPath.Combine(LBinDir, 'libMyApp.so.map'), LProjectInfo.MapFilePath,
+        'The existing Android map is the map path');
+      Assert.IsTrue(TFile.Exists(LProjectInfo.OutputFilePath));
+      Assert.IsTrue(TFile.Exists(LProjectInfo.MapFilePath));
+    finally
+      LProjectInfo.Free;
+    end;
+  finally
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_Android32_FallsBackToCallerFolder;
+var
+  LAltDir: string;
+  LDproj: string;
+  LProjectInfo: TProjectInfo;
+  LScanner: IProjectScanner;
+  LTempDir: string;
+begin
+  LTempDir := MakeTempDir;
+  try
+    LDproj := WriteProject(LTempDir, AndroidAppDproj('.\Source\$(Platform)\$(Config)'));
+    LAltDir := TPath.Combine(LTempDir, 'Source\Android32\Release');
+    ForceDirectories(LAltDir);
+    TFile.WriteAllText(TPath.Combine(LAltDir, 'libMyApp.so'), 'so', TEncoding.UTF8);
+    TFile.WriteAllText(TPath.Combine(LAltDir, 'libMyApp.so.map'), 'map', TEncoding.UTF8);
+    LScanner := TProjectScanner.Create;
+    LProjectInfo := LScanner.Scan(LDproj, 'Android32', 'Release');
+    try
+      Assert.AreEqual(TPath.Combine(LAltDir, 'libMyApp.so'), LProjectInfo.OutputFilePath,
+        'A binary that is only under Android32 is still found');
+      Assert.AreEqual(TPath.Combine(LAltDir, 'libMyApp.so.map'), LProjectInfo.MapFilePath,
+        'A map that is only under Android32 is still found');
+    finally
+      LProjectInfo.Free;
+    end;
+  finally
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_Android_NoExeOutput_UsesExistingPlatformFolder;
+var
+  LBinDir: string;
+  LDproj: string;
+  LProjectInfo: TProjectInfo;
+  LScanner: IProjectScanner;
+  LTempDir: string;
+begin
+  LTempDir := MakeTempDir;
+  try
+    LDproj := WriteProject(LTempDir, AndroidAppDproj(''));
+    LBinDir := TPath.Combine(LTempDir, 'Android\Release');
+    ForceDirectories(LBinDir);
+    TFile.WriteAllText(TPath.Combine(LBinDir, 'libMyApp.so'), 'so', TEncoding.UTF8);
+    LScanner := TProjectScanner.Create;
+    LProjectInfo := LScanner.Scan(LDproj, 'Android32', 'Release');
+    try
+      Assert.AreEqual(TPath.Combine(LBinDir, 'libMyApp.so'), LProjectInfo.OutputFilePath,
+        'With no DCC_ExeOutput, an existing Android\Release folder is the output');
+      Assert.IsFalse(HasWarningText(LProjectInfo, 'project directory'),
+        'The project directory must not be used when the platform folder exists');
+    finally
+      LProjectInfo.Free;
+    end;
+  finally
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_Android_NoExeOutput_UsesProjectDirectory;
+var
+  LDproj: string;
+  LProjectInfo: TProjectInfo;
+  LScanner: IProjectScanner;
+  LTempDir: string;
+begin
+  LTempDir := MakeTempDir;
+  try
+    LDproj := WriteProject(LTempDir, AndroidAppDproj(''));
+    LScanner := TProjectScanner.Create;
+    LProjectInfo := LScanner.Scan(LDproj, 'Android', 'Release');
+    try
+      Assert.AreEqual(LProjectInfo.ProjectDir, LProjectInfo.OutputDir,
+        'With no output setting and no platform folder, the project directory is used');
+      Assert.IsTrue(HasWarningText(LProjectInfo, 'project directory'),
+        'The fallback must be reported');
+      Assert.AreEqual(TPath.Combine(LProjectInfo.ProjectDir, 'libMyApp.so'),
+        LProjectInfo.OutputFilePath);
+    finally
+      LProjectInfo.Free;
+    end;
+  finally
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+function AndroidVersionDproj: string;
+begin
+  // Base carries the Windows default 1.0.0.7. Android replaces VerInfo_Keys
+  // with versionName. The Android64 group uses the long condition Delphi
+  // writes, which also contains $(Cfg_2), and must not leak into Android.
+  Result :=
+    '<?xml version="1.0" encoding="utf-8"?>' + sLineBreak +
+    '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">' + sLineBreak +
+    '  <PropertyGroup>' + sLineBreak +
+    '    <MainSource>MyApp.dpr</MainSource>' + sLineBreak +
+    '    <AppType>Application</AppType>' + sLineBreak +
+    '    <ProjectVersion>20.4</ProjectVersion>' + sLineBreak +
+    '    <TargetedPlatforms>288</TargetedPlatforms>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '  <PropertyGroup Condition="''$(Base)''!=''''">' + sLineBreak +
+    '    <VerInfo_IncludeVerInfo>true</VerInfo_IncludeVerInfo>' + sLineBreak +
+    '    <VerInfo_MajorVer>1</VerInfo_MajorVer>' + sLineBreak +
+    '    <VerInfo_MinorVer>0</VerInfo_MinorVer>' + sLineBreak +
+    '    <VerInfo_Release>0</VerInfo_Release>' + sLineBreak +
+    '    <VerInfo_Build>7</VerInfo_Build>' + sLineBreak +
+    '    <VerInfo_Keys>CompanyName=Acme;FileDescription=$(MSBuildProjectName);FileVersion=1.0.0.7;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProductName=$(MSBuildProjectName);ProductVersion=1.0.0.7;Comments=</VerInfo_Keys>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '  <PropertyGroup Condition="''$(Base_Android)''!=''''">' + sLineBreak +
+    '    <VerInfo_Keys>package=com.embarcadero.MyApp;label=My App;versionCode=1;versionName=2.0.0.1;persistent=False;restoreAnyVersion=False;installLocation=auto</VerInfo_Keys>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '  <PropertyGroup Condition="''$(Base_Android64)''!=''''">' + sLineBreak +
+    '    <VerInfo_Keys>package=com.embarcadero.MyApp;label=My App;versionCode=3142;versionName=3.1.4.2</VerInfo_Keys>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '  <PropertyGroup Condition="(''$(Platform)''==''Android'' and ''$(Cfg_2)''==''true'') or ''$(Cfg_2_Android)''!=''''">' + sLineBreak +
+    '    <VerInfo_Keys>package=com.embarcadero.MyApp;label=My App;versionCode=160007;versionName=16.0.0.7;persistent=False;restoreAnyVersion=False;installLocation=auto</VerInfo_Keys>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '  <PropertyGroup Condition="(''$(Platform)''==''Android64'' and ''$(Cfg_2)''==''true'') or ''$(Cfg_2_Android64)''!=''''">' + sLineBreak +
+    '    <VerInfo_Keys>package=com.embarcadero.MyApp;label=My App;versionCode=9999;versionName=9.9.9.9</VerInfo_Keys>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '  <ItemGroup>' + sLineBreak +
+    '    <BuildConfiguration Include="Base">' + sLineBreak +
+    '      <Key>Base</Key>' + sLineBreak +
+    '    </BuildConfiguration>' + sLineBreak +
+    '    <BuildConfiguration Include="Debug">' + sLineBreak +
+    '      <Key>Cfg_1</Key>' + sLineBreak +
+    '      <CfgParent>Base</CfgParent>' + sLineBreak +
+    '    </BuildConfiguration>' + sLineBreak +
+    '    <BuildConfiguration Include="Release">' + sLineBreak +
+    '      <Key>Cfg_2</Key>' + sLineBreak +
+    '      <CfgParent>Base</CfgParent>' + sLineBreak +
+    '    </BuildConfiguration>' + sLineBreak +
+    '  </ItemGroup>' + sLineBreak +
+    '</Project>';
+end;
+
+procedure TProjectScannerTests.Scan_Android_VersionName_IsProductVersion;
+var
+  LDproj: string;
+  LProjectInfo: TProjectInfo;
+  LScanner: IProjectScanner;
+  LTempDir: string;
+begin
+  LTempDir := MakeTempDir;
+  try
+    LDproj := WriteProject(LTempDir, AndroidVersionDproj);
+    LScanner := TProjectScanner.Create;
+
+    LProjectInfo := LScanner.Scan(LDproj, 'Android', 'Release');
+    try
+      Assert.AreEqual('16.0.0.7', LProjectInfo.Version,
+        'versionName from Cfg_2_Android is the product version, not 1.0.0.7');
+    finally
+      LProjectInfo.Free;
+    end;
+
+    LProjectInfo := LScanner.Scan(LDproj, 'Android32', 'Release');
+    try
+      Assert.AreEqual('16.0.0.7', LProjectInfo.Version,
+        'Android32 reads the Android property groups');
+    finally
+      LProjectInfo.Free;
+    end;
+
+    LProjectInfo := LScanner.Scan(LDproj, 'Android64', 'Release');
+    try
+      Assert.AreEqual('9.9.9.9', LProjectInfo.Version,
+        'Android64 uses its own versionName');
+    finally
+      LProjectInfo.Free;
+    end;
+  finally
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_Android_MajorVer_WhenKeysHaveNoVersion;
+const
+  cDproj =
+    '<?xml version="1.0" encoding="utf-8"?>' + sLineBreak +
+    '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">' + sLineBreak +
+    '  <PropertyGroup>' + sLineBreak +
+    '    <MainSource>MyApp.dpr</MainSource>' + sLineBreak +
+    '    <AppType>Application</AppType>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '  <PropertyGroup Condition="''$(Base)''!=''''">' + sLineBreak +
+    '    <VerInfo_MajorVer>1</VerInfo_MajorVer>' + sLineBreak +
+    '    <VerInfo_MinorVer>0</VerInfo_MinorVer>' + sLineBreak +
+    '    <VerInfo_Release>0</VerInfo_Release>' + sLineBreak +
+    '    <VerInfo_Build>0</VerInfo_Build>' + sLineBreak +
+    '    <VerInfo_Keys>CompanyName=Acme;ProductName=My App</VerInfo_Keys>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '  <PropertyGroup Condition="(''$(Platform)''==''Android'' and ''$(Cfg_2)''==''true'') or ''$(Cfg_2_Android)''!=''''">' + sLineBreak +
+    '    <VerInfo_MajorVer>16</VerInfo_MajorVer>' + sLineBreak +
+    '    <VerInfo_MinorVer>0</VerInfo_MinorVer>' + sLineBreak +
+    '    <VerInfo_Release>0</VerInfo_Release>' + sLineBreak +
+    '    <VerInfo_Build>7</VerInfo_Build>' + sLineBreak +
+    '    <VerInfo_Keys>package=com.embarcadero.MyApp;label=My App;versionCode=160007</VerInfo_Keys>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '  <PropertyGroup Condition="(''$(Platform)''==''Android64'' and ''$(Cfg_2)''==''true'') or ''$(Cfg_2_Android64)''!=''''">' + sLineBreak +
+    '    <VerInfo_MajorVer>9</VerInfo_MajorVer>' + sLineBreak +
+    '    <VerInfo_Build>9</VerInfo_Build>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '</Project>';
+var
+  LDproj: string;
+  LProjectInfo: TProjectInfo;
+  LScanner: IProjectScanner;
+  LTempDir: string;
+begin
+  LTempDir := MakeTempDir;
+  try
+    LDproj := WriteProject(LTempDir, cDproj);
+    LScanner := TProjectScanner.Create;
+    LProjectInfo := LScanner.Scan(LDproj, 'Android32', 'Release');
+    try
+      Assert.AreEqual('16.0.0.7', LProjectInfo.Version,
+        'The Android major version must not stay at the base value 1');
+    finally
+      LProjectInfo.Free;
+    end;
+  finally
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_Android_FileVersion_WinsOverVersionName;
+const
+  cDproj =
+    '<?xml version="1.0" encoding="utf-8"?>' + sLineBreak +
+    '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">' + sLineBreak +
+    '  <PropertyGroup>' + sLineBreak +
+    '    <MainSource>MyApp.dpr</MainSource>' + sLineBreak +
+    '    <AppType>Application</AppType>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '  <PropertyGroup Condition="''$(Base_Android)''!=''''">' + sLineBreak +
+    '    <VerInfo_Keys>FileVersion=4.5.6.7;versionCode=160007;versionName=16.0.0.7</VerInfo_Keys>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '</Project>';
+var
+  LDproj: string;
+  LProjectInfo: TProjectInfo;
+  LScanner: IProjectScanner;
+  LTempDir: string;
+begin
+  LTempDir := MakeTempDir;
+  try
+    LDproj := WriteProject(LTempDir, cDproj);
+    LScanner := TProjectScanner.Create;
+    LProjectInfo := LScanner.Scan(LDproj, 'Android', 'Release');
+    try
+      Assert.AreEqual('4.5.6.7', LProjectInfo.Version,
+        'FileVersion wins when the Android keys contain both values');
+    finally
+      LProjectInfo.Free;
+    end;
+  finally
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_Win32_IgnoresAndroidVersionName;
+const
+  cWithFileVersion =
+    '<?xml version="1.0" encoding="utf-8"?>' + sLineBreak +
+    '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">' + sLineBreak +
+    '  <PropertyGroup>' + sLineBreak +
+    '    <MainSource>MyApp.dpr</MainSource>' + sLineBreak +
+    '    <AppType>Application</AppType>' + sLineBreak +
+    '    <VerInfo_Keys>FileVersion=16.0.0.7;versionName=9.9.9.9;CompanyName=Acme</VerInfo_Keys>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '</Project>';
+  cNameOnly =
+    '<?xml version="1.0" encoding="utf-8"?>' + sLineBreak +
+    '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">' + sLineBreak +
+    '  <PropertyGroup>' + sLineBreak +
+    '    <MainSource>MyApp.dpr</MainSource>' + sLineBreak +
+    '    <AppType>Application</AppType>' + sLineBreak +
+    '    <VerInfo_MajorVer>1</VerInfo_MajorVer>' + sLineBreak +
+    '    <VerInfo_MinorVer>0</VerInfo_MinorVer>' + sLineBreak +
+    '    <VerInfo_Release>0</VerInfo_Release>' + sLineBreak +
+    '    <VerInfo_Build>7</VerInfo_Build>' + sLineBreak +
+    '    <VerInfo_Keys>versionName=16.0.0.7;CompanyName=Acme</VerInfo_Keys>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '</Project>';
+var
+  LDproj: string;
+  LProjectInfo: TProjectInfo;
+  LScanner: IProjectScanner;
+  LTempDir: string;
+begin
+  LTempDir := MakeTempDir;
+  try
+    LScanner := TProjectScanner.Create;
+    LDproj := WriteProject(LTempDir, cWithFileVersion);
+    LProjectInfo := LScanner.Scan(LDproj, 'Win32', 'Release');
+    try
+      Assert.AreEqual('16.0.0.7', LProjectInfo.Version,
+        'Win32 FileVersion is kept in full');
+    finally
+      LProjectInfo.Free;
+    end;
+
+    TFile.WriteAllText(LDproj, cNameOnly, TEncoding.UTF8);
+    LProjectInfo := LScanner.Scan(LDproj, 'Win32', 'Release');
+    try
+      Assert.AreEqual('1.0.0.7', LProjectInfo.Version,
+        'Win32 does not take versionName');
+    finally
+      LProjectInfo.Free;
+    end;
+  finally
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
 procedure TProjectScannerTests.ExtractVerInfoKeyValue_DecodesXmlEntities;
 begin
   Assert.AreEqual('Smith & Sons Ltd',
@@ -961,6 +1581,10 @@ begin
     try
       Assert.AreEqual('libAndroidApp.so', TPath.GetFileName(LProjectInfo.OutputFilePath),
         'Android32 uses the same shared-library name');
+      Assert.IsTrue(Pos('\Android\', LProjectInfo.OutputFilePath) > 0,
+        'Android32 must use the Android folder, but was: ' + LProjectInfo.OutputFilePath);
+      Assert.IsTrue(Pos('Android32', LProjectInfo.OutputFilePath) = 0,
+        'Android32 is not an output folder, but was: ' + LProjectInfo.OutputFilePath);
     finally
       LProjectInfo.Free;
     end;

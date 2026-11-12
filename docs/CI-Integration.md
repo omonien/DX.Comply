@@ -22,6 +22,15 @@ executable from the pipeline.
 The `--no-pause` flag suppresses the interactive "Press Enter to quit" prompt
 and is **required** in all automated pipeline steps.
 
+The default output directory comes from `DCC_ExeOutput`, then the BPL, DCP, and
+DCU output paths in the `.dproj`. `$(Platform)` and `$(Config)` are expanded.
+For 32-bit Android the platform folder is `Android`, so a default layout is
+`Android\Release\libMyApp.so` and `Android\Release\libMyApp.so.map`.
+`--platform=Android32` maps to that folder. Android64 stays `Android64`.
+Pass `--platform=Android` or `--platform=Android64` with the configuration
+you built. When those output settings are absent and the platform folder is
+already on disk, that folder is used. Otherwise the project directory is used.
+
 If the MAP file is not located in the default output directory derived from the
 `.dproj`, use `--map-dir` to point `dxcomply` at the correct directory:
 

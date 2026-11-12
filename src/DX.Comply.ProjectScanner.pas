@@ -222,6 +222,17 @@ type
     /// </summary>
     function BuildExpectedMapFilePath(const AProjectInfo: TProjectInfo): string;
     /// <summary>
+    /// Delphi folder and property-group suffix for the platform being scanned.
+    /// Android32 becomes Android. Android64 stays Android64.
+    /// </summary>
+    function PlatformToken: string;
+    /// <summary>
+    /// ADirectory with the Delphi platform folder replaced by the name the
+    /// caller passed, when those names differ. Used when the build is still
+    /// in the other folder.
+    /// </summary>
+    function AlternateOutputDirectory(const ADirectory: string): string;
+    /// <summary>
     /// Adds semicolon-delimited values to a list, optionally normalizing them as paths.
     /// Path entries are expanded first; one that still holds a $(Name) is skipped.
     /// In a list of names, entries that start with $ are skipped.
@@ -397,6 +408,13 @@ function TryReadPeImportNames(const AFilePath: string;
 /// </summary>
 function ExtractVerInfoKeyValue(const AVerInfoKeys, AKey: string): string;
 
+/// <summary>
+/// Trims a dotted version and keeps every character of each component.
+/// 16.0.0.7 stays 16.0.0.7. A component is not reduced to its first digit.
+/// A value with no dot is trimmed and returned as it is.
+/// </summary>
+function PreserveDottedVersion(const AValue: string): string;
+
 implementation
 
 /// <summary>
@@ -525,6 +543,46 @@ begin
       Exit;
     end;
   end;
+end;
+
+function PreserveDottedVersion(const AValue: string): string;
+var
+  LIndex: Integer;
+  LPart: string;
+  LParts: TArray<string>;
+begin
+  Result := Trim(AValue);
+  if Pos('.', Result) = 0 then
+    Exit;
+
+  // Split on the dots and join the trimmed components. "16" stays "16".
+  LParts := Result.Split(['.']);
+  Result := '';
+  for LIndex := 0 to High(LParts) do
+  begin
+    LPart := Trim(LParts[LIndex]);
+    if LPart = '' then
+      Continue;
+    if Result <> '' then
+      Result := Result + '.';
+    Result := Result + LPart;
+  end;
+end;
+
+function ReplacePathSegment(const APath, AFrom, ATo: string): string;
+var
+  I: Integer;
+  LParts: TArray<string>;
+begin
+  Result := APath;
+  if (AFrom = '') or (ATo = '') or SameText(AFrom, ATo) then
+    Exit;
+
+  LParts := APath.Split(['\', '/']);
+  for I := 0 to High(LParts) do
+    if SameText(LParts[I], AFrom) then
+      LParts[I] := ATo;
+  Result := string.Join('\', LParts);
 end;
 
 function ReadLatestInstalledBdsVersion: string;
@@ -1391,7 +1449,7 @@ begin
     Exit;
 
   // Delphi installation lib directories
-  LBaseLibDir := TPath.Combine(AToolchain.RootDir, 'lib\' + FCurrentPlatform);
+  LBaseLibDir := TPath.Combine(AToolchain.RootDir, 'lib\' + PlatformToken);
   if AUsesDebugDCUs then
   begin
     LPreferredConfigDir := TPath.Combine(LBaseLibDir, 'debug');
@@ -1409,7 +1467,7 @@ begin
   AddExistingPath(TPath.Combine(AToolchain.RootDir, 'source'), Result);
 
   // IDE Library Search Path from registry (third-party components)
-  LIdeSearchPath := ReadIdeLibrarySearchPath(AToolchain.Version, FCurrentPlatform);
+  LIdeSearchPath := ReadIdeLibrarySearchPath(AToolchain.Version, PlatformToken);
   if LIdeSearchPath <> '' then
   begin
     for LPathEntry in LIdeSearchPath.Split([';']) do
@@ -1483,7 +1541,9 @@ begin
       if (LBitmask and 4) <> 0 then LPlatforms.Add('OSX32');
       if (LBitmask and 8) <> 0 then LPlatforms.Add('iOSSimulator');
       if (LBitmask and 16) <> 0 then LPlatforms.Add('iOSDevice32');
-      if (LBitmask and 32) <> 0 then LPlatforms.Add('Android32');
+      // Bit 32 is 32-bit Android. Delphi names that platform Android, and
+      // the output folder is Android, not Android32.
+      if (LBitmask and 32) <> 0 then LPlatforms.Add('Android');
       if (LBitmask and 64) <> 0 then LPlatforms.Add('Linux64');
       if (LBitmask and 128) <> 0 then LPlatforms.Add('iOSDevice64');
       if (LBitmask and 256) <> 0 then LPlatforms.Add('Android64');
@@ -1756,6 +1816,8 @@ function TProjectScanner.GetPropertyValue(const AName, ADefault: string): string
 var
   LBlock: string;
   LBlocks: TArray<string>;
+  LConfigPlatformPrefix: string;
+  LConfigToken: string;
   LFound: Boolean;
   LValueSoFar: string;
   I: Integer;
@@ -1782,10 +1844,11 @@ begin
     TakeValue(AName, LBlock, LValueSoFar, LFound);
   end;
 
-  // 2. Platform-specific (Condition contains '$(Base_Win32)' etc.)
-  if FCurrentPlatform <> '' then
+  // 2. Platform-specific (Condition contains '$(Base_Android)' etc.)
+  // Android32 is read as Base_Android, which is the group Delphi writes.
+  if PlatformToken <> '' then
   begin
-    LBlocks := GetPropertyGroupContents('$(Base_' + FCurrentPlatform + ')');
+    LBlocks := GetPropertyGroupContents('$(Base_' + PlatformToken + ')');
     for I := 0 to High(LBlocks) do
     begin
       TakeValue(AName, LBlocks[I], LValueSoFar, LFound);
@@ -1795,19 +1858,25 @@ begin
   // 3. Config-specific — use the detected Cfg_N key
   if FConfigKey <> '' then
   begin
-    LBlocks := GetPropertyGroupContents('$(' + FConfigKey + ')');
+    LConfigToken := '$(' + FConfigKey + ')';
+    // Cfg_2_Android contains "'$(Cfg_2)'=='true'" as well as $(Cfg_2_Android).
+    // The platform group is step 4, and only for the active platform.
+    LConfigPlatformPrefix := '$(' + FConfigKey + '_';
+    LBlocks := GetPropertyGroupContents(LConfigToken);
     for I := 0 to High(LBlocks) do
     begin
+      if Pos(UpperCase(LConfigPlatformPrefix), UpperCase(LBlocks[I])) > 0 then
+        Continue;
       TakeValue(AName, LBlocks[I], LValueSoFar, LFound);
     end;
   end;
 
-  // 4. Platform+Config specific (e.g., Base_Win32 + Cfg_1)
-  if (FCurrentPlatform <> '') and (FConfigKey <> '') then
+  // 4. Platform+Config specific (e.g., Cfg_2_Android)
+  if (PlatformToken <> '') and (FConfigKey <> '') then
   begin
     // The closing parenthesis keeps Cfg_1_Android from also matching the
     // Cfg_1_Android64 group, and Cfg_1_Win64 from matching Cfg_1_Win64x.
-    LBlocks := GetPropertyGroupContents('$(' + FConfigKey + '_' + FCurrentPlatform + ')');
+    LBlocks := GetPropertyGroupContents('$(' + FConfigKey + '_' + PlatformToken + ')');
     for I := 0 to High(LBlocks) do
     begin
       TakeValue(AName, LBlocks[I], LValueSoFar, LFound);
@@ -1818,9 +1887,9 @@ begin
   //    e.g. Condition="'$(Configuration)|$(Platform)'=='Release|Win32'"
   if FCurrentConfig <> '' then
   begin
-    if FCurrentPlatform <> '' then
+    if PlatformToken <> '' then
     begin
-      LBlock := GetPropertyGroupContent(FCurrentConfig + '|' + FCurrentPlatform);
+      LBlock := GetPropertyGroupContent(FCurrentConfig + '|' + PlatformToken);
       if LBlock <> '' then
       begin
         TakeValue(AName, LBlock, LValueSoFar, LFound);
@@ -1878,9 +1947,9 @@ begin
     LPackageStr := GetElementValue(FXmlText, 'RuntimePackage');
 
   // Also check platform-specific UsePackage
-  if FCurrentPlatform <> '' then
+  if PlatformToken <> '' then
   begin
-    LBlocks := GetPropertyGroupContents('$(Base_' + FCurrentPlatform + ')');
+    LBlocks := GetPropertyGroupContents('$(Base_' + PlatformToken + ')');
     for I := 0 to High(LBlocks) do
     begin
       LPlatformPackages := GetElementValue(LBlocks[I], 'DCC_UsePackage');
@@ -1968,7 +2037,8 @@ var
 begin
   Result := AValue;
   // Standard MSBuild variables
-  Result := StringReplace(Result, '$(Platform)', FCurrentPlatform, [rfIgnoreCase, rfReplaceAll]);
+  // $(Platform) is the Delphi folder. Android32 expands to Android.
+  Result := StringReplace(Result, '$(Platform)', PlatformToken, [rfIgnoreCase, rfReplaceAll]);
   Result := StringReplace(Result, '$(Config)', FCurrentConfig, [rfIgnoreCase, rfReplaceAll]);
   Result := StringReplace(Result, '$(Configuration)', FCurrentConfig, [rfIgnoreCase, rfReplaceAll]);
   Result := StringReplace(Result, '$(MSBuildProjectName)', AProjectName, [rfIgnoreCase, rfReplaceAll]);
@@ -2298,6 +2368,37 @@ begin
     AProjectInfo.OutputFilePath := LFileName
   else
     AProjectInfo.OutputFilePath := TPath.Combine(LDir, LFileName);
+
+  // The Delphi folder is the path above. When that file is not on disk and
+  // the same name exists under the caller's platform folder (Android32),
+  // use the file that is there.
+  if (LDir <> '') and not TFile.Exists(AProjectInfo.OutputFilePath) then
+  begin
+    var LAltDir := AlternateOutputDirectory(LDir);
+    if not SameText(LAltDir, LDir) then
+    begin
+      var LAltFile := TPath.Combine(LAltDir, LFileName);
+      if TFile.Exists(LAltFile) then
+      begin
+        AProjectInfo.OutputFilePath := LAltFile;
+        AProjectInfo.ArtefactOutputDir := LAltDir;
+        if SameText(AProjectInfo.OutputDir, LDir) then
+          AProjectInfo.OutputDir := LAltDir;
+        if SameText(AProjectInfo.BplOutputDir, LDir) then
+          AProjectInfo.BplOutputDir := LAltDir;
+      end;
+    end;
+  end;
+end;
+
+function TProjectScanner.PlatformToken: string;
+begin
+  Result := PlatformOutputDirectoryName(FCurrentPlatform);
+end;
+
+function TProjectScanner.AlternateOutputDirectory(const ADirectory: string): string;
+begin
+  Result := ReplacePathSegment(ADirectory, PlatformToken, Trim(FCurrentPlatform));
 end;
 
 function TProjectScanner.TryLookupVariable(const AName: string; out AValue: string): Boolean;
@@ -2396,11 +2497,13 @@ end;
 
 function TProjectScanner.BuildExpectedMapFilePath(const AProjectInfo: TProjectInfo): string;
 var
+  LAltDir: string;
   LMapFileName: string;
   LCandidate: string;
   LCandidateDirs: TArray<string>;
   LDir: string;
   LBuildDir: string;
+  LPlatformDir: string;
 begin
   Result := '';
   if AProjectInfo.ProjectName = '' then
@@ -2409,13 +2512,24 @@ begin
   LMapFileName := AProjectInfo.ExpectedMapFileName;
 
   // Build candidate directories in priority order:
-  // 1. Configured output directory (from .dproj)
-  // 2. Project directory (Delphi default when no output dir is configured)
-  // 3. Standard build structure relative to project (../build/Platform/Config)
-  // 4. BPL output directory (for packages)
+  // 1. Configured output directory (from .dproj, $(Platform) already expanded)
+  // 2. Project\<Delphi platform>\<Config>, and the caller's folder name when
+  //    that name is different (Android32 next to Android)
+  // 3. Project directory (older projects with no output directory)
+  // 4. Standard build structure relative to project (../build/Platform/Config)
+  // 5. BPL output directory (for packages)
   LCandidateDirs := [];
   if AProjectInfo.OutputDir <> '' then
     LCandidateDirs := LCandidateDirs + [AProjectInfo.OutputDir];
+  if (AProjectInfo.ProjectDir <> '') and (FCurrentConfig <> '') and (PlatformToken <> '') then
+  begin
+    LPlatformDir := TPath.Combine(AProjectInfo.ProjectDir,
+      TPath.Combine(PlatformToken, FCurrentConfig));
+    LCandidateDirs := LCandidateDirs + [LPlatformDir];
+    LAltDir := AlternateOutputDirectory(LPlatformDir);
+    if not SameText(LAltDir, LPlatformDir) then
+      LCandidateDirs := LCandidateDirs + [LAltDir];
+  end;
   if AProjectInfo.ProjectDir <> '' then
     LCandidateDirs := LCandidateDirs + [AProjectInfo.ProjectDir];
   if AProjectInfo.ProjectDir <> '' then
@@ -2429,7 +2543,7 @@ begin
      (AProjectInfo.BplOutputDir <> AProjectInfo.OutputDir) then
     LCandidateDirs := LCandidateDirs + [AProjectInfo.BplOutputDir];
 
-  // Return the first candidate where the MAP file actually exists
+  // Return the first candidate where the MAP file actually exists.
   for LDir in LCandidateDirs do
   begin
     LCandidate := TPath.Combine(LDir, LMapFileName);
@@ -2437,8 +2551,19 @@ begin
       Exit(LCandidate);
   end;
 
-  // No existing MAP file found — return the best candidate path so the
-  // Deep-Evidence build knows where to look after building
+  // The configured directory did not have the map. A build that still used
+  // the caller's platform folder (Android32) is accepted when that file exists.
+  for LDir in LCandidateDirs do
+  begin
+    LAltDir := AlternateOutputDirectory(LDir);
+    if SameText(LAltDir, LDir) then
+      Continue;
+    LCandidate := TPath.Combine(LAltDir, LMapFileName);
+    if TFile.Exists(LCandidate) then
+      Exit(LCandidate);
+  end;
+
+  // Nothing on disk yet. The first candidate is where Delphi will write it.
   if Length(LCandidateDirs) > 0 then
     Result := TPath.Combine(LCandidateDirs[0], LMapFileName);
 end;
@@ -2740,6 +2865,9 @@ var
   LDcuOutputDir: string;
   LExeOutputDir: string;
   LTargetedPlatforms: TArray<string>;
+  LDelphiDefault: string;
+  LKeys: string;
+  LVersionName: string;
   LVersionStr: string;
   LMajor, LMinor, LRelease, LBuild: string;
   LWarning: string;
@@ -2795,7 +2923,10 @@ begin
     LHasMatchingPlatform := False;
     for LDetectedPlatform in LTargetedPlatforms do
     begin
-      if SameText(LDetectedPlatform, Result.Platform) then
+      // Android32 and Android are the same Delphi target. The folder name
+      // is what the .dproj lists.
+      if SameText(PlatformOutputDirectoryName(LDetectedPlatform),
+         PlatformOutputDirectoryName(Result.Platform)) then
       begin
         LHasMatchingPlatform := True;
         Break;
@@ -2829,14 +2960,27 @@ begin
 
     Result.Version := LMajor + '.' + LMinor + '.' + LRelease + '.' + LBuild;
 
-    // Also try FileVersion directly (some projects specify it as a single string)
-    LVersionStr := GetPropertyValue('FileVersion', '');
-    if (LVersionStr <> '') and (Pos('.', LVersionStr) > 0) then
-      Result.Version := LVersionStr;
+    // FileVersion is a VerInfo_Keys entry, and some projects also write it
+    // as its own element. A dotted value replaces the four numeric parts.
+    // Each component is kept in full, so 16.0.0.7 does not become 1.0.0.7.
+    LKeys := GetPropertyValue('VerInfo_Keys', '');
+    LVersionStr := PreserveDottedVersion(GetPropertyValue('FileVersion', ''));
+    if Pos('.', LVersionStr) = 0 then
+      LVersionStr := PreserveDottedVersion(ExtractVerInfoKeyValue(LKeys, 'FileVersion'));
+    if Pos('.', LVersionStr) > 0 then
+      Result.Version := LVersionStr
+    else if StartsText('Android', PlatformToken) then
+    begin
+      // Android writes versionName (and versionCode) instead of FileVersion.
+      // The keys come from Base_Android or Cfg_N_Android, not from a Windows group.
+      LVersionName := PreserveDottedVersion(ExtractVerInfoKeyValue(LKeys, 'versionName'));
+      if Pos('.', LVersionName) > 0 then
+        Result.Version := LVersionName;
+    end;
 
     // CompanyName from Project Options > Version Info. The engine uses it as
     // the SBOM supplier when the configuration sets none (issue #88).
-    Result.CompanyName := ExtractVerInfoKeyValue(GetPropertyValue('VerInfo_Keys', ''), 'CompanyName');
+    Result.CompanyName := ExtractVerInfoKeyValue(LKeys, 'CompanyName');
 
     // Extract output directory. Try the expanded path, then the same path
     // with unknown tokens removed, then a path with $(ProductVersion) empty.
@@ -2863,10 +3007,18 @@ begin
 
     if Result.OutputDir = '' then
     begin
-      // Delphi's default: output goes to the project directory when no
-      // DCC_ExeOutput / DCC_BplOutput is specified in the .dproj.
-      Result.OutputDir := Result.ProjectDir;
-      FWarnings.Add('No output directory found in .dproj. Using project directory as default.');
+      // Delphi's own default is .\$(Platform)\$(Config). Use that directory
+      // when it is already on disk. Otherwise an older project writes the
+      // binary in the project directory.
+      LDelphiDefault := ResolveOutputDirectory('.\$(Platform)\$(Config)',
+        Result.ProjectDir, Result.ProjectName, 'DCC_ExeOutput', nil);
+      if (LDelphiDefault <> '') and TDirectory.Exists(LDelphiDefault) then
+        Result.OutputDir := LDelphiDefault
+      else
+      begin
+        Result.OutputDir := Result.ProjectDir;
+        FWarnings.Add('No output directory found in .dproj. Using project directory as default.');
+      end;
     end;
 
     Result.DllSuffix := GetPropertyValue('DllSuffix', '');

@@ -423,7 +423,9 @@ begin
   Result.ScriptPath := ResolveBuildScriptPath(AOptions.BuildScriptPathOverride,
     Result.ScriptSource);
   Result.ProjectPath := AProjectInfo.ProjectPath;
-  Result.Platform := AProjectInfo.Platform;
+  // MSBuild -Platform must be the Delphi name. Android32 builds as Android,
+  // which is also the output folder for the binary and the map.
+  Result.Platform := PlatformOutputDirectoryName(AProjectInfo.Platform);
   Result.Configuration := AProjectInfo.Configuration;
   Result.DelphiVersion := AOptions.DelphiVersion;
   Result.ExpectedMapFilePath := AProjectInfo.MapFilePath;
