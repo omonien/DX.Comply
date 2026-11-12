@@ -20,6 +20,7 @@ interface
 
 uses
   System.SysUtils,
+  System.StrUtils,
   System.IOUtils,
   System.Classes,
   System.Generics.Collections,
@@ -128,6 +129,12 @@ type
     /// </summary>
     [Test]
     procedure Write_ProductLicence_OnUntypedProjectExe;
+    /// <summary>
+    /// Embarcadero units carry their origin label. Own-code units carry the
+    /// product licence. A third-party file does not. Issues #165 and #166.
+    /// </summary>
+    [Test]
+    procedure Write_UnitLicences_EmbarcaderoAndOwnCode;
 
     /// <summary>Component hashes must precede purl.</summary>
     [Test]
@@ -705,6 +712,86 @@ begin
   LContent := LoadOutputContent;
   // The special characters should be escaped in XML
   Assert.IsTrue(Pos('Test&amp;App&lt;1&gt;', LContent) > 0);
+end;
+
+procedure TCycloneDxXmlWriterTests.Write_UnitLicences_EmbarcaderoAndOwnCode;
+var
+  LContent, LSlice: string;
+  LUnit: TArtefactInfo;
+
+  function SliceComponent(const AName: string): string;
+  var
+    LNamePos, LStart, LEnd: Integer;
+  begin
+    LNamePos := Pos('<name>' + AName + '</name>', LContent);
+    Assert.IsTrue(LNamePos > 0, AName + ' must be a component');
+    LStart := LNamePos;
+    while (LStart > 1) and (Copy(LContent, LStart, 10) <> '<component') do
+      Dec(LStart);
+    LEnd := PosEx('</component>', LContent, LNamePos);
+    Assert.IsTrue(LEnd > LNamePos, AName + ' component must close');
+    Result := Copy(LContent, LStart, LEnd - LStart);
+  end;
+
+  procedure AddUnit(const AName, AOrigin, ASource: string);
+  begin
+    LUnit := MakeArtefact(AName, 'unit-evidence', 'abcd1234ef', 32);
+    LUnit.Origin := AOrigin;
+    LUnit.SourcePath := ASource;
+    FArtefacts.Add(LUnit);
+  end;
+
+begin
+  FMetadata.Licence := 'MIT';
+  FMetadata.ComponentManifestJson :=
+    '{"components":[{"name":"Wrapped","version":"1","vendor":"A","licence":"Apache-2.0",' +
+    '"type":"library","units_exact":["Data.DB"]}],' +
+    '"own_code_units":["MainForm"],"own_code_prefixes":["App"],' +
+    '"own_code_folders":["' +
+    StringReplace('C:\DXComplyFolderTest\src', '\', '\\', [rfReplaceAll]) + '"]}';
+  FArtefacts.Add(MakeArtefact('TestProject.exe', 'application', 'abcd1234ef', 1024));
+  AddUnit('System.SysUtils.pas', 'Embarcadero RTL', '');
+  AddUnit('Vcl.Forms.pas', 'Embarcadero VCL', '');
+  AddUnit('FMX.Forms.pas', 'Embarcadero FMX', '');
+  AddUnit('MainForm.pas', 'Local project', '');
+  AddUnit('AppSettings.pas', 'Local project', '');
+  AddUnit('Helper.pas', 'Local project', 'C:\DXComplyFolderTest\src\Helper.pas');
+  AddUnit('LocalOnly.pas', 'Local project', '');
+  AddUnit('Data.DB.pas', 'Embarcadero RTL', '');
+  FArtefacts.Add(MakeArtefact('vendor.dll', 'library', 'abcd1234ef', 64));
+  Assert.IsTrue(FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LContent := LoadOutputContent;
+  Assert.AreEqual(NativeInt(0), NativeInt(Length(CycloneDxXmlSequenceErrors(LContent))),
+    'Unit licences must keep the CycloneDX element order');
+  Assert.IsTrue(FWriter.Validate(LContent));
+
+  LSlice := SliceComponent('TestProject.exe');
+  Assert.IsTrue(Pos('<id>MIT</id>', LSlice) > 0);
+  LSlice := SliceComponent('System.SysUtils.pas');
+  Assert.IsTrue(Pos('<hashes>', LSlice) < Pos('<licenses>', LSlice),
+    'The unit licence follows the hashes');
+  Assert.IsTrue(Pos('<name>Embarcadero RTL</name>', LSlice) > 0);
+  LSlice := SliceComponent('Vcl.Forms.pas');
+  Assert.IsTrue(Pos('<name>Embarcadero VCL</name>', LSlice) > 0);
+  LSlice := SliceComponent('FMX.Forms.pas');
+  Assert.IsTrue(Pos('<name>Embarcadero FMX</name>', LSlice) > 0);
+  Assert.IsTrue(Pos('<id>MIT</id>', SliceComponent('MainForm.pas')) > 0);
+  Assert.IsTrue(Pos('<id>MIT</id>', SliceComponent('AppSettings.pas')) > 0);
+  Assert.IsTrue(Pos('<id>MIT</id>', SliceComponent('Helper.pas')) > 0);
+  Assert.AreEqual(0, Pos('<licenses>', SliceComponent('LocalOnly.pas')));
+  Assert.AreEqual(0, Pos('<licenses>', SliceComponent('vendor.dll')));
+  Assert.AreEqual(0, Pos('<licenses>', SliceComponent('Data.DB.pas')),
+    'A unit matched to a manifest library does not also take the origin label');
+  Assert.IsTrue(Pos('<id>Apache-2.0</id>', SliceComponent('Wrapped')) > 0);
+
+  FMetadata.Licence := '';
+  Assert.IsTrue(FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LContent := LoadOutputContent;
+  Assert.AreEqual(0, Pos('<licenses>', SliceComponent('TestProject.exe')));
+  Assert.AreEqual(0, Pos('<licenses>', SliceComponent('MainForm.pas')),
+    'Own code stays without a licence when the product licence is empty');
+  Assert.IsTrue(Pos('<name>Embarcadero RTL</name>',
+    SliceComponent('System.SysUtils.pas')) > 0);
 end;
 
 end.

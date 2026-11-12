@@ -18,7 +18,9 @@
 /// generated value.
 ///
 /// Own-code units stay in the evidence. They are not dropped and they are
-/// not attached to a third-party library.
+/// not attached to a third-party library. When a product licence is set,
+/// those units carry it. Embarcadero RTL, VCL, and FMX units carry the
+/// origin label the resolver already writes.
 ///
 /// An optional copyright string on a row is stored as text (a year or other
 /// copyright notice). It is not used for matching. When the text is set,
@@ -218,6 +220,25 @@ procedure AppendCycloneDxLicencesXml(ALines: TStrings; const ALicence,
 function SpdxLicenceTokenFor(const ALicence: string; out AKind: TLicenceKind): string;
 
 /// <summary>
+/// Licence written on one SBOM component, and the title used for that
+/// component in the report licence overview.
+/// The built program uses the product licence. An empty product licence
+/// stays empty, which is the previous output.
+/// A unit classified as own code through own_code_units, own_code_prefixes,
+/// or own_code_folders uses the product licence when one is set. With no
+/// product licence those units keep the previous output, unless the unit
+/// is also Embarcadero.
+/// A unit whose origin is Embarcadero RTL, Embarcadero VCL, Embarcadero FMX,
+/// or another label that starts with "Embarcadero ", uses that label. That
+/// is the identifier the resolver already writes for those units.
+/// A unit matched to a manifest library stays empty. The library component
+/// carries the row licence.
+/// </summary>
+function ComponentLicenceFor(const AArtefact: TArtefactInfo;
+  AIsDeliverable: Boolean; const AProductLicence: string;
+  const AManifest: TComponentManifest): string;
+
+/// <summary>
 /// Percent-encodes one purl segment. Unreserved characters are kept.
 /// A space becomes %20.
 /// </summary>
@@ -346,6 +367,7 @@ implementation
 
 uses
   System.SysUtils,
+  System.StrUtils,
   System.IOUtils,
   System.Generics.Collections,
   System.RegularExpressions,
@@ -2116,6 +2138,47 @@ begin
     if Result = 'LicenseRef-' then
       Result := 'LicenseRef-Custom';
   end;
+end;
+
+function IsEmbarcaderoOrigin(const AOrigin: string): Boolean;
+begin
+  // The resolver writes "Embarcadero RTL", "Embarcadero VCL", and
+  // "Embarcadero FMX". A later Embarcadero origin uses the same prefix.
+  Result := StartsText('Embarcadero ', Trim(AOrigin));
+end;
+
+function ComponentLicenceFor(const AArtefact: TArtefactInfo;
+  AIsDeliverable: Boolean; const AProductLicence: string;
+  const AManifest: TComponentManifest): string;
+var
+  LProduct: string;
+  LMatch: TManifestMatch;
+begin
+  LProduct := Trim(AProductLicence);
+  Result := '';
+  // A deliverable match applies to the built program. A unit keeps the
+  // own-code and origin rules below.
+  if AIsDeliverable and
+    not SameText(AArtefact.ArtefactType, 'unit-evidence') then
+    Exit(LProduct);
+
+  if not SameText(AArtefact.ArtefactType, 'unit-evidence') then
+    Exit;
+
+  // Own code belongs to the product. A library row keeps its own licence
+  // on the library component, so the unit itself stays without one.
+  if AManifest.Loaded then
+  begin
+    LMatch := MatchManifestUnit(AManifest, ArtefactUnitName(AArtefact),
+      ArtefactFolderPath(AArtefact));
+    if (LMatch.Kind = mmOwnCode) and (LProduct <> '') then
+      Exit(LProduct);
+    if LMatch.Kind = mmLibrary then
+      Exit;
+  end;
+
+  if IsEmbarcaderoOrigin(AArtefact.Origin) then
+    Result := Trim(AArtefact.Origin);
 end;
 
 function SpdxLicenceToken(const AEntry: TComponentEntry; out AKind: TLicenceKind): string;

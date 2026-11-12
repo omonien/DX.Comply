@@ -64,6 +64,20 @@ type
     /// </summary>
     [Test]
     procedure Licences_LibPrefix_MatchesProject;
+    /// <summary>
+    /// Embarcadero RTL, VCL and FMX units are grouped under that origin
+    /// label. A third-party unit and a neighboring file stay unlicensed.
+    /// Issue #165.
+    /// </summary>
+    [Test]
+    procedure Licences_EmbarcaderoUnits_UseOriginLabel;
+    /// <summary>
+    /// own_code_units, own_code_prefixes and own_code_folders inherit the
+    /// product licence. With no product licence they stay unlicensed, and
+    /// an Embarcadero unit still uses its origin label. Issue #166.
+    /// </summary>
+    [Test]
+    procedure Licences_OwnCode_InheritsProductLicence;
     [Test]
     procedure Suppliers_FromManifestVendor_UnknownOtherwise;
     [Test]
@@ -303,6 +317,88 @@ begin
   var LNone := FindLicence(LOverview.Licences, cNoLicenceGroupTitle);
   Assert.AreEqual(1, LNone.Count);
   Assert.AreEqual('vendor.dll', LNone.Components[0].Name);
+end;
+
+procedure TReportOverviewTests.Licences_EmbarcaderoUnits_UseOriginLabel;
+begin
+  FData.Metadata.Licence := 'MIT';
+  // Demo.exe is the product. vendor.dll is then a neighboring file.
+  FData.ProjectInfo.ProjectName := 'Demo';
+  AddFile('Demo.exe', 'application');
+  AddUnit('System.SysUtils', 'Embarcadero RTL');
+  AddUnit('Winapi.Windows', 'Embarcadero RTL');
+  AddUnit('Vcl.Forms', 'Embarcadero VCL');
+  AddUnit('FMX.Forms', 'Embarcadero FMX');
+  AddUnit('JvComponent', 'Third party');
+  AddFile('vendor.dll', 'library');
+  var LOverview := BuildReportOverview(FData);
+  var LRtl := FindLicence(LOverview.Licences, 'Embarcadero RTL');
+  Assert.AreEqual(NativeInt(2), NativeInt(LRtl.Count), LicenceNames(LRtl));
+  Assert.IsTrue(Pos('System.SysUtils', LicenceNames(LRtl)) > 0);
+  Assert.IsTrue(Pos('Winapi.Windows', LicenceNames(LRtl)) > 0);
+  var LVcl := FindLicence(LOverview.Licences, 'Embarcadero VCL');
+  Assert.AreEqual(NativeInt(1), NativeInt(LVcl.Count));
+  Assert.AreEqual('Vcl.Forms', LVcl.Components[0].Name);
+  var LFmx := FindLicence(LOverview.Licences, 'Embarcadero FMX');
+  Assert.AreEqual(NativeInt(1), NativeInt(LFmx.Count));
+  Assert.AreEqual('FMX.Forms', LFmx.Components[0].Name);
+  var LNone := FindLicence(LOverview.Licences, cNoLicenceGroupTitle);
+  Assert.AreEqual(NativeInt(2), NativeInt(LNone.Count));
+  Assert.IsTrue(Pos('JvComponent', LicenceNames(LNone)) > 0);
+  Assert.IsTrue(Pos('vendor.dll', LicenceNames(LNone)) > 0);
+  Assert.AreEqual(0, Pos('System.SysUtils', LicenceNames(LNone)));
+  Assert.AreEqual(0, Pos('Vcl.Forms', LicenceNames(LNone)));
+  Assert.AreEqual(0, Pos('FMX.Forms', LicenceNames(LNone)));
+end;
+
+procedure TReportOverviewTests.Licences_OwnCode_InheritsProductLicence;
+  procedure SetSource(AIndex: Integer; const APath: string);
+  var
+    LArtefact: TArtefactInfo;
+  begin
+    LArtefact := FArtefacts[AIndex];
+    LArtefact.SourcePath := APath;
+    FArtefacts[AIndex] := LArtefact;
+  end;
+begin
+  FData.Metadata.Licence := 'Apache-2.0';
+  FData.Metadata.ComponentManifestJson :=
+    '{"components":[],"own_code_units":["MainForm","System.SysUtils"],' +
+    '"own_code_prefixes":["App"],"own_code_folders":["' +
+    StringReplace('C:\DXComplyFolderTest\src', '\', '\\', [rfReplaceAll]) + '"]}';
+  AddUnit('MainForm', 'Local project');
+  AddUnit('AppSettings', 'Local project');
+  AddUnit('Helper', 'Local project');
+  SetSource(2, 'C:\DXComplyFolderTest\src\Helper.pas');
+  AddUnit('LocalOnly', 'Local project');
+  AddUnit('VendorUnit', 'Third party');
+  AddUnit('System.SysUtils', 'Embarcadero RTL');
+
+  var LOverview := BuildReportOverview(FData);
+  var LProduct := FindLicence(LOverview.Licences, 'Apache-2.0');
+  Assert.IsTrue(Pos('MainForm', LicenceNames(LProduct)) > 0, 'own_code_units');
+  Assert.IsTrue(Pos('AppSettings', LicenceNames(LProduct)) > 0, 'own_code_prefixes');
+  Assert.IsTrue(Pos('Helper', LicenceNames(LProduct)) > 0, 'own_code_folders');
+  Assert.IsTrue(Pos('System.SysUtils', LicenceNames(LProduct)) > 0,
+    'Own code wins over the Embarcadero origin');
+  Assert.AreEqual(NativeInt(0), NativeInt(FindLicence(LOverview.Licences, 'Embarcadero RTL').Count));
+  var LNone := FindLicence(LOverview.Licences, cNoLicenceGroupTitle);
+  Assert.AreEqual(NativeInt(2), NativeInt(LNone.Count));
+  Assert.IsTrue(Pos('LocalOnly', LicenceNames(LNone)) > 0);
+  Assert.IsTrue(Pos('VendorUnit', LicenceNames(LNone)) > 0);
+  Assert.AreEqual(0, Pos('MainForm', LicenceNames(LNone)));
+
+  FData.Metadata.Licence := '';
+  LOverview := BuildReportOverview(FData);
+  Assert.AreEqual(NativeInt(0), NativeInt(FindLicence(LOverview.Licences, 'Apache-2.0').Count));
+  var LRtl := FindLicence(LOverview.Licences, 'Embarcadero RTL');
+  Assert.AreEqual(NativeInt(1), NativeInt(LRtl.Count));
+  Assert.AreEqual('System.SysUtils', LRtl.Components[0].Name);
+  LNone := FindLicence(LOverview.Licences, cNoLicenceGroupTitle);
+  Assert.IsTrue(Pos('MainForm', LicenceNames(LNone)) > 0);
+  Assert.IsTrue(Pos('AppSettings', LicenceNames(LNone)) > 0);
+  Assert.IsTrue(Pos('Helper', LicenceNames(LNone)) > 0);
+  Assert.AreEqual(0, Pos('System.SysUtils', LicenceNames(LNone)));
 end;
 
 procedure TReportOverviewTests.Licences_CopyleftHint_OnlyWhenDifferentFromProduct;

@@ -20,6 +20,7 @@ interface
 
 uses
   System.SysUtils,
+  System.Generics.Collections,
   System.IOUtils,
   System.JSON,
   System.RegularExpressions,
@@ -65,6 +66,12 @@ type
     procedure Build_Relationships_GroupedWithCompleteness;
     [Test]
     procedure Build_Licence_IsLicenseExpression;
+    /// <summary>
+    /// Embarcadero units and own-code units keep their licences when the
+    /// SPDX 2.3 document is converted. Issues #165 and #166.
+    /// </summary>
+    [Test]
+    procedure Build_UnitLicences_EmbarcaderoAndOwnCode;
     [Test]
     procedure Write_OutputPassesValidate;
 
@@ -328,6 +335,90 @@ begin
     var LRel := FindRelationship(LDoc, PackageId(LDoc, 'TestProject.exe'), 'hasDeclaredLicense');
     Assert.IsNotNull(LRel, 'the deliverable declares its licence');
     Assert.IsTrue(ArrayHas(LRel.GetValue('to'), LFound));
+  finally
+    LDoc.Free;
+  end;
+end;
+
+procedure TSpdx3WriterTests.Build_UnitLicences_EmbarcaderoAndOwnCode;
+  procedure AddUnit(const AName, AOrigin, ASource: string);
+  begin
+    AddArtefact(AName, 'unit-evidence', 'abc');
+    var LItem := FArtefacts[FArtefacts.Count - 1];
+    LItem.Origin := AOrigin;
+    LItem.SourcePath := ASource;
+    FArtefacts[FArtefacts.Count - 1] := LItem;
+  end;
+
+  function ExpressionFor(const ADoc: TJSONObject; const APackageName: string): string;
+  var
+    LRel: TJSONObject;
+    LTargets: TJSONArray;
+    LId: string;
+    I: Integer;
+  begin
+    Result := '';
+    LRel := FindRelationship(ADoc, PackageId(ADoc, APackageName), 'hasDeclaredLicense');
+    if LRel = nil then
+      Exit;
+    if not (LRel.GetValue('to') is TJSONArray) then
+      Exit;
+    LTargets := TJSONArray(LRel.GetValue('to'));
+    if LTargets.Count = 0 then
+      Exit;
+    LId := LTargets.Items[0].Value;
+    for I := 0 to High(Elements(ADoc, 'simplelicensing_LicenseExpression')) do
+      if Elements(ADoc, 'simplelicensing_LicenseExpression')[I].GetValue<string>('spdxId') = LId then
+        Exit(Elements(ADoc, 'simplelicensing_LicenseExpression')[I].GetValue<string>(
+          'simplelicensing_licenseExpression'));
+  end;
+
+  function HasLicenceText(const ADoc: TJSONObject; const AText: string): Boolean;
+  var
+    LItem: TJSONObject;
+  begin
+    Result := False;
+    for LItem in Elements(ADoc, 'simplelicensing_SimpleLicensingText') do
+      if LItem.GetValue<string>('simplelicensing_licenseText') = AText then
+        Exit(True);
+  end;
+
+begin
+  FMetadata.Licence := 'MIT';
+  FMetadata.ComponentManifestJson :=
+    '{"components":[],"own_code_units":["MainForm"],"own_code_prefixes":["App"],' +
+    '"own_code_folders":["' +
+    StringReplace('C:\DXComplyFolderTest\src', '\', '\\', [rfReplaceAll]) + '"]}';
+  AddArtefact('TestProject.exe', 'application', 'abc');
+  AddUnit('System.SysUtils.pas', 'Embarcadero RTL', '');
+  AddUnit('Vcl.Forms.pas', 'Embarcadero VCL', '');
+  AddUnit('FMX.Forms.pas', 'Embarcadero FMX', '');
+  AddUnit('MainForm.pas', 'Local project', '');
+  AddUnit('Helper.pas', 'Local project', 'C:\DXComplyFolderTest\src\Helper.pas');
+  AddUnit('JvComponent.pas', 'Third party', '');
+  var LDoc := Build;
+  try
+    Assert.AreEqual('LicenseRef-Embarcadero-RTL', ExpressionFor(LDoc, 'System.SysUtils.pas'));
+    Assert.AreEqual('LicenseRef-Embarcadero-VCL', ExpressionFor(LDoc, 'Vcl.Forms.pas'));
+    Assert.AreEqual('LicenseRef-Embarcadero-FMX', ExpressionFor(LDoc, 'FMX.Forms.pas'));
+    Assert.IsTrue(HasLicenceText(LDoc, 'Embarcadero RTL'));
+    Assert.IsTrue(HasLicenceText(LDoc, 'Embarcadero VCL'));
+    Assert.IsTrue(HasLicenceText(LDoc, 'Embarcadero FMX'));
+    Assert.AreEqual('MIT', ExpressionFor(LDoc, 'TestProject.exe'));
+    Assert.AreEqual('MIT', ExpressionFor(LDoc, 'MainForm.pas'));
+    Assert.AreEqual('MIT', ExpressionFor(LDoc, 'Helper.pas'));
+    Assert.IsNull(FindRelationship(LDoc, PackageId(LDoc, 'JvComponent.pas'), 'hasDeclaredLicense'),
+      'A third-party unit stays without a declared licence');
+  finally
+    LDoc.Free;
+  end;
+
+  FMetadata.Licence := '';
+  LDoc := Build;
+  try
+    Assert.AreEqual('', ExpressionFor(LDoc, 'MainForm.pas'),
+      'Own code stays without a licence when the product licence is empty');
+    Assert.AreEqual('LicenseRef-Embarcadero-RTL', ExpressionFor(LDoc, 'System.SysUtils.pas'));
   finally
     LDoc.Free;
   end;

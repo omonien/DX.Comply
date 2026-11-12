@@ -49,7 +49,8 @@ type
     function BuildProperties(const AProperties: TArray<TSbomProperty>): TJSONArray;
     /// <summary>
     /// Builds one component. ALicence is written as licenses when it is not
-    /// empty. Only the built program gets the product licence.
+    /// empty. The built program and own-code units use the product licence.
+    /// An Embarcadero unit uses its origin label.
     /// </summary>
     function BuildComponent(const AArtefact: TArtefactInfo; const AIndex: Integer;
       AUnresolvedSource: Boolean; const ALicence: string): TJSONObject;
@@ -282,8 +283,10 @@ begin
     LComponent.AddPair('hashes', LHashArray);
   end;
 
-  // The built program is the product, so it carries the product licence,
-  // as the SPDX writer does (issue #131). Empty writes nothing.
+  // The built program carries the product licence (issue #131). An
+  // Embarcadero unit carries its origin label (issue #165). An own-code
+  // unit carries the product licence when one is set (issue #166).
+  // Empty writes nothing.
   AddCycloneDxLicences(LComponent, ALicence, '');
 
   // TR-03183-2 maps the deployable SHA-512 to externalReferences type
@@ -443,6 +446,9 @@ var
   LGraph: TUsesDependencyGraph;
   I: Integer;
   LRootIndex: Integer;
+  LManifest: TComponentManifest;
+  LLicenceError: string;
+  LLicence: string;
 begin
   Result := False;
   if AOutputPath = '' then
@@ -476,13 +482,22 @@ begin
     LComponents := TJSONArray.Create;
     LRootIndex := FindDeliverableTargetIndex(AArtefacts, AProjectInfo.ProjectName,
       AProjectInfo.OutputFilePath);
+    LManifest := Default(TComponentManifest);
+    if Trim(AMetadata.ComponentManifestJson) <> '' then
+    begin
+      // A failed parse leaves the manifest unloaded. A non-empty error does too.
+      if not TryParseComponentManifest(AMetadata.ComponentManifestJson, '',
+        LManifest, LLicenceError) or (LLicenceError <> '') then
+        LManifest := Default(TComponentManifest);
+    end;
     for I := 0 to AArtefacts.Count - 1 do
-      if IsSameDeliverableFile(AArtefacts, I, LRootIndex) then
-        LComponents.Add(BuildComponent(AArtefacts[I], I,
-          LGraph.Status[I] = uusMissingSource, AMetadata.Licence))
-      else
-        LComponents.Add(BuildComponent(AArtefacts[I], I,
-          LGraph.Status[I] = uusMissingSource, ''));
+    begin
+      LLicence := ComponentLicenceFor(AArtefacts[I],
+        IsSameDeliverableFile(AArtefacts, I, LRootIndex), AMetadata.Licence,
+        LManifest);
+      LComponents.Add(BuildComponent(AArtefacts[I], I,
+        LGraph.Status[I] = uusMissingSource, LLicence));
+    end;
     LRoot.AddPair('components', LComponents);
 
     // Dependencies. A component manifest groups matched units under one

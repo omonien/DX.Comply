@@ -18,7 +18,8 @@
 /// creationInfo.created is UTC YYYY-MM-DDThh:mm:ssZ. Package external
 /// references use a percent-encoded pkg:generic PURL so the locator has no
 /// whitespace (issue #40). licenseConcluded and licenseDeclared are
-/// NOASSERTION, except the built program when a product licence is set.
+/// NOASSERTION, except the built program and own-code units when a product
+/// licence is set, and Embarcadero units, which use their origin label.
 /// supplier uses Organization: when metadata supplies a name.
 ///
 /// SPDX JSON is part of the MIT-licensed tool, the same as the CycloneDX writers.
@@ -297,7 +298,8 @@ begin
 
   LPackage.AddPair('downloadLocation', 'NOASSERTION');
   LPackage.AddPair('filesAnalyzed', TJSONBool.Create(False));
-  // The built program carries the product licence. Every other package
+  // The built program and own-code units carry the product licence.
+  // An Embarcadero unit carries its origin label. Every other package
   // stays NOASSERTION, the same as a scanned file with no manifest row.
   LToken := SpdxLicenceTokenFor(ALicence, LKind);
   LPackage.AddPair('licenseConcluded', LToken);
@@ -476,6 +478,9 @@ var
   LGraph: TUsesDependencyGraph;
   I: Integer;
   LRootIndex: Integer;
+  LManifest: TComponentManifest;
+  LLicenceError: string;
+  LLicence: string;
 begin
   LDocumentSpdxId := cSpdxIdPrefix + 'DOCUMENT';
   LDocNamespace := 'https://spdx.org/spdxdocs/' +
@@ -498,18 +503,29 @@ begin
 
     // Packages. IDs are assigned once so relationships point at the same values.
     // The product licence is written on the built program. A second copy of
-    // that file gets the same licence (issue #155).
+    // that file gets the same licence (issue #155). Own-code units use it
+    // too when it is set (issue #166). Embarcadero units use their origin
+    // label (issue #165).
     LRootIndex := FindDeliverableTargetIndex(AArtefacts, AProjectInfo.ProjectName,
       AProjectInfo.OutputFilePath);
+    LManifest := Default(TComponentManifest);
+    if Trim(AMetadata.ComponentManifestJson) <> '' then
+    begin
+      // A failed parse leaves the manifest unloaded. A non-empty error does too.
+      if not TryParseComponentManifest(AMetadata.ComponentManifestJson, '',
+        LManifest, LLicenceError) or (LLicenceError <> '') then
+        LManifest := Default(TComponentManifest);
+    end;
     LPackageIds := CollectPackageSpdxIds(AArtefacts);
     LPackages := TJSONArray.Create;
     for I := 0 to AArtefacts.Count - 1 do
-      if IsSameDeliverableFile(AArtefacts, I, LRootIndex) then
-        LPackages.Add(BuildPackage(AArtefacts[I], LPackageIds[I], AMetadata.Supplier,
-          AMetadata.Licence))
-      else
-        LPackages.Add(BuildPackage(AArtefacts[I], LPackageIds[I], AMetadata.Supplier,
-          ''));
+    begin
+      LLicence := ComponentLicenceFor(AArtefacts[I],
+        IsSameDeliverableFile(AArtefacts, I, LRootIndex), AMetadata.Licence,
+        LManifest);
+      LPackages.Add(BuildPackage(AArtefacts[I], LPackageIds[I], AMetadata.Supplier,
+        LLicence));
+    end;
     LRoot.AddPair('packages', LPackages);
 
     // Relationships. Manifest libraries use the same package IDs.
@@ -524,6 +540,18 @@ begin
         LDocumentSpdxId, LRoot);
     if (LRootIndex >= 0) and (Trim(AMetadata.Licence) <> '') then
       AddRootExtractedLicence(LRoot, AMetadata.Licence);
+    // Name licences on units (Embarcadero origin labels, and a product
+    // licence that is not an SPDX id) need an extracted entry. The helper
+    // skips SPDX ids and keeps one entry per token.
+    for I := 0 to AArtefacts.Count - 1 do
+    begin
+      if IsSameDeliverableFile(AArtefacts, I, LRootIndex) then
+        Continue;
+      LLicence := ComponentLicenceFor(AArtefacts[I], False, AMetadata.Licence,
+        LManifest);
+      if LLicence <> '' then
+        AddRootExtractedLicence(LRoot, LLicence);
+    end;
     AppendUsesRelationships(LRoot.GetValue('relationships') as TJSONArray,
       LPackageIds, LGraph);
   except

@@ -165,6 +165,12 @@ type
     /// </summary>
     [Test]
     procedure Write_ProductLicence_OnUntypedProjectExe;
+    /// <summary>
+    /// Embarcadero units carry their origin label as a LicenseRef.
+    /// Own-code units carry the product licence. Issues #165 and #166.
+    /// </summary>
+    [Test]
+    procedure Write_UnitLicences_EmbarcaderoAndOwnCode;
   end;
 
 implementation
@@ -929,6 +935,115 @@ begin
       end;
     end;
     Assert.AreEqual(2, LLicensed, 'Both copies of the project executable are licensed');
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TSpdxWriterTests.Write_UnitLicences_EmbarcaderoAndOwnCode;
+var
+  LJson, LPackage: TJSONObject;
+  LExtracted: TJSONArray;
+  LUnit: TArtefactInfo;
+
+  function PackageNamed(const AName: string): TJSONObject;
+  var
+    LPackages: TJSONArray;
+    I: Integer;
+  begin
+    Result := nil;
+    LPackages := LJson.GetValue('packages') as TJSONArray;
+    Assert.IsNotNull(LPackages, 'packages must be present');
+    for I := 0 to LPackages.Count - 1 do
+      if SameText(TJSONObject(LPackages.Items[I]).GetValue<string>('name'), AName) then
+        Exit(TJSONObject(LPackages.Items[I]));
+  end;
+
+  procedure ExpectLicence(const AName, AToken: string);
+  begin
+    LPackage := PackageNamed(AName);
+    Assert.IsNotNull(LPackage, AName);
+    Assert.AreEqual(AToken, LPackage.GetValue<string>('licenseConcluded'), AName);
+    Assert.AreEqual(AToken, LPackage.GetValue<string>('licenseDeclared'), AName);
+  end;
+
+  function ExtractedName(const AId: string): string;
+  var
+    I: Integer;
+    LInfo: TJSONObject;
+  begin
+    Result := '';
+    if not (LJson.GetValue('hasExtractedLicensingInfos') is TJSONArray) then
+      Exit;
+    LExtracted := TJSONArray(LJson.GetValue('hasExtractedLicensingInfos'));
+    for I := 0 to LExtracted.Count - 1 do
+    begin
+      LInfo := LExtracted.Items[I] as TJSONObject;
+      if SameText(LInfo.GetValue<string>('licenseId'), AId) then
+        Exit(LInfo.GetValue<string>('name'));
+    end;
+  end;
+
+  procedure AddUnit(const AName, AOrigin, ASource: string);
+  begin
+    LUnit := MakeArtefact(AName, 'unit-evidence', 'abcd1234ef', 32);
+    LUnit.Origin := AOrigin;
+    LUnit.SourcePath := ASource;
+    FArtefacts.Add(LUnit);
+  end;
+
+begin
+  FMetadata.Licence := 'MIT';
+  FMetadata.ComponentManifestJson :=
+    '{"components":[{"name":"Wrapped","version":"1","vendor":"A","licence":"Apache-2.0",' +
+    '"type":"library","units_exact":["Data.DB"]}],' +
+    '"own_code_units":["MainForm"],"own_code_prefixes":["App"],' +
+    '"own_code_folders":["' +
+    StringReplace('C:\DXComplyFolderTest\src', '\', '\\', [rfReplaceAll]) + '"]}';
+  FArtefacts.Add(MakeArtefact('TestProject.exe', 'application', 'abcd1234ef', 1024));
+  AddUnit('System.SysUtils.pas', 'Embarcadero RTL', '');
+  AddUnit('Vcl.Forms.pas', 'Embarcadero VCL', '');
+  AddUnit('FMX.Forms.pas', 'Embarcadero FMX', '');
+  AddUnit('MainForm.pas', 'Local project', '');
+  AddUnit('AppSettings.pas', 'Local project', '');
+  AddUnit('Helper.pas', 'Local project', 'C:\DXComplyFolderTest\src\Helper.pas');
+  AddUnit('LocalOnly.pas', 'Local project', '');
+  AddUnit('Data.DB.pas', 'Embarcadero RTL', '');
+  FArtefacts.Add(MakeArtefact('vendor.dll', 'library', 'abcd1234ef', 64));
+  Assert.IsTrue(FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LJson := LoadOutputJson;
+  Assert.IsNotNull(LJson);
+  try
+    ExpectLicence('TestProject.exe', 'MIT');
+    ExpectLicence('System.SysUtils.pas', 'LicenseRef-Embarcadero-RTL');
+    ExpectLicence('Vcl.Forms.pas', 'LicenseRef-Embarcadero-VCL');
+    ExpectLicence('FMX.Forms.pas', 'LicenseRef-Embarcadero-FMX');
+    ExpectLicence('MainForm.pas', 'MIT');
+    ExpectLicence('AppSettings.pas', 'MIT');
+    ExpectLicence('Helper.pas', 'MIT');
+    ExpectLicence('LocalOnly.pas', 'NOASSERTION');
+    ExpectLicence('vendor.dll', 'NOASSERTION');
+    ExpectLicence('Data.DB.pas', 'NOASSERTION');
+    ExpectLicence('Wrapped', 'Apache-2.0');
+    LExtracted := LJson.GetValue('hasExtractedLicensingInfos') as TJSONArray;
+    Assert.IsNotNull(LExtracted);
+    Assert.AreEqual(NativeInt(3), NativeInt(LExtracted.Count),
+      'Each Embarcadero origin label is one extracted licence');
+    Assert.AreEqual('Embarcadero RTL', ExtractedName('LicenseRef-Embarcadero-RTL'));
+    Assert.AreEqual('Embarcadero VCL', ExtractedName('LicenseRef-Embarcadero-VCL'));
+    Assert.AreEqual('Embarcadero FMX', ExtractedName('LicenseRef-Embarcadero-FMX'));
+  finally
+    LJson.Free;
+  end;
+
+  FMetadata.Licence := '';
+  Assert.IsTrue(FWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LJson := LoadOutputJson;
+  Assert.IsNotNull(LJson);
+  try
+    ExpectLicence('TestProject.exe', 'NOASSERTION');
+    ExpectLicence('MainForm.pas', 'NOASSERTION');
+    ExpectLicence('System.SysUtils.pas', 'LicenseRef-Embarcadero-RTL');
   finally
     LJson.Free;
   end;

@@ -60,7 +60,8 @@ type
     procedure BuildMetadata(const AMetadata: TSbomMetadata; const AProjectInfo: TProjectInfo);
     /// <summary>
     /// Writes one component. ALicence is written as licenses when it is not
-    /// empty. Only the built program gets the product licence.
+    /// empty. The built program and own-code units use the product licence.
+    /// An Embarcadero unit uses its origin label.
     /// </summary>
     procedure BuildComponent(const AArtefact: TArtefactInfo; const AIndex: Integer;
       AUnresolvedSource: Boolean; const ALicence: string);
@@ -279,8 +280,10 @@ begin
     CloseTag('hashes');
   end;
 
-  // bom-1.6 places licenses after hashes. The built program is the product
-  // and carries the product licence (issue #131). Empty writes nothing.
+  // bom-1.6 places licenses after hashes. The built program carries the
+  // product licence (issue #131). An Embarcadero unit carries its origin
+  // label (issue #165). An own-code unit carries the product licence when
+  // one is set (issue #166). Empty writes nothing.
   AppendCycloneDxLicencesXml(FLines, ALicence, '', FIndentLevel);
 
   // A file has no package URL of its own, so no purl element is written.
@@ -388,15 +391,27 @@ procedure TCycloneDxXmlWriter.BuildComponents(const AArtefacts: TArtefactList;
 var
   I: Integer;
   LRootIndex: Integer;
+  LManifest: TComponentManifest;
+  LLicenceError: string;
+  LLicence: string;
 begin
   OpenTag('components');
   LRootIndex := FindDeliverableTargetIndex(AArtefacts, AProjectName, AOutputFilePath);
+  LManifest := Default(TComponentManifest);
+  if Trim(AMetadata.ComponentManifestJson) <> '' then
+  begin
+    // A failed parse leaves the manifest unloaded. A non-empty error does too.
+    if not TryParseComponentManifest(AMetadata.ComponentManifestJson, '',
+      LManifest, LLicenceError) or (LLicenceError <> '') then
+      LManifest := Default(TComponentManifest);
+  end;
   for I := 0 to AArtefacts.Count - 1 do
-    if IsSameDeliverableFile(AArtefacts, I, LRootIndex) then
-      BuildComponent(AArtefacts[I], I, AGraph.Status[I] = uusMissingSource,
-        AMetadata.Licence)
-    else
-      BuildComponent(AArtefacts[I], I, AGraph.Status[I] = uusMissingSource, '');
+  begin
+    LLicence := ComponentLicenceFor(AArtefacts[I],
+      IsSameDeliverableFile(AArtefacts, I, LRootIndex), AMetadata.Licence,
+      LManifest);
+    BuildComponent(AArtefacts[I], I, AGraph.Status[I] = uusMissingSource, LLicence);
+  end;
   // Library rows from a component manifest. Element order is owned by
   // DX.Comply.ComponentManifest so this writer stays a thin hook.
   if AMetadata.ComponentManifestJson <> '' then

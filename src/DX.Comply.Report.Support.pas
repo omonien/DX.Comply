@@ -59,7 +59,12 @@ function SafeText(const AValue: string; const AFallback: string = 'n/a'): string
 /// </summary>
 function IsHttpUrl(const AValue: string): Boolean;
 function DelphiRuntimeUnitsText(const AProjectInfo: TProjectInfo): string;
-function HumanReadableReportTitle: string;
+/// <summary>
+/// Report title. The project name is the prefix, so several open reports
+/// can be told apart. The product name is used when the project name is
+/// empty. With neither name the title stays "DX.Comply SBOM Report".
+/// </summary>
+function HumanReadableReportTitle(const AProjectName, AProductName: string): string;
 function HumanReadableReportSubtitle: string;
 function HumanReadableReportGenerator: string;
 function RelativeOutputReference(const ABaseFilePath, ATargetFilePath: string): string;
@@ -139,9 +144,16 @@ begin
     'It sits beside the SBOM. The status below is an internal structural check.';
 end;
 
-function HumanReadableReportTitle: string;
+function HumanReadableReportTitle(const AProjectName, AProductName: string): string;
+var
+  LName: string;
 begin
+  LName := Trim(AProjectName);
+  if LName = '' then
+    LName := Trim(AProductName);
   Result := 'DX.Comply SBOM Report';
+  if LName <> '' then
+    Result := LName + ' - ' + Result;
 end;
 
 function HumanReadableReportFormatToString(AValue: THumanReadableReportFormat): string;

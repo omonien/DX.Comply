@@ -211,15 +211,15 @@ The JSON formats are written as UTF-8 without a byte order mark, as RFC 8259 ask
 
 | Report | Description |
 |---|---|
-| **HTML** | SBOM report with unit evidence, artefacts, and the result of the internal structural check. Pass `--report=html` |
-| **Markdown** | Shorter companion for review and archival. Pass `--report=markdown` |
+| **HTML** | SBOM report with unit evidence, artefacts, and the result of the internal structural check. The page title and the heading start with the project name, or the product name when the project name is empty. Pass `--report=html` |
+| **Markdown** | Shorter companion for review and archival. The heading uses the same name prefix. Pass `--report=markdown` |
 
 `--report=both` (or bare `--report`) emits both. `--report=none` keeps companion reports off (the default).
 
 Both reports open with three overview sections built from the same data as the SBOM:
 
 - **Origin summary.** Component counts per origin (Embarcadero RTL/VCL/FMX, local project, third party, component manifest libraries, DLLs, runtime packages, other files), with links to the detail sections. The total equals the number of components in the SBOM. Third-party units are also counted per supplier from the component manifest, the rest as unknown supplier.
-- **Licences.** Components grouped by the licence declared in the SBOM, plus a group for components without licence information. Each component is its own row, sorted by name without regard to case. Version and copyright are their own columns. The copyright is the optional `copyright` field of the component manifest, and the cell is empty when that field is not set. The declared licence, the component count and the review note are shown once for the group. Copyleft licences that differ from the product licence get a review hint. The hint is not legal advice.
+- **Licences.** Components grouped by the licence declared in the SBOM, plus a group for components without licence information. Embarcadero RTL, VCL and FMX units are grouped under that origin label (`Embarcadero RTL`, `Embarcadero VCL`, `Embarcadero FMX`). Units marked as the project's own code are grouped under the product licence when one is set. Each component is its own row, sorted by name without regard to case. Version and copyright are their own columns. The copyright is the optional `copyright` field of the component manifest, and the cell is empty when that field is not set. The declared licence, the component count and the review note are shown once for the group. Copyleft licences that differ from the product licence get a review hint. The hint is not legal advice.
 - **Third-party units without manifest.** Third-party units that no component manifest row matches, grouped by unit prefix, with the fields they are missing. The section is left out when the manifest covers every third-party unit. The CLI and the IDE log print the same count as one line only when at least one unit is missing.
 
 The licence table lists one component per row. The declared licence, the component count and the note are filled on the first row of that licence. In the HTML report those three cells span the rows of the group. Later rows leave them empty:
@@ -299,7 +299,7 @@ The CLI warnings name the flag and the `.dxcomply.json` key, as listed below. In
 - No SBOM creator email or URL. Pass `--sbom-creator=<email-or-url>` or set `sbomCreator`.
 - No product version, or the version is `0.0.0.0`. Pass `--version=<version>`, set `product.version`, or set the version info in the project options.
 - The version is `1.0.0.0` and it came from the project version info (the Delphi default for a new project). Pass `--version=<version>`, set `product.version`, or update the version info in the project options.
-- No distribution licence. Pass `--licence=<SPDX expression>` or set `product.licence`. An SPDX identifier, an expression, or a name is written on the primary component the same way as a manifest library, and as `licenseDeclared` and `licenseConcluded` on the SPDX package of the built program. The CycloneDX component of the built program (the `.exe`, `.dll` or `.bpl` of the project) carries the same licence, and the licence overview of the reports lists it under the product licence. That file is the project output path, or a binary whose name is the project name (a numeric suffix and a `lib` or `bpl` prefix still match), including when the scan did not mark it as an application, library, or package. A neighboring binary such as `bit.dll` stays without that licence. A second copy of the project binary carries the same licence and stays in the SBOM. The CLI and the IDE use the same rule.
+- No distribution licence. Pass `--licence=<SPDX expression>` or set `product.licence`. An SPDX identifier, an expression, or a name is written on the primary component the same way as a manifest library, and as `licenseDeclared` and `licenseConcluded` on the SPDX package of the built program. The CycloneDX component of the built program (the `.exe`, `.dll` or `.bpl` of the project) carries the same licence, and the licence overview of the reports lists it under the product licence. That file is the project output path, or a binary whose name is the project name (a numeric suffix and a `lib` or `bpl` prefix still match), including when the scan did not mark it as an application, library, or package. A neighboring binary such as `bit.dll` stays without that licence. A second copy of the project binary carries the same licence and stays in the SBOM. The CLI and the IDE use the same rule. Units classified as the project's own code (`own_code_units`, `own_code_prefixes`, `own_code_folders`) carry that same product licence in the SBOM and in the licence overview. With no product licence they stay without one. An Embarcadero unit that is also listed as own code uses the product licence when one is set, and its origin label otherwise.
 - The built exe, dll, or bpl was not found, so the SBOM has no hash for it. Build the project first, or check the output directory, `--platform`, and `--config-name`.
 - Third-party units without supplier or licence (BSI TR-03183-2 sections 5.2.2 and 6.1). A unit gets both only from a [component manifest](#component-manifest) row. Units without a row are grouped by unit prefix (`Jv` for `JvComponent`, `Spring` for `Spring.Collections`), and a row that lacks `vendor` or `licence` is named on its own. Up to ten groups are listed, then one line counts the rest. Add a manifest row with `vendor` and `licence` to clear the warning.
 
@@ -449,7 +449,7 @@ The first hit wins, in this order:
 
 `units_exclude` lists unit names that the prefixes and folders of that row do not match. This helps with a short prefix: `"units_prefix": ["Ab"], "units_exclude": ["AboutBox"]` gives every `Ab*` unit to the row except `AboutBox`, which can still match another row or stay unmatched. The same list keeps a unit out of a `units_folder` on that row. For a unit with a Delphi scope, write the name either way: `Vcl.Skia` and `Skia` both keep the unit `Vcl.Skia` out of a row with the prefix `Skia`. A prefix shorter than 3 characters gets a warning, but it is still applied.
 
-`own_code_units`, `own_code_prefixes`, and `own_code_folders` mark the project's own units. Those units stay in the evidence. They are not dropped, and they are not attributed to a third-party library. Unmatched units stay as they are: one component each, linked from the program that was built.
+`own_code_units`, `own_code_prefixes`, and `own_code_folders` mark the project's own units. Those units stay in the evidence. They are not dropped, and they are not attributed to a third-party library. When `product.licence` is set, they carry that licence in the SBOM and in the reports. With no product licence they stay without one. Unmatched units stay as they are: one component each, linked from the program that was built.
 
 A matched unit stays as its own evidence component (hash, origin). The SBOM adds one library component for the row (`name`, `version`, `type`, supplier and author from `vendor`, optional `vendor_url`, and `copyright` when the row sets it). The program that was built depends on that library, and the library depends on the matched units. Other binaries stay linked from that program. This is written for CycloneDX JSON, CycloneDX XML, SPDX 2.3 JSON, and SPDX 3.0.1 JSON-LD.
 
@@ -544,6 +544,18 @@ Yes. `--report-content=overview` writes the origin summary, suppliers, and licen
 ### A library I use has no SBOM and no component manifest. How do I add its supplier and licence?
 
 Add a row for it to your own components file and pass it with `--manifest`. The report section **Third-party units without manifest** shows which units still need a row. See [Libraries that ship no metadata](#libraries-that-ship-no-metadata).
+
+### Why do RTL, VCL and FMX units show an Embarcadero licence?
+
+They belong to the Delphi product. The licence overview and the SBOM use the origin label DX.Comply already records: `Embarcadero RTL`, `Embarcadero VCL`, or `Embarcadero FMX`. CycloneDX writes that label as `license.name`. SPDX 2.3 and SPDX 3.0.1 write `LicenseRef-Embarcadero-RTL` (and the same form for VCL and FMX) and keep the label as the extracted licence text. A third-party unit is not given that licence.
+
+### Do my own units get a licence?
+
+Units named by `own_code_units`, `own_code_prefixes`, or `own_code_folders` belong to the product. When `product.licence` (or `--licence`) is set, they inherit it in the HTML and Markdown reports and in CycloneDX, SPDX 2.3 and SPDX 3.0.1. When it is not set, they stay without licence information. An Embarcadero unit that you also list as own code uses the product licence when one is set, and the origin label otherwise.
+
+### Several HTML reports are open. How do I tell them apart?
+
+The HTML page title and the heading, and the Markdown heading, start with the project name. When the project name is empty, the product name is used. With neither name the heading stays `DX.Comply SBOM Report`.
 
 ### Do I have to list every unit in the component manifest?
 
