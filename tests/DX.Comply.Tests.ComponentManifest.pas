@@ -874,14 +874,15 @@ procedure TComponentManifestTests.Licence_LicenseRef_IsAcceptedWithoutWarning;
 var
   LManifest: TComponentManifest;
   LKind: TLicenceKind;
-  I: Integer;
 
   function WarnsFor(const ALicence: string): Boolean;
+  var
+    LIdx: Integer;
   begin
     Result := False;
-    for I := 0 to High(LManifest.Warnings) do
+    for LIdx := 0 to High(LManifest.Warnings) do
       if Pos('licence "' + ALicence + '" is not a recognised SPDX identifier',
-        LManifest.Warnings[I]) > 0 then
+        LManifest.Warnings[LIdx]) > 0 then
         Exit(True);
   end;
 
