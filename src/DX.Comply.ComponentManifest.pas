@@ -2841,24 +2841,34 @@ var
   function TokenForName(const AValue: string): string;
   var
     LId: string;
+
+    function IdHasLetterOrDigit(const AId: string): Boolean;
+    var
+      LIndex: Integer;
+    begin
+      // SanitizeSpdxId turns "!!!" into "---". Hyphens and dots alone are
+      // not an id, so that result is treated as empty. The sanitizer itself
+      // stays unchanged because package ids use it too.
+      Result := False;
+      for LIndex := 1 to Length(AId) do
+        if CharInSet(AId[LIndex], ['A'..'Z', 'a'..'z', '0'..'9']) then
+          Exit(True);
+    end;
+
   begin
     // A value that already starts with LicenseRef- is kept, in the letter
     // case it was written. Only the id characters are sanitized, so
     // LicenseRef-Proprietary is not written as LicenseRef-LicenseRef-Proprietary.
     if StartsText(cLicenseRefPrefix, AValue) then
-    begin
-      LId := SanitizeSpdxId(Copy(AValue, Length(cLicenseRefPrefix) + 1, MaxInt));
-      if LId = '' then
-        Result := 'LicenseRef-Custom'
-      else
-        Result := Copy(AValue, 1, Length(cLicenseRefPrefix)) + LId;
-    end
+      LId := SanitizeSpdxId(Copy(AValue, Length(cLicenseRefPrefix) + 1, MaxInt))
     else
-    begin
-      Result := cLicenseRefPrefix + SanitizeSpdxId(AValue);
-      if Result = 'LicenseRef-' then
-        Result := 'LicenseRef-Custom';
-    end;
+      LId := SanitizeSpdxId(AValue);
+    if not IdHasLetterOrDigit(LId) then
+      Result := 'LicenseRef-Custom'
+    else if StartsText(cLicenseRefPrefix, AValue) then
+      Result := Copy(AValue, 1, Length(cLicenseRefPrefix)) + LId
+    else
+      Result := cLicenseRefPrefix + LId;
   end;
 
 begin

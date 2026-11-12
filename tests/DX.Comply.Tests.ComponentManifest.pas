@@ -913,6 +913,9 @@ begin
   Assert.AreEqual('LicenseRef-Proprietary', SpdxLicenceTokenFor('Proprietary', LKind));
   Assert.AreEqual('LicenseRef-Custom', SpdxLicenceTokenFor('LicenseRef-', LKind));
   Assert.AreEqual('LicenseRef-Custom', SpdxLicenceTokenFor('!!!', LKind));
+  Assert.AreEqual('LicenseRef-Custom', SpdxLicenceTokenFor('LicenseRef-!!!', LKind));
+  Assert.AreEqual('LicenseRef-Custom', SpdxLicenceTokenFor('...', LKind));
+  Assert.AreEqual('LicenseRef-Custom', SpdxLicenceTokenFor('LicenseRef-...', LKind));
   Assert.AreEqual('MIT', SpdxLicenceTokenFor('mit', LKind));
   Assert.AreEqual(Ord(lkSpdxId), Ord(LKind));
 
