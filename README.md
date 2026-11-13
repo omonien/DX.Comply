@@ -328,7 +328,7 @@ Pass `--scan-dir=<path>` (repeatable) or set `scanDirs` when you stage extra bin
 dxcomply --project=MyApp.dproj --scan-dir=redist --scan-dir=plugins\** --no-pause
 ```
 
-`--scan-tree` (or `"scanTree": true`) restores the previous recursive walk of the output directory. It is deprecated and will be removed in a future release. Prefer `--scan-dir`.
+`--scan-tree` (or `"scanTree": true`) restores the previous recursive walk of the output directory. It is deprecated and will be removed in the next release. Prefer `--scan-dir`.
 
 Each listed file gets a version. The binary the project builds gets the product version from the SBOM header (or the project version when the header is empty). That includes a file with no version resource, such as an Android `lib<Project>.so`. A file-date stamp is not used for that file when a product version is known. CycloneDX JSON and XML, SPDX 2.3, SPDX 3.0.1, and the HTML and Markdown reports write the same value. Any other `.exe`, DLL, or `.bpl` gets the FileVersion from its own version resource, else its ProductVersion. It does not inherit the product version. A file that still has no version, such as a `.res`, a `.map`, a third-party DLL with no version resource, or a third-party `.dcp`, gets its last modification time in UTC as an RFC 3339 timestamp, as BSI TR-03183-2 section 5.2.2 allows. Such a component carries the property `net.developer-experts.dx-comply:versionSource` = `file-modification-time`.
 

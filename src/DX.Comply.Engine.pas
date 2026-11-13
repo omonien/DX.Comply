@@ -206,7 +206,8 @@ type
     ScanDirs: TArray<string>;
     /// <summary>
     /// When True, recursively scan the project output directory the way older
-    /// versions did. Deprecated and kept for one release. Default is False.
+    /// versions did. Deprecated. Will be removed in the next release.
+    /// Default is False.
     /// </summary>
     ScanTree: Boolean;
     /// <summary>
@@ -2807,9 +2808,9 @@ begin
       begin
         // Previous releases walked OutputDir with soAllDirectories, which
         // pulled in setup\, tools\, and old build folders whenever that
-        // directory fell back to the project root. Kept for one release.
-        DoProgress('Warning: scanTree is deprecated and will be removed in a ' +
-          'future release. The output directory is scanned recursively. ' +
+        // directory fell back to the project root.
+        DoProgress('Warning: scanTree is deprecated and will be removed in the next ' +
+          'release. The output directory is scanned recursively. ' +
           'Use scanDirs to add binaries that are staged somewhere else.', 30);
         LScanRoot := AProjectInfo.OutputDir;
       end

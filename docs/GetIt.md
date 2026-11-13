@@ -40,4 +40,4 @@ Values: `Search Path`, `Browsing Path`, `Debug DCU Path`. Each is a list separat
 
 ### The Delphi 13 installer cleans up
 
-Starting with the next release, the Delphi 13 installer (`DX.Comply.D13.Setup.exe`) removes these entries when it installs and when it is uninstalled. It removes only entries under a `DXComply-*` folder of the CatalogRepository whose folder does not exist, so an installed GetIt copy is not affected. Close RAD Studio before you run the installer or the uninstaller.
+The Delphi 13 installer (`DX.Comply.D13.Setup.exe`) removes these entries when it installs and when it is uninstalled. It removes only entries under a `DXComply-*` folder of the CatalogRepository whose folder does not exist, so an installed GetIt copy is not affected. Close RAD Studio before you run the installer or the uninstaller.

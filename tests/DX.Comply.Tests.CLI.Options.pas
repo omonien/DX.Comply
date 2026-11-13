@@ -1379,6 +1379,12 @@ begin
   Assert.Contains(LHelp, 'Android 32-bit is the platform Android');
   Assert.Contains(LHelp, 'Android32');
   Assert.Contains(LHelp, 'Android64 stays Android64');
+  Assert.Contains(LHelp, 'File key: bdsVersion');
+  Assert.Contains(LHelp, 'Will be removed in the next release');
+  Assert.IsTrue(Pos('Kept for one release', LHelp) = 0,
+    'scan-tree help must not say it is kept for one release');
+  Assert.IsTrue(Pos('resolve library units', LHelp) = 0,
+    '--bds-version must not be limited to legacy library units');
 end;
 
 initialization
