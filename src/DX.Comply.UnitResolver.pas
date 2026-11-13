@@ -6,7 +6,8 @@
 /// <remarks>
 /// Resolves units from the MAP file, and from uses clauses when the MAP is
 /// missing or the platform is not Win32 or Win64. A readable .pas is parsed
-/// once here and the uses names are stored on the resolved unit.
+/// once. The uses-clause walk and CacheUsedUnits share that result, and the
+/// SBOM writers read it from the resolved unit.
 /// </remarks>
 ///
 /// <copyright>
@@ -33,6 +34,11 @@ type
   private
     FHashService: IHashService;
     FRecursiveSearchCache: TDictionary<string, string>;
+    /// <summary>
+    /// Uses names already parsed for a .pas, keyed by the full path in
+    /// lower case. The uses-clause walk fills it. CacheUsedUnits reads it.
+    /// </summary>
+    FUsesClauseCache: TDictionary<string, TArray<string>>;
     /// <summary>
     /// Copies unique warning entries from the source list into the target list.
     /// </summary>
@@ -155,6 +161,7 @@ constructor TUnitResolver.Create;
 begin
   inherited Create;
   FRecursiveSearchCache := TDictionary<string, string>.Create;
+  FUsesClauseCache := TDictionary<string, TArray<string>>.Create;
 end;
 
 constructor TUnitResolver.Create(const AHashService: IHashService);
@@ -182,6 +189,7 @@ end;
 procedure TUnitResolver.CacheUsedUnits(var AResolvedUnit: TResolvedUnitInfo);
 var
   LPath: string;
+  LKey: string;
   LLines: TStringList;
   LText: string;
 begin
@@ -191,6 +199,12 @@ begin
   if (LPath = '') or not SameText(TPath.GetExtension(LPath), '.pas') then
     Exit;
   if not TFile.Exists(LPath) then
+    Exit;
+
+  // The uses-clause walk already parsed this file. Reuse that list.
+  LKey := LowerCase(TPath.GetFullPath(LPath));
+  if Assigned(FUsesClauseCache) and FUsesClauseCache.TryGetValue(LKey,
+    AResolvedUnit.UsedUnitNames) then
     Exit;
 
   LLines := TStringList.Create;
@@ -211,10 +225,13 @@ begin
     LLines.Free;
   end;
   AResolvedUnit.UsedUnitNames := TUsesClauseParser.ExtractUsedUnits(LText);
+  if Assigned(FUsesClauseCache) then
+    FUsesClauseCache.AddOrSetValue(LKey, AResolvedUnit.UsedUnitNames);
 end;
 
 destructor TUnitResolver.Destroy;
 begin
+  FUsesClauseCache.Free;
   FRecursiveSearchCache.Free;
   inherited;
 end;
@@ -845,7 +862,7 @@ begin
 
   LDiscoveredUnits := TUsesClauseWalker.WalkDependencies(LRootSourcePath,
     ABuildEvidence.SearchPaths, AProjectInfo.GlobalSearchPaths,
-    ABuildEvidence.UnitScopeNames);
+    ABuildEvidence.UnitScopeNames, 100, FUsesClauseCache);
 
   for LUnitName in LDiscoveredUnits do
   begin
@@ -875,6 +892,10 @@ function TUnitResolver.Resolve(const AProjectInfo: TProjectInfo;
 var
   LHasMapEvidence: Boolean;
 begin
+  // A reused resolver must not keep uses names from an earlier project.
+  if Assigned(FUsesClauseCache) then
+    FUsesClauseCache.Clear;
+
   Result := TCompositionEvidence.Create;
   Result.ProjectName := AProjectInfo.ProjectName;
   Result.ProjectVersion := AProjectInfo.Version;

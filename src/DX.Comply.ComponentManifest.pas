@@ -388,12 +388,13 @@ procedure AppendManifestLibrariesXml(ALines: TStrings; const AManifestJson: stri
 /// <summary>
 /// Writes the dependencies element. The project depends on the program
 /// that was built. That program depends on each library and on components
-/// the manifest did not group. Each library depends on its matched units.
+/// the manifest did not group, except a unit another unit uses. Each
+/// library depends on its matched units.
 /// </summary>
 procedure AppendManifestDependenciesXml(ALines: TStrings; const AManifestJson: string;
   const AArtefacts: TArtefactList; const AProjectBomRef: string;
   AIndentLevel: Integer; const AUsesGraph: TUsesDependencyGraph;
-  const AOutputFilePath: string = '');
+  const ACovered: TArray<Boolean>; const AOutputFilePath: string = '');
 
 /// <summary>
 /// bom-ref values of manifest libraries that matched at least one unit.
@@ -2726,7 +2727,8 @@ end;
 
 procedure AppendManifestDependenciesXml(ALines: TStrings; const AManifestJson: string;
   const AArtefacts: TArtefactList; const AProjectBomRef: string; AIndentLevel: Integer;
-  const AUsesGraph: TUsesDependencyGraph; const AOutputFilePath: string);
+  const AUsesGraph: TUsesDependencyGraph; const ACovered: TArray<Boolean>;
+  const AOutputFilePath: string);
 var
   LManifest: TComponentManifest;
   LPlan: TManifestPlan;
@@ -2766,7 +2768,8 @@ begin
   else if Assigned(AArtefacts) then
   begin
     for I := 0 to AArtefacts.Count - 1 do
-      if (I > High(LGrouped)) or not LGrouped[I] then
+      if ((I > High(LGrouped)) or not LGrouped[I]) and
+        not IsCoveredUnit(ACovered, I) then
         AddLine(AIndentLevel + 2, '<dependency ref="comp-' + IntToStr(I) + '"/>');
     if LPlan.Active then
       for I := 0 to High(LPlan.Libraries) do
@@ -2783,7 +2786,8 @@ begin
         for I := 0 to AArtefacts.Count - 1 do
           if (I <> LTargetIndex) and
              (ArtefactDependencyGroup(AArtefacts[I]) = LGroup) and
-             ((I > High(LGrouped)) or not LGrouped[I]) then
+             ((I > High(LGrouped)) or not LGrouped[I]) and
+             not IsCoveredUnit(ACovered, I) then
             LChildren.Add('<dependency ref="comp-' + IntToStr(I) + '"/>');
       if LPlan.Active then
         for I := 0 to High(LPlan.Libraries) do

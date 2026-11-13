@@ -273,8 +273,8 @@ SPDX JSON and CycloneDX XML are not checked against official schemas inside
 the tool.
 
 BSI TR-03183-2 version 2.1.0 asks for CycloneDX 1.6 or later, or SPDX 3.0.1
-or later. CycloneDX output is 1.6. SPDX stays at 2.3. SPDX 3.0.1 is out of
-scope. The CLI writes SHA-512 next to SHA-256, and on a deployable file it
+or later. CycloneDX output is 1.6. SPDX output is 2.3 by default, and
+3.0.1 with `dxcomply.exe --spdx-version=3.0.1`. The CLI writes SHA-512 next to SHA-256, and on a deployable file it
 also writes that SHA-512 as an external reference of type distribution. It
 writes the file name and the executable, archive, and structured properties
 when the component has a file name. Pass `--sbom-creator` with an email
@@ -282,8 +282,10 @@ address or an http(s) URL when you want that contact in the document. A
 component manifest supplies licence, version, creator, and, when the row
 sets it, copyright for third-party libraries. The dependency list is the
 grouped graph of the built program, plus direct uses edges where the Pascal
-source was read. CycloneDX compositions say which of those sets are
-complete. A unit with no source stays incomplete. See
+source was read. The program lists runtime packages, external DLLs, and the
+units that no other unit uses. A uses B and B uses C writes those two edges,
+and the program depends on A. CycloneDX compositions say which of those sets
+are complete. A unit with no source stays incomplete. See
 [BSI-TR-03183-2.md](BSI-TR-03183-2.md). This output is not a certification.
 
 Practical checklist:

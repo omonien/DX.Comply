@@ -10,8 +10,13 @@
 /// The walk is not recursive: A uses B and B uses C produces A to B and
 /// B to C, not A to C. A cycle is stored as both direct edges.
 /// Targets are sorted by unit name, case-insensitive, then by index.
-/// On the MAP path the resolver caches the clause, so this unit does not
-/// read that .pas again.
+/// System and SysInit are not edges from a unit. They stay on the program,
+/// together with any other unit that no uses edge points at.
+/// A unit that another unit uses is left off the program, so the chart is
+/// the uses graph. A cycle that nothing outside it uses keeps its lowest
+/// index on the program, and both cycle edges stay.
+/// The resolver caches the clause. This unit reads a .pas only when that
+/// cache is empty, and then stores the names on the artefact.
 /// </remarks>
 ///
 /// <copyright>
@@ -73,9 +78,32 @@ type
 
 /// <summary>
 /// Builds direct uses edges. Does not walk the disk except to read a .pas
-/// that the resolver has not already cached.
+/// that the resolver has not already cached. A file read here is stored on
+/// the artefact so a later writer does not parse it again.
 /// </summary>
 function BuildUsesDependencyGraph(const AArtefacts: TArtefactList): TUsesDependencyGraph;
+
+/// <summary>
+/// True for each unit that another unit uses and that can be reached from
+/// a unit the program still lists. The program omits those indexes.
+/// System and SysInit are never marked. A cycle with no outside user keeps
+/// its lowest index unmarked. Nil when AArtefacts is nil.
+/// </summary>
+function UnitsCoveredByUsesEdges(const AArtefacts: TArtefactList;
+  const AGraph: TUsesDependencyGraph): TArray<Boolean>;
+
+/// <summary>
+/// True when UnitsCoveredByUsesEdges marked AIndex.
+/// </summary>
+function IsCoveredUnit(const ACovered: TArray<Boolean>; AIndex: Integer): Boolean;
+
+/// <summary>
+/// Drops covered comp-N refs from the dependsOn list of AParentRef.
+/// Removes that dependency object when the list becomes empty.
+/// Library refs and uses edges added later are left as they are.
+/// </summary>
+procedure RemoveCoveredUnits(ADependencies: TJSONArray; const AParentRef: string;
+  const ACovered: TArray<Boolean>);
 
 /// <summary>
 /// Appends one dependency object per uses edge list. Does not emit an empty
@@ -145,6 +173,13 @@ uses
   System.Generics.Defaults,
   DX.Comply.ComponentManifest,
   DX.Comply.UsesClauseParser;
+
+function IsImplicitCompilerUnit(const AName: string): Boolean;
+begin
+  // The compiler links these into the program. A uses clause that names
+  // them does not become an edge from that unit.
+  Result := SameText(Trim(AName), 'System') or SameText(Trim(AName), 'SysInit');
+end;
 
 function ShortUnitName(const ALowerName: string): string;
 var
@@ -276,6 +311,19 @@ begin
     end));
 end;
 
+procedure KeepParsedUses(const AArtefacts: TArtefactList; AIndex: Integer;
+  const ANames: TArray<string>);
+var
+  LInfo: TArtefactInfo;
+begin
+  if not Assigned(AArtefacts) or AArtefacts[AIndex].UsesCached then
+    Exit;
+  LInfo := AArtefacts[AIndex];
+  LInfo.UsesCached := True;
+  LInfo.UsedUnitNames := Copy(ANames, 0, Length(ANames));
+  AArtefacts[AIndex] := LInfo;
+end;
+
 function BuildUsesDependencyGraph(const AArtefacts: TArtefactList): TUsesDependencyGraph;
 var
   LExact, LShort: TDictionary<string, Integer>;
@@ -323,6 +371,7 @@ begin
         Result.Status[I] := uusMissingSource;
         Continue;
       end;
+      KeepParsedUses(AArtefacts, I, LUsed);
 
       LTargets := TList<Integer>.Create;
       LSeen := TDictionary<Integer, Byte>.Create;
@@ -331,6 +380,13 @@ begin
         for J := 0 to High(LUsed) do
         begin
           LTarget := ResolveUsesName(LExact, LShort, LUsed[J]);
+          if IsImplicitCompilerUnit(LUsed[J]) then
+          begin
+            // Resolved when the program already lists the unit. No edge.
+            if LTarget < 0 then
+              LAllResolved := False;
+            Continue;
+          end;
           if LTarget < 0 then
           begin
             LAllResolved := False;
@@ -366,6 +422,173 @@ begin
     LDeps.Free;
     LShort.Free;
     LExact.Free;
+  end;
+end;
+
+procedure ReachFrom(const AAdj: TArray<TList<Integer>>; const AQueue: TQueue<Integer>;
+  var AReached: TArray<Boolean>; AStart: Integer);
+var
+  LNext, LTarget: Integer;
+begin
+  if (AStart < 0) or (AStart > High(AReached)) or AReached[AStart] then
+    Exit;
+  AReached[AStart] := True;
+  AQueue.Enqueue(AStart);
+  while AQueue.Count > 0 do
+  begin
+    LNext := AQueue.Dequeue;
+    for LTarget in AAdj[LNext] do
+      if (LTarget >= 0) and (LTarget <= High(AReached)) and not AReached[LTarget] then
+      begin
+        AReached[LTarget] := True;
+        AQueue.Enqueue(LTarget);
+      end;
+  end;
+end;
+
+function UnitsCoveredByUsesEdges(const AArtefacts: TArtefactList;
+  const AGraph: TUsesDependencyGraph): TArray<Boolean>;
+var
+  LCount, I, LTarget: Integer;
+  LAdj: TArray<TList<Integer>>;
+  LInDegree: TArray<Integer>;
+  LAnchor, LReached: TArray<Boolean>;
+  LQueue: TQueue<Integer>;
+  LDep: TUsesDependency;
+  LPromoted: Boolean;
+begin
+  Result := nil;
+  if not Assigned(AArtefacts) then
+    Exit;
+
+  LCount := AArtefacts.Count;
+  SetLength(Result, LCount);
+  SetLength(LAdj, LCount);
+  SetLength(LInDegree, LCount);
+  SetLength(LAnchor, LCount);
+  SetLength(LReached, LCount);
+  for I := 0 to LCount - 1 do
+    LAdj[I] := TList<Integer>.Create;
+  LQueue := TQueue<Integer>.Create;
+  try
+    for LDep in AGraph.Dependencies do
+    begin
+      if (LDep.SourceIndex < 0) or (LDep.SourceIndex >= LCount) then
+        Continue;
+      for LTarget in LDep.TargetIndexes do
+      begin
+        if (LTarget < 0) or (LTarget >= LCount) or (LTarget = LDep.SourceIndex) then
+          Continue;
+        LAdj[LDep.SourceIndex].Add(LTarget);
+        Inc(LInDegree[LTarget]);
+      end;
+    end;
+
+    for I := 0 to LCount - 1 do
+      if SameText(AArtefacts[I].ArtefactType, 'unit-evidence') and
+        (LInDegree[I] = 0) then
+        LAnchor[I] := True;
+
+    for I := 0 to LCount - 1 do
+      if LAnchor[I] then
+        ReachFrom(LAdj, LQueue, LReached, I);
+
+    // A cycle that no listed unit uses would otherwise float. Keep the
+    // lowest index on the program and reach the rest from there.
+    repeat
+      LPromoted := False;
+      for I := 0 to LCount - 1 do
+        if SameText(AArtefacts[I].ArtefactType, 'unit-evidence') and
+          not LReached[I] then
+        begin
+          LAnchor[I] := True;
+          ReachFrom(LAdj, LQueue, LReached, I);
+          LPromoted := True;
+          Break;
+        end;
+    until not LPromoted;
+
+    for I := 0 to LCount - 1 do
+      Result[I] := SameText(AArtefacts[I].ArtefactType, 'unit-evidence') and
+        not LAnchor[I];
+  finally
+    LQueue.Free;
+    for I := 0 to LCount - 1 do
+      LAdj[I].Free;
+  end;
+end;
+
+function IsCoveredUnit(const ACovered: TArray<Boolean>; AIndex: Integer): Boolean;
+begin
+  Result := (AIndex >= 0) and (AIndex <= High(ACovered)) and ACovered[AIndex];
+end;
+
+procedure RemoveCoveredUnits(ADependencies: TJSONArray; const AParentRef: string;
+  const ACovered: TArray<Boolean>);
+var
+  I, J, LIndex, LCode: Integer;
+  LDep: TJSONObject;
+  LDepends, LNew: TJSONArray;
+  LRef: string;
+  LValue: TJSONValue;
+  LPair: TJSONPair;
+  LRemoved: TJSONValue;
+  LChanged: Boolean;
+begin
+  if not Assigned(ADependencies) or (AParentRef = '') or (Length(ACovered) = 0) then
+    Exit;
+
+  for I := ADependencies.Count - 1 downto 0 do
+  begin
+    if not (ADependencies.Items[I] is TJSONObject) then
+      Continue;
+    LDep := TJSONObject(ADependencies.Items[I]);
+    LValue := LDep.GetValue('ref');
+    if (LValue = nil) or not SameText(LValue.Value, AParentRef) then
+      Continue;
+    if not (LDep.GetValue('dependsOn') is TJSONArray) then
+      Continue;
+
+    LDepends := TJSONArray(LDep.GetValue('dependsOn'));
+    LNew := TJSONArray.Create;
+    LChanged := False;
+    for J := 0 to LDepends.Count - 1 do
+    begin
+      LRef := LDepends.Items[J].Value;
+      LIndex := -1;
+      if LRef.StartsWith('comp-') then
+      begin
+        Val(Copy(LRef, 6, MaxInt), LIndex, LCode);
+        if LCode <> 0 then
+          LIndex := -1;
+      end;
+      if IsCoveredUnit(ACovered, LIndex) then
+      begin
+        LChanged := True;
+        Continue;
+      end;
+      LNew.Add(LRef);
+    end;
+
+    if not LChanged then
+    begin
+      LNew.Free;
+      Continue;
+    end;
+    if LNew.Count = 0 then
+    begin
+      LNew.Free;
+      LRemoved := ADependencies.Remove(I);
+      if Assigned(LRemoved) then
+        LRemoved.Free;
+    end
+    else
+    begin
+      LPair := LDep.RemovePair('dependsOn');
+      if Assigned(LPair) then
+        LPair.Free;
+      LDep.AddPair('dependsOn', LNew);
+    end;
   end;
 end;
 

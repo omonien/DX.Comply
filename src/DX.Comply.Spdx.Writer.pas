@@ -536,7 +536,9 @@ begin
 
     // Relationships. Manifest libraries use the same package IDs.
     // Uses edges are added after that rewrite. A unit-to-unit DEPENDS_ON is
-    // not one of the edges the manifest moves onto a library.
+    // not one of the edges the manifest moves onto a library. The program
+    // still CONTAINS every linked unit. System and SysInit are not uses
+    // edges. They stay on that CONTAINS list.
     LGraph := BuildUsesDependencyGraph(AArtefacts);
     LRoot.AddPair('relationships', BuildRelationships(AArtefacts, LPackageIds,
       LDocumentSpdxId, AProjectInfo.ProjectName, AProjectInfo.OutputFilePath));
