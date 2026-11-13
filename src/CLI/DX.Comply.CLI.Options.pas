@@ -423,7 +423,7 @@ begin
       Continue;
     end;
 
-    // Deprecated recursive walk of the output directory. Kept for one release.
+    // Deprecated recursive walk of the output directory.
     if LArg = '--scan-tree' then
     begin
       FScanTree := True;
@@ -930,7 +930,8 @@ begin
     Line('                                A path that contains ** walks subdirectories.');
     Line('  --scan-tree                   Deprecated: recursively scan the output');
     Line('                                directory, as older versions did.');
-    Line('                                Kept for one release. Prefer --scan-dir.');
+    Line('                                Will be removed in the next release.');
+    Line('                                Prefer --scan-dir.');
     Line('  --library[=true|false]        SBOM for a source release, not a build.');
     Line('                                No build, no MAP file, no binary scan.');
     Line('                                File key: library');
@@ -955,9 +956,15 @@ begin
     Line('                                Overrides the manifest key in .dxcomply.json');
     Line('  --map-dir=<path>              Directory containing the pre-built MAP file');
     Line('  --delphi7-root=<path>         Delphi 7 install directory (RootDir).');
-    Line('  --bds-version=<ver>           Delphi BDS version to use, e.g. 23.0 (default: BDS, then newest).');
-    Line('                                Optional. Used to resolve library units');
-    Line('                                for .dpr, .dpk, and .bdsproj projects.');
+    Line('  --bds-version=<ver>           Delphi install to use, for example 23.0');
+    Line('                                or 23. Default: the BDS environment');
+    Line('                                variable, then the newest installed');
+    Line('                                Delphi. That version sets');
+    Line('                                $(ProductVersion), the library paths,');
+    Line('                                and the IDE environment variable');
+    Line('                                overrides. The run prints which');
+    Line('                                version was used and where it came');
+    Line('                                from. File key: bdsVersion');
     Line('  --no-composition-evidence     Omit source/DCU units from SBOM (binary-only)');
     Line('  --include-platform-in-output  Append <Platform>.<Config> to the default');
     Line('                                output filename (e.g. bom.Win64.Release.json).');

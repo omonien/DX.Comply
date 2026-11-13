@@ -154,7 +154,7 @@ store the configuration in `.dxcomply.json` at the repository root.
 `scanDirs` entries are extra directories of binaries you stage on purpose.
 Each one is scanned non-recursively unless the value contains `**`.
 `"scanTree": true` restores the old recursive walk of the output directory.
-That switch is deprecated and will be removed in a future release.
+That switch is deprecated and will be removed in the next release.
 
 `include` and `exclude` still filter the files that were scanned. With
 `scanTree`, or a `scanDirs` value that contains `**`, patterns are relative
