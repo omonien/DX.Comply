@@ -13,6 +13,12 @@
 /// licence group on its own row, with the manifest version and copyright.
 /// Embarcadero units use their origin label as the licence (issue #165).
 /// Own-code units use the product licence when one is set (issue #166).
+/// A third-party origin that matches own_code_* is own code, so it is not
+/// counted as an unknown supplier. Units that stay under Unknown supplier
+/// are named on that row, grouped by prefix (issue #176).
+/// The built program's licence row uses its own version, or the product
+/// version from the SBOM header when the file has none. A third-party file
+/// does not inherit that version.
 /// </remarks>
 ///
 /// <copyright>
@@ -62,6 +68,11 @@ type
     Note: string;
     /// <summary>Section anchor with the detailed list, or empty.</summary>
     Anchor: string;
+    /// <summary>
+    /// Lines shown under the title. The Unknown supplier row lists its
+    /// units by prefix. Empty for every other group.
+    /// </summary>
+    Detail: TArray<string>;
     function Count: Integer;
     /// <summary>Names joined by comma, at most AMax, then "and N more".</summary>
     function NamesText(AMax: Integer = cMaxGroupNames): string;
@@ -124,6 +135,14 @@ type
 /// </summary>
 function BuildReportOverview(const AData: TComplianceReportData;
   AGroupByFolder: Boolean = False): TReportOverview;
+
+/// <summary>
+/// Compact lines for the units counted under Unknown supplier. Names are
+/// grouped by unit prefix, the same key as the console warnings. At most
+/// ten groups are listed, with at most five names in each group, then one
+/// line counts the rest.
+/// </summary>
+function FormatUnknownSupplierLines(const ANames: TArray<string>): TArray<string>;
 
 /// <summary>
 /// Returns a review hint for a licence that usually needs a check before it ships
@@ -464,6 +483,81 @@ begin
   Result := True;
 end;
 
+function FormatUnknownSupplierLines(const ANames: TArray<string>): TArray<string>;
+const
+  // Same cap as JoinNames in the console warnings.
+  cShownNames = 5;
+
+  function CountText(ACount: Integer; const AOne, AMany: string): string;
+  begin
+    if ACount = 1 then
+      Result := '1 ' + AOne
+    else
+      Result := IntToStr(ACount) + ' ' + AMany;
+  end;
+
+begin
+  Result := nil;
+  if High(ANames) < 0 then
+    Exit;
+
+  // The first spelling of a prefix is kept. jvEdit and JvComponent share
+  // one group, as they do in the console warnings.
+  var LGroups := TObjectDictionary<string, TList<string>>.Create([doOwnsValues],
+    TIStringComparer.Ordinal);
+  var LOrder := TList<string>.Create;
+  var LLines := TList<string>.Create;
+  try
+    for var LName in ANames do
+    begin
+      var LPrefix := ThirdPartyUnitPrefix(LName);
+      var LNames: TList<string>;
+      if not LGroups.TryGetValue(LPrefix, LNames) then
+      begin
+        LNames := TList<string>.Create;
+        LGroups.Add(LPrefix, LNames);
+        LOrder.Add(LPrefix);
+      end;
+      LNames.Add(LName);
+    end;
+
+    var LRestGroups := 0;
+    var LRestUnits := 0;
+    for var i := 0 to LOrder.Count - 1 do
+    begin
+      var LNames := LGroups[LOrder[i]];
+      if i >= cMaxComponentWarningGroups then
+      begin
+        Inc(LRestGroups);
+        Inc(LRestUnits, LNames.Count);
+        Continue;
+      end;
+      var LShown := '';
+      for var j := 0 to LNames.Count - 1 do
+      begin
+        if j = cShownNames then
+        begin
+          LShown := LShown + ', ...';
+          Break;
+        end;
+        if LShown <> '' then
+          LShown := LShown + ', ';
+        LShown := LShown + LNames[j];
+      end;
+      LLines.Add(LOrder[i] + ': ' + CountText(LNames.Count, 'unit', 'units') +
+        ' (' + LShown + ')');
+    end;
+    if LRestGroups > 0 then
+      LLines.Add(CountText(LRestGroups, 'more group', 'more groups') + ', ' +
+        CountText(LRestUnits, 'unit', 'units'));
+    Result := LLines.ToArray;
+  finally
+    LLines.Free;
+    LOrder.Free;
+    LGroups.Free;
+  end;
+end;
+
 function BuildReportOverview(const AData: TComplianceReportData;
   AGroupByFolder: Boolean = False): TReportOverview;
 begin
@@ -543,55 +637,71 @@ begin
         // when that licence is set. Embarcadero units use their origin label.
         // A manifest library covers its units, so those units are not listed
         // again here (issues #131, #155, #165, #166).
-        var LComponentLicence := ComponentLicenceFor(LArtefact,
-          IsSameDeliverableFile(AData.Artefacts, i, LDeliverable),
+        var LIsDeliverable := IsSameDeliverableFile(AData.Artefacts, i, LDeliverable);
+        var LComponentLicence := ComponentLicenceFor(LArtefact, LIsDeliverable,
           AData.Metadata.Licence, LManifest);
+        // The built program shows its own version, or the product version
+        // from the SBOM header when it has none. A third-party file stays
+        // empty here. Its version is not the product version.
+        var LVersion := '';
+        if LIsDeliverable then
+          LVersion := ComponentVersionFor(LArtefact, True,
+            AData.Metadata.ProductVersion, AData.ProjectInfo.Version);
         if LComponentLicence <> '' then
         begin
-          LLicences.Add(LComponentLicence, LName, '', '');
+          LLicences.Add(LComponentLicence, LName, LVersion, '');
         end
         else if not LGrouped.ContainsKey(i) then
         begin
-          LLicences.Add(cNoLicenceGroupTitle, LName, '', '');
+          LLicences.Add(cNoLicenceGroupTitle, LName, LVersion, '');
         end;
         if IsThirdPartyUnit(LArtefact) then
         begin
-          Inc(Result.ThirdPartyUnitCount);
-          var LComponentIndex: Integer;
-          if LGrouped.TryGetValue(i, LComponentIndex) and
-            (Trim(LManifest.Components[LComponentIndex].Vendor) <> '') then
-          begin
-            LSuppliers.Add(Trim(LManifest.Components[LComponentIndex].Vendor), LName);
-          end
-          else
-          begin
-            LSuppliers.Add(cUnknownSupplierTitle, LName);
-          end;
           var LMatchKind := mmNone;
           if Result.ManifestUsed then
           begin
             LMatchKind := MatchManifestUnit(LManifest, ArtefactUnitName(LArtefact),
               ArtefactFolderPath(LArtefact)).Kind;
           end;
-          if LMatchKind = mmNone then
+          // own_code_* marks the project's own units, including a file that
+          // lives outside the project folder and is therefore recorded as
+          // Third party. The without-manifest list and the console warnings
+          // already leave those units out, and they carry the product
+          // licence. Counting them as an unknown supplier made a number
+          // that no named list could explain (issue #176).
+          if LMatchKind <> mmOwnCode then
           begin
-            // Issue #132: optional second level, the source folder, so one
-            // prefix used by two libraries in different folders splits up.
-            var LGroupTitle := ThirdPartyUnitPrefix(ArtefactUnitName(LArtefact));
-            if AGroupByFolder then
+            Inc(Result.ThirdPartyUnitCount);
+            var LComponentIndex: Integer;
+            if LGrouped.TryGetValue(i, LComponentIndex) and
+              (Trim(LManifest.Components[LComponentIndex].Vendor) <> '') then
             begin
-              var LFolder := ExtractFileDir(LArtefact.FilePath);
-              if LFolder = '' then
-              begin
-                LFolder := ExtractFileDir(LArtefact.RelativePath);
-              end;
-              if LFolder <> '' then
-              begin
-                LGroupTitle := LGroupTitle + ' (' + LFolder + ')';
-              end;
+              LSuppliers.Add(Trim(LManifest.Components[LComponentIndex].Vendor), LName);
+            end
+            else
+            begin
+              LSuppliers.Add(cUnknownSupplierTitle, LName);
             end;
-            LWithout.Add(LGroupTitle, LName);
-            Inc(Result.WithoutManifestCount);
+            if LMatchKind = mmNone then
+            begin
+              // Issue #132: optional second level, the source folder, so one
+              // prefix used by two libraries in different folders splits up.
+              var LGroupTitle := ThirdPartyUnitPrefix(ArtefactUnitName(LArtefact));
+              if AGroupByFolder then
+              begin
+                var LFolder := ExtractFileDir(LArtefact.FilePath);
+                if LFolder = '' then
+                begin
+                  LFolder := ExtractFileDir(LArtefact.RelativePath);
+                end;
+                if LFolder <> '' then
+                begin
+                  LGroupTitle := LGroupTitle + ' (' + LFolder + ')';
+                end;
+              end;
+              LWithout.Add(LGroupTitle, LName);
+              Inc(Result.WithoutManifestCount);
+            end;
           end;
         end;
       end;
@@ -648,6 +758,9 @@ begin
     end;
 
     Result.Suppliers := LSuppliers.ToArray(True);
+    for var i := 0 to High(Result.Suppliers) do
+      if SameText(Result.Suppliers[i].Title, cUnknownSupplierTitle) then
+        Result.Suppliers[i].Detail := FormatUnknownSupplierLines(Result.Suppliers[i].Names);
     Result.WithoutManifest := LWithout.ToArray(True);
     for var i := 0 to High(Result.WithoutManifest) do
     begin

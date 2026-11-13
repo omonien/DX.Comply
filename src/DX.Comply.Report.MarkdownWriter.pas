@@ -48,34 +48,45 @@ implementation
 uses
   System.IOUtils,
   System.SysUtils,
+  DX.Comply.ComponentManifest,
   DX.Comply.Report.Overview,
   DX.Comply.Report.Support;
 
 procedure TMarkdownReportWriter.AddArtefacts(Lines: TStrings; const AData: TComplianceReportData);
 var
   LArtefact: TArtefactInfo;
+  LDeliverable: Integer;
+  LVersion: string;
+  I: Integer;
 begin
   Lines.Add('## Artefacts');
-  // Issue #90: Version is the PE FileVersion/ProductVersion (or product
-  // version) already stored on the artefact for CycloneDX consistency.
+  // Issue #90: Version is the PE FileVersion/ProductVersion already stored
+  // on the artefact. The built program with no version of its own uses the
+  // product version, the same value as the SBOM and the licence table.
   Lines.Add('| Relative Path | Type | Version | Size | SHA-256 |');
   Lines.Add('| --- | --- | --- | ---: | --- |');
-  for LArtefact in AData.Artefacts do
+  LDeliverable := FindDeliverableTargetIndex(AData.Artefacts,
+    AData.ProjectInfo.ProjectName, AData.ProjectInfo.OutputFilePath);
+  for I := 0 to AData.Artefacts.Count - 1 do
   begin
+    LArtefact := AData.Artefacts[I];
     if LArtefact.ArtefactType = 'unit-evidence' then
       Continue;
+    LVersion := ComponentVersionFor(LArtefact,
+      IsSameDeliverableFile(AData.Artefacts, I, LDeliverable),
+      AData.Metadata.ProductVersion, AData.ProjectInfo.Version);
     if LArtefact.FileSize >= 0 then
       Lines.Add(Format('| %s | %s | %s | %d | %s |', [
         EscapeMarkdown(SafeText(SafeText(LArtefact.RelativePath, LArtefact.ComponentName), LArtefact.FilePath)),
         EscapeMarkdown(SafeText(LArtefact.ArtefactType)),
-        EscapeMarkdown(SafeText(LArtefact.Version)),
+        EscapeMarkdown(SafeText(LVersion)),
         LArtefact.FileSize,
         EscapeMarkdown(SafeText(LArtefact.Hash))]))
     else
       Lines.Add(Format('| %s | %s | %s | n/a | %s |', [
         EscapeMarkdown(SafeText(SafeText(LArtefact.RelativePath, LArtefact.ComponentName), LArtefact.FilePath)),
         EscapeMarkdown(SafeText(LArtefact.ArtefactType)),
-        EscapeMarkdown(SafeText(LArtefact.Version)),
+        EscapeMarkdown(SafeText(LVersion)),
         EscapeMarkdown(SafeText(LArtefact.Hash))]));
   end;
   Lines.Add('');
@@ -217,7 +228,12 @@ begin
     Lines.Add('| --- | ---: |');
     for var LGroup in LOverview.Suppliers do
     begin
-      Lines.Add(Format('| %s | %d |', [EscapeMarkdown(LGroup.Title), LGroup.Count]));
+      // Unknown supplier names sit under the title, grouped by prefix.
+      // Issue #176. <br> is the line break already used in these tables.
+      var LLabel := EscapeMarkdown(LGroup.Title);
+      for var LLine in LGroup.Detail do
+        LLabel := LLabel + '<br>' + EscapeMarkdown(LLine);
+      Lines.Add(Format('| %s | %d |', [LLabel, LGroup.Count]));
     end;
     Lines.Add('');
   end;

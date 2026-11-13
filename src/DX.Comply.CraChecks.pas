@@ -11,7 +11,9 @@
 ///
 /// BuildThirdPartyComponentWarnings looks at third-party units and names
 /// those without supplier or licence, grouped by unit prefix or manifest
-/// library (issue #110).
+/// library (issue #110). A unit matched by own_code_* is the project's
+/// own code, including when the file is outside the project folder, so
+/// it is not named here (issue #176).
 /// </remarks>
 ///
 /// <copyright>
@@ -247,6 +249,8 @@ begin
       var LKey: string;
       case LMatch.Kind of
         mmOwnCode:
+          // Own code is the product, even when the file is outside the
+          // project folder. It is not an unknown supplier (issue #176).
           Continue;
         mmLibrary:
           begin

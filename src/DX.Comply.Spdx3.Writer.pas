@@ -15,11 +15,14 @@
 ///   agents in createdBy. Without either, a SoftwareAgent named DX.Comply is
 ///   the creator.
 /// - Packages become software_Package with verifiedUsing hashes (sha256,
-///   sha512), software_packageUrl, suppliedBy and originatedBy.
+///   sha512), software_packageUrl, suppliedBy and originatedBy. versionInfo
+///   is copied to software_packageVersion, including the product version
+///   used when the built program has no version of its own.
 /// - Licences become simplelicensing_LicenseExpression elements linked with
 ///   hasDeclaredLicense and hasConcludedLicense. A licence name that is not
 ///   an SPDX identifier keeps its LicenseRef- token and gets a
-///   simplelicensing_SimpleLicensingText.
+///   simplelicensing_SimpleLicensingText. A value that already starts with
+///   LicenseRef- is not prefixed a second time.
 /// - Relationships with the same source and type are one Relationship.
 ///   completeness carries what CycloneDX writes as compositions.
 /// - The TR properties (filename, executable, archive, structured) stay in
@@ -352,7 +355,9 @@ begin
   var LMap: TJSONArray := nil;
   for var LToken in LText.Split([' '], TStringSplitOptions.ExcludeEmpty) do
   begin
-    if not LToken.StartsWith('LicenseRef-') then
+    // The prefix match is case-insensitive. A value kept as
+    // licenseref-Proprietary still points at its licence text.
+    if not StartsText('LicenseRef-', LToken) then
       Continue;
     var LTextId := LicenceTextId(LToken);
     if LTextId = '' then

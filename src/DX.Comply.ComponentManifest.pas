@@ -12,7 +12,13 @@
 /// units, the same way own_code_units names those units one by one.
 ///
 /// Licence values are classified as an SPDX identifier, an SPDX expression,
-/// or a plain name. Package URLs for manifest libraries use pkg:delphi, which
+/// or a plain name. An expression is recognised only when every operand is
+/// a known SPDX id or a LicenseRef id, so English words such as "with",
+/// "and", and "or" do not turn a name into an expression. A value that
+/// already starts with LicenseRef- and is not such an expression stays a
+/// name, so CycloneDX writes license.name. The SPDX writers keep that
+/// prefix and only sanitize the id characters. Package URLs for manifest
+/// libraries use pkg:delphi, which
 /// is not a registered PURL type. Scanned files keep the file: locator the
 /// writers already emit. An optional purl field on a row replaces the
 /// generated value.
@@ -195,6 +201,9 @@ function StripDelphiScopePrefix(const AUnitName: string): string;
 
 /// <summary>
 /// Classifies a licence value. Recognised SPDX ids are returned in canonical case.
+/// OR, AND, and WITH make an expression only when each operand is a known
+/// SPDX id or a LicenseRef id. A name that merely contains those English
+/// words stays a name.
 /// </summary>
 function ClassifyLicence(const AValue: string; out ANormalised: string): TLicenceKind;
 
@@ -216,6 +225,8 @@ procedure AppendCycloneDxLicencesXml(ALines: TStrings; const ALicence,
 /// <summary>
 /// SPDX 2.3 token for a licence value. NOASSERTION when empty.
 /// A name becomes LicenseRef- followed by a sanitized id.
+/// A value that already starts with LicenseRef- keeps that prefix.
+/// Only the characters after the prefix are sanitized.
 /// </summary>
 function SpdxLicenceTokenFor(const ALicence: string; out AKind: TLicenceKind): string;
 
@@ -237,6 +248,27 @@ function SpdxLicenceTokenFor(const ALicence: string; out AKind: TLicenceKind): s
 function ComponentLicenceFor(const AArtefact: TArtefactInfo;
   AIsDeliverable: Boolean; const AProductLicence: string;
   const AManifest: TComponentManifest): string;
+
+/// <summary>
+/// Version written on one SBOM component and in the report tables.
+/// A version already stored on the artefact is kept. A third-party file
+/// is left as it is, including an empty version and a file-date stand-in.
+/// The built program, and a second copy of that file, uses the product
+/// version when it has no version of its own. A file-date stand-in is not
+/// a version of its own. The product version is the SBOM header value, or
+/// the project version when the header is empty. That is the value the
+/// report header shows. A unit is not the built program.
+/// </summary>
+function ComponentVersionFor(const AArtefact: TArtefactInfo;
+  AIsDeliverable: Boolean; const AProductVersion, AProjectVersion: string): string;
+
+/// <summary>
+/// True when AWrittenVersion is the file modification time stored on
+/// AArtefact. A product version used in its place is not a file date, so
+/// the versionSource property must not be written for it.
+/// </summary>
+function ComponentVersionFromFileDate(const AArtefact: TArtefactInfo;
+  const AWrittenVersion: string): Boolean;
 
 /// <summary>
 /// Percent-encodes one purl segment. Unreserved characters are kept.
@@ -446,10 +478,142 @@ begin
   Result := AUnitName;
 end;
 
+function IsKnownSpdxId(const AToken: string): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := Low(cKnownSpdxIds) to High(cKnownSpdxIds) do
+    if SameText(AToken, cKnownSpdxIds[I]) then
+      Exit(True);
+end;
+
+function IsLicenseRefToken(const AToken: string): Boolean;
+const
+  cPrefix = 'LicenseRef-';
+var
+  LRest: string;
+  LIndex: Integer;
+begin
+  Result := False;
+  if not StartsText(cPrefix, AToken) then
+    Exit;
+  LRest := Copy(AToken, Length(cPrefix) + 1, MaxInt);
+  if LRest = '' then
+    Exit;
+  for LIndex := 1 to Length(LRest) do
+    if not CharInSet(LRest[LIndex], ['A'..'Z', 'a'..'z', '0'..'9', '.', '-']) then
+      Exit;
+  Result := True;
+end;
+
+function IsSpdxLicenceExpression(const AValue: string): Boolean;
+var
+  LPos: Integer;
+  LOperators: Integer;
+
+  function ParseExpr: Boolean; forward;
+
+  procedure SkipSpace;
+  begin
+    while (LPos <= Length(AValue)) and (AValue[LPos] = ' ') do
+      Inc(LPos);
+  end;
+
+  function AtEnd: Boolean;
+  begin
+    Result := LPos > Length(AValue);
+  end;
+
+  function StartsWithWord(const AWord: string): Boolean;
+  var
+    LNext: Integer;
+  begin
+    Result := False;
+    if not StartsText(AWord, Copy(AValue, LPos, Length(AWord))) then
+      Exit;
+    LNext := LPos + Length(AWord);
+    // "or" inside a longer token, such as GPL-2.0-or-later, is not an operator.
+    if (LNext <= Length(AValue)) and CharInSet(AValue[LNext],
+      ['A'..'Z', 'a'..'z', '0'..'9', '.', '-', '+']) then
+      Exit;
+    Result := True;
+  end;
+
+  function TakeOperator: Boolean;
+  var
+    LMark: Integer;
+  begin
+    LMark := LPos;
+    SkipSpace;
+    if StartsWithWord('OR') then
+      Inc(LPos, 2)
+    else if StartsWithWord('AND') then
+      Inc(LPos, 3)
+    else if StartsWithWord('WITH') then
+      Inc(LPos, 4)
+    else
+    begin
+      LPos := LMark;
+      Exit(False);
+    end;
+    Result := True;
+  end;
+
+  function ReadToken: string;
+  var
+    LStart: Integer;
+  begin
+    LStart := LPos;
+    while (LPos <= Length(AValue)) and CharInSet(AValue[LPos],
+      ['A'..'Z', 'a'..'z', '0'..'9', '.', '-', '+']) do
+      Inc(LPos);
+    Result := Copy(AValue, LStart, LPos - LStart);
+  end;
+
+  function ParseOperand: Boolean;
+  var
+    LToken: string;
+  begin
+    SkipSpace;
+    if AtEnd then
+      Exit(False);
+    if AValue[LPos] = '(' then
+    begin
+      Inc(LPos);
+      Result := ParseExpr;
+      SkipSpace;
+      if AtEnd or (AValue[LPos] <> ')') then
+        Exit(False);
+      Inc(LPos);
+      Exit;
+    end;
+    LToken := ReadToken;
+    Result := (LToken <> '') and (IsKnownSpdxId(LToken) or IsLicenseRefToken(LToken));
+  end;
+
+  function ParseExpr: Boolean;
+  begin
+    Result := ParseOperand;
+    while Result and TakeOperator do
+    begin
+      Inc(LOperators);
+      Result := ParseOperand;
+    end;
+  end;
+
+begin
+  // A single id, including one wrapped in parentheses, is not an expression.
+  LPos := 1;
+  LOperators := 0;
+  Result := ParseExpr;
+  SkipSpace;
+  Result := Result and AtEnd and (LOperators > 0);
+end;
+
 function ClassifyLicence(const AValue: string; out ANormalised: string): TLicenceKind;
 var
   I: Integer;
-  LPadded: string;
 begin
   ANormalised := Trim(AValue);
   if ANormalised = '' then
@@ -462,8 +626,9 @@ begin
       Exit(lkSpdxId);
     end;
 
-  LPadded := ' ' + UpperCase(ANormalised) + ' ';
-  if LPadded.Contains(' OR ') or LPadded.Contains(' AND ') or LPadded.Contains(' WITH ') then
+  // "Freeware with source" and "Free and open" contain the operator words
+  // but the operands are not SPDX ids, so they stay names and are sanitized.
+  if IsSpdxLicenceExpression(ANormalised) then
     Exit(lkExpression);
 
   Result := lkName;
@@ -744,7 +909,12 @@ begin
   else
   begin
     LKind := ClassifyLicence(Result.Licence, LNormalised);
-    if (LKind = lkName) and not SameText(Result.Licence, 'Commercial') then
+    // Commercial is a plain name the manifest accepts on purpose.
+    // LicenseRef- is already an SPDX licence reference, in any letter
+    // case. The README and the header dialog suggest LicenseRef-Proprietary,
+    // so that form must not raise the unrecognised-identifier warning.
+    if (LKind = lkName) and not SameText(Result.Licence, 'Commercial') and
+      not StartsText('LicenseRef-', Trim(Result.Licence)) then
       AddWarning(AWarnings, LContext + ': licence "' + Result.Licence +
         '" is not a recognised SPDX identifier and will be written as a licence name');
   end;
@@ -2224,6 +2394,9 @@ begin
   begin
     // The row declares the licence, and it is also the distribution
     // licence we assert. Same id or name, once concluded and once declared.
+    // LicenseRef-* stays a name. CycloneDX 1.6 license.id is the SPDX
+    // license list, which does not include LicenseRef, so an id would
+    // fail the schema. A name stays valid.
     AddNamed('concluded');
     AddNamed('declared');
   end;
@@ -2269,6 +2442,7 @@ begin
       EscapeXml(LValue) + '</expression>')
   else
   begin
+    // Same choice as the JSON writer: LicenseRef-* is a name, not an id.
     EmitNamed('concluded');
     EmitNamed('declared');
   end;
@@ -2659,8 +2833,44 @@ begin
 end;
 
 function SpdxLicenceTokenFor(const ALicence: string; out AKind: TLicenceKind): string;
+const
+  cLicenseRefPrefix = 'LicenseRef-';
 var
   LValue: string;
+
+  function TokenForName(const AValue: string): string;
+  var
+    LId: string;
+
+    function IdHasLetterOrDigit(const AId: string): Boolean;
+    var
+      LIndex: Integer;
+    begin
+      // SanitizeSpdxId turns "!!!" into "---". Hyphens and dots alone are
+      // not an id, so that result is treated as empty. The sanitizer itself
+      // stays unchanged because package ids use it too.
+      Result := False;
+      for LIndex := 1 to Length(AId) do
+        if CharInSet(AId[LIndex], ['A'..'Z', 'a'..'z', '0'..'9']) then
+          Exit(True);
+    end;
+
+  begin
+    // A value that already starts with LicenseRef- is kept, in the letter
+    // case it was written. Only the id characters are sanitized, so
+    // LicenseRef-Proprietary is not written as LicenseRef-LicenseRef-Proprietary.
+    if StartsText(cLicenseRefPrefix, AValue) then
+      LId := SanitizeSpdxId(Copy(AValue, Length(cLicenseRefPrefix) + 1, MaxInt))
+    else
+      LId := SanitizeSpdxId(AValue);
+    if not IdHasLetterOrDigit(LId) then
+      Result := 'LicenseRef-Custom'
+    else if StartsText(cLicenseRefPrefix, AValue) then
+      Result := Copy(AValue, 1, Length(cLicenseRefPrefix)) + LId
+    else
+      Result := cLicenseRefPrefix + LId;
+  end;
+
 begin
   AKind := ClassifyLicence(ALicence, LValue);
   case AKind of
@@ -2669,9 +2879,7 @@ begin
     lkSpdxId, lkExpression:
       Result := LValue;
   else
-    Result := 'LicenseRef-' + SanitizeSpdxId(LValue);
-    if Result = 'LicenseRef-' then
-      Result := 'LicenseRef-Custom';
+    Result := TokenForName(LValue);
   end;
 end;
 
@@ -2714,6 +2922,37 @@ begin
 
   if IsEmbarcaderoOrigin(AArtefact.Origin) then
     Result := Trim(AArtefact.Origin);
+end;
+
+function ComponentVersionFor(const AArtefact: TArtefactInfo;
+  AIsDeliverable: Boolean; const AProductVersion, AProjectVersion: string): string;
+var
+  LProduct: string;
+begin
+  Result := Trim(AArtefact.Version);
+  // A third-party file keeps the version it has, including none and a
+  // file-date stand-in. The product version is not copied onto it.
+  if not AIsDeliverable then
+    Exit;
+  // A unit is not the built program. ComponentLicenceFor uses the same guard.
+  if SameText(AArtefact.ArtefactType, 'unit-evidence') then
+    Exit;
+  // A file-date stamp is the stand-in used when the file has no version
+  // resource. The header version replaces it on the built program only.
+  if (Result <> '') and not AArtefact.VersionFromFileDate then
+    Exit;
+  LProduct := Trim(AProductVersion);
+  if LProduct = '' then
+    LProduct := Trim(AProjectVersion);
+  if LProduct <> '' then
+    Result := LProduct;
+end;
+
+function ComponentVersionFromFileDate(const AArtefact: TArtefactInfo;
+  const AWrittenVersion: string): Boolean;
+begin
+  Result := AArtefact.VersionFromFileDate and (Trim(AWrittenVersion) <> '') and
+    SameText(Trim(AArtefact.Version), Trim(AWrittenVersion));
 end;
 
 function SpdxLicenceToken(const AEntry: TComponentEntry; out AKind: TLicenceKind): string;

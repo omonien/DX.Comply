@@ -244,8 +244,10 @@ begin
   LJson := LoadJson;
   try
     LComponent := (LJson.GetValue('components') as TJSONArray).Items[0] as TJSONObject;
-    Assert.IsNull(LComponent.GetValue('version'),
-      'A file with no assigned version has no hash prefix version');
+    Assert.AreEqual('1.0.0', LComponent.GetValue<string>('version'),
+      'The built program uses the project version');
+    Assert.AreEqual(0, Pos(Copy(cSha256, 1, 12), LComponent.GetValue<string>('version')),
+      'The version is not a hash prefix');
     Assert.IsNull(LComponent.GetValue('purl'), 'A file has no file: purl');
     LHashes := LComponent.GetValue('hashes') as TJSONArray;
     Assert.AreEqual(NativeInt(2), NativeInt(LHashes.Count));
@@ -495,7 +497,10 @@ begin
   try
     LPackage := (LJson.GetValue('packages') as TJSONArray).Items[0] as TJSONObject;
     Assert.AreEqual('TestApp.exe', LPackage.GetValue<string>('packageFileName'));
-    Assert.IsNull(LPackage.GetValue('versionInfo'), 'no hash prefix as versionInfo');
+    Assert.AreEqual('1.0.0', LPackage.GetValue<string>('versionInfo'),
+      'The built program uses the project version');
+    Assert.AreEqual(0, Pos(Copy(cSha256, 1, 12), LPackage.GetValue<string>('versionInfo')),
+      'versionInfo is not a hash prefix');
     Assert.AreEqual('NOASSERTION', LPackage.GetValue<string>('licenseConcluded'));
     Assert.AreEqual('NOASSERTION', LPackage.GetValue<string>('licenseDeclared'));
     Assert.AreEqual(

@@ -20,6 +20,7 @@
 /// whitespace (issue #40). licenseConcluded and licenseDeclared are
 /// NOASSERTION, except the built program and own-code units when a product
 /// licence is set, and Embarcadero units, which use their origin label.
+/// A licence that already starts with LicenseRef- keeps that prefix.
 /// supplier uses Organization: when metadata supplies a name.
 ///
 /// SPDX JSON is part of the MIT-licensed tool, the same as the CycloneDX writers.
@@ -70,7 +71,7 @@ type
     function BuildGenericPurl(const ARelativePath: string): string;
     function BuildCreationInfo(const AMetadata: TSbomMetadata): TJSONObject;
     function BuildPackage(const AArtefact: TArtefactInfo; const ASpdxId,
-      ASupplier, ALicence: string): TJSONObject;
+      ASupplier, ALicence, AVersion: string): TJSONObject;
     function BuildRelationships(const AArtefacts: TArtefactList;
       const APackageIds: TArray<string>;
       const ADocumentSpdxId, AProjectName, AOutputFilePath: string): TJSONArray;
@@ -270,7 +271,7 @@ begin
 end;
 
 function TSpdxJsonWriter.BuildPackage(const AArtefact: TArtefactInfo;
-  const ASpdxId, ASupplier, ALicence: string): TJSONObject;
+  const ASpdxId, ASupplier, ALicence, AVersion: string): TJSONObject;
 var
   LPackage: TJSONObject;
   LChecksums: TJSONArray;
@@ -289,12 +290,15 @@ begin
   if LFileName <> '' then
   begin
     LPackage.AddPair('packageFileName', LFileName);
-    LPackage.AddPair('comment', BsiPropertyComment(AArtefact));
+    // A product version used in place of a file-date stand-in is not a file date.
+    LPackage.AddPair('comment', BsiPropertyComment(AArtefact,
+      not ComponentVersionFromFileDate(AArtefact, AVersion)));
   end;
 
-  // Only a known version is written. The hash is in checksums.
-  if Trim(AArtefact.Version) <> '' then
-    LPackage.AddPair('versionInfo', Trim(AArtefact.Version));
+  // Only a known version is written. The built program with no version of
+  // its own uses the product version. The hash is in checksums.
+  if AVersion <> '' then
+    LPackage.AddPair('versionInfo', AVersion);
 
   LPackage.AddPair('downloadLocation', 'NOASSERTION');
   LPackage.AddPair('filesAnalyzed', TJSONBool.Create(False));
@@ -481,6 +485,7 @@ var
   LManifest: TComponentManifest;
   LLicenceError: string;
   LLicence: string;
+  LIsDeliverable: Boolean;
 begin
   LDocumentSpdxId := cSpdxIdPrefix + 'DOCUMENT';
   LDocNamespace := 'https://spdx.org/spdxdocs/' +
@@ -520,11 +525,12 @@ begin
     LPackages := TJSONArray.Create;
     for I := 0 to AArtefacts.Count - 1 do
     begin
-      LLicence := ComponentLicenceFor(AArtefacts[I],
-        IsSameDeliverableFile(AArtefacts, I, LRootIndex), AMetadata.Licence,
-        LManifest);
+      LIsDeliverable := IsSameDeliverableFile(AArtefacts, I, LRootIndex);
+      LLicence := ComponentLicenceFor(AArtefacts[I], LIsDeliverable,
+        AMetadata.Licence, LManifest);
       LPackages.Add(BuildPackage(AArtefacts[I], LPackageIds[I], AMetadata.Supplier,
-        LLicence));
+        LLicence, ComponentVersionFor(AArtefacts[I], LIsDeliverable,
+          AMetadata.ProductVersion, AProjectInfo.Version)));
     end;
     LRoot.AddPair('packages', LPackages);
 

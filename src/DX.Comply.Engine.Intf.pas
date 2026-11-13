@@ -613,9 +613,12 @@ function BsiStructuredValue(const AFileName: string): string;
 
 /// <summary>
 /// SPDX 2.3 package comment carrying the three TR properties. Empty when
-/// the artefact has no file name.
+/// the artefact has no file name. AOmitFileDate leaves out the file-date
+/// version source, which is used when the written version is the product
+/// version rather than the file modification time.
 /// </summary>
-function BsiPropertyComment(const AArtefact: TArtefactInfo): string;
+function BsiPropertyComment(const AArtefact: TArtefactInfo;
+  AOmitFileDate: Boolean = False): string;
 
 /// <summary>
 /// File name Delphi writes for this platform and project kind.
@@ -1258,7 +1261,8 @@ begin
     Result := 'unstructured';
 end;
 
-function BsiPropertyComment(const AArtefact: TArtefactInfo): string;
+function BsiPropertyComment(const AArtefact: TArtefactInfo;
+  AOmitFileDate: Boolean): string;
 var
   LFileName: string;
 begin
@@ -1268,7 +1272,7 @@ begin
   Result := 'bsi:component:executable=' + BsiExecutableValue(AArtefact) + '; ' +
     'bsi:component:archive=' + BsiArchiveValue(LFileName) + '; ' +
     'bsi:component:structured=' + BsiStructuredValue(LFileName);
-  if AArtefact.VersionFromFileDate then
+  if AArtefact.VersionFromFileDate and not AOmitFileDate then
   begin
     Result := Result + '; ' + cVersionSourceProperty + '=' + cVersionSourceFileDate;
   end;

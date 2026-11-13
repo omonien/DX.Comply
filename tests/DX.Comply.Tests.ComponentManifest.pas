@@ -158,6 +158,18 @@ type
     [Test]
     procedure Licence_Commercial_IsName;
     /// <summary>
+    /// A value that already starts with LicenseRef- is accepted. The SPDX
+    /// token keeps that prefix. A plain name still gets one prefix.
+    /// </summary>
+    [Test]
+    procedure Licence_LicenseRef_IsAcceptedWithoutWarning;
+    /// <summary>
+    /// CycloneDX writes LicenseRef-* as license.name. license.id is the
+    /// SPDX license list and would reject the value.
+    /// </summary>
+    [Test]
+    procedure Licence_LicenseRef_CycloneDxUsesName;
+    /// <summary>
     /// Embarcadero RTL, VCL and FMX units use that origin label as their
     /// licence. Another file keeps none. Issue #165.
     /// </summary>
@@ -841,6 +853,17 @@ begin
   Assert.AreEqual('MPL-1.1 OR LGPL-2.1-or-later', LValue);
   LKind := ClassifyLicence('mit and apache-2.0', LValue);
   Assert.AreEqual(Ord(lkExpression), Ord(LKind));
+  LKind := ClassifyLicence('LicenseRef-Mine OR MIT', LValue);
+  Assert.AreEqual(Ord(lkExpression), Ord(LKind));
+  Assert.AreEqual('LicenseRef-Mine OR MIT', LValue);
+  LKind := ClassifyLicence('(MIT OR Apache-2.0) AND GPL-2.0-only', LValue);
+  Assert.AreEqual(Ord(lkExpression), Ord(LKind));
+  LKind := ClassifyLicence('LicenseRef-Freeware with source', LValue);
+  Assert.AreEqual(Ord(lkName), Ord(LKind), 'English "with" is not an operator');
+  LKind := ClassifyLicence('Freeware with source', LValue);
+  Assert.AreEqual(Ord(lkName), Ord(LKind));
+  LKind := ClassifyLicence('Free and open', LValue);
+  Assert.AreEqual(Ord(lkName), Ord(LKind));
 end;
 
 procedure TComponentManifestTests.Licence_Commercial_IsName;
@@ -856,6 +879,99 @@ begin
   Assert.AreEqual('Proprietary', LValue);
   LKind := ClassifyLicence('', LValue);
   Assert.AreEqual(Ord(lkNone), Ord(LKind));
+end;
+
+procedure TComponentManifestTests.Licence_LicenseRef_IsAcceptedWithoutWarning;
+var
+  LManifest: TComponentManifest;
+  LKind: TLicenceKind;
+
+  function WarnsFor(const ALicence: string): Boolean;
+  var
+    LIdx: Integer;
+  begin
+    Result := False;
+    for LIdx := 0 to High(LManifest.Warnings) do
+      if Pos('licence "' + ALicence + '" is not a recognised SPDX identifier',
+        LManifest.Warnings[LIdx]) > 0 then
+        Exit(True);
+  end;
+
+begin
+  Assert.AreEqual('LicenseRef-Proprietary', SpdxLicenceTokenFor('LicenseRef-Proprietary', LKind));
+  Assert.AreEqual(Ord(lkName), Ord(LKind));
+  Assert.AreEqual('licenseref-Proprietary', SpdxLicenceTokenFor('  licenseref-Proprietary  ', LKind));
+  Assert.AreEqual('LicenseRef-Freeware-with-source',
+    SpdxLicenceTokenFor('LicenseRef-Freeware with source', LKind));
+  Assert.AreEqual(Ord(lkName), Ord(LKind));
+  Assert.AreEqual('LicenseRef-Freeware-with-source',
+    SpdxLicenceTokenFor('Freeware with source', LKind));
+  Assert.AreEqual(Ord(lkName), Ord(LKind));
+  Assert.AreEqual('LicenseRef-Free-and-open',
+    SpdxLicenceTokenFor('Free and open', LKind));
+  Assert.AreEqual(Ord(lkName), Ord(LKind));
+  Assert.AreEqual('LicenseRef-Proprietary', SpdxLicenceTokenFor('Proprietary', LKind));
+  Assert.AreEqual('LicenseRef-Custom', SpdxLicenceTokenFor('LicenseRef-', LKind));
+  Assert.AreEqual('LicenseRef-Custom', SpdxLicenceTokenFor('!!!', LKind));
+  Assert.AreEqual('LicenseRef-Custom', SpdxLicenceTokenFor('LicenseRef-!!!', LKind));
+  Assert.AreEqual('LicenseRef-Custom', SpdxLicenceTokenFor('...', LKind));
+  Assert.AreEqual('LicenseRef-Custom', SpdxLicenceTokenFor('LicenseRef-...', LKind));
+  Assert.AreEqual('MIT', SpdxLicenceTokenFor('mit', LKind));
+  Assert.AreEqual(Ord(lkSpdxId), Ord(LKind));
+
+  LManifest := ParseManifest(
+    '{"components":[' +
+    '{"name":"A","version":"1","vendor":"V","licence":"LicenseRef-Proprietary","units_exact":["A"]},' +
+    '{"name":"B","version":"1","vendor":"V","licence":" licenseref-Freeware-with-source ","units_exact":["B"]},' +
+    '{"name":"C","version":"1","vendor":"V","licence":"Commercial","units_exact":["C"]},' +
+    '{"name":"D","version":"1","vendor":"V","licence":"Proprietary","units_exact":["D"]},' +
+    '{"name":"E","version":"1","vendor":"V","licence":"MIT","units_exact":["E"]},' +
+    '{"name":"F","version":"1","vendor":"V","licence":"LicenseRef","units_exact":["F"]}' +
+    ']}');
+  Assert.IsFalse(WarnsFor('LicenseRef-Proprietary'), 'LicenseRef-Proprietary is accepted');
+  Assert.IsFalse(WarnsFor('licenseref-Freeware-with-source'), 'letter case does not matter');
+  Assert.IsFalse(WarnsFor('Commercial'));
+  Assert.IsFalse(WarnsFor('MIT'));
+  Assert.IsTrue(WarnsFor('Proprietary'), 'a plain name is still reported');
+  Assert.IsTrue(WarnsFor('LicenseRef'), 'the dash is required');
+end;
+
+procedure TComponentManifestTests.Licence_LicenseRef_CycloneDxUsesName;
+var
+  LComponent, LWrap, LLicence: TJSONObject;
+  LLicences: TJSONArray;
+  LLines: TStringList;
+begin
+  LComponent := TJSONObject.Create;
+  try
+    AddCycloneDxLicences(LComponent, 'LicenseRef-Proprietary', '');
+    LLicences := LComponent.GetValue('licenses') as TJSONArray;
+    Assert.IsNotNull(LLicences);
+    Assert.AreEqual(NativeInt(2), NativeInt(LLicences.Count));
+    LWrap := LLicences.Items[0] as TJSONObject;
+    LLicence := LWrap.GetValue('license') as TJSONObject;
+    Assert.AreEqual('LicenseRef-Proprietary', LLicence.GetValue<string>('name'));
+    Assert.IsNull(LLicence.GetValue('id'), 'LicenseRef is not an SPDX list id');
+    Assert.AreEqual('concluded', LLicence.GetValue<string>('acknowledgement'));
+    LWrap := LLicences.Items[1] as TJSONObject;
+    LLicence := LWrap.GetValue('license') as TJSONObject;
+    Assert.AreEqual('declared', LLicence.GetValue<string>('acknowledgement'));
+    Assert.AreEqual('LicenseRef-Proprietary', LLicence.GetValue<string>('name'));
+    Assert.AreEqual(0, Pos('LicenseRef-LicenseRef', LComponent.ToJSON));
+  finally
+    LComponent.Free;
+  end;
+
+  LLines := TStringList.Create;
+  try
+    AppendCycloneDxLicencesXml(LLines, 'licenseref-Freeware-with-source', '', 1);
+    Assert.IsTrue(Pos('<name>licenseref-Freeware-with-source</name>', LLines.Text) > 0,
+      LLines.Text);
+    Assert.AreEqual(0, Pos('<id>', LLines.Text));
+    Assert.AreEqual(0, Pos('LicenseRef-LicenseRef', LLines.Text));
+  finally
+    LLines.Free;
+  end;
 end;
 
 procedure TComponentManifestTests.ComponentLicence_EmbarcaderoOrigin_UsesOriginLabel;
