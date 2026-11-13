@@ -32,6 +32,12 @@
 /// copyright notice). It is not used for matching. When the text is set,
 /// the CycloneDX and SPDX writers put it on the library component for that
 /// row. The human-readable licence summary shows the same text.
+///
+/// An optional cpe string is stored only when it is a CPE 2.3 formatted
+/// string or a CPE 2.2 URI, the two forms the CycloneDX 1.6 schema accepts.
+/// It is not used for matching and it is not derived from the name or the
+/// version. When it is set, the writers put it on the library component for
+/// that row. A value that is neither form is a warning and is left out.
 /// </remarks>
 ///
 /// <copyright>
@@ -62,6 +68,25 @@ type
     lkExpression,
     /// <summary>Any other text, such as Commercial. Emitted as license.name.</summary>
     lkName
+  );
+
+  /// <summary>
+  /// Which CPE binding a manifest value uses.
+  /// </summary>
+  TCpeKind = (
+    /// <summary>
+    /// No CPE, or a value that is not a CPE 2.3 formatted string and not a
+    /// CPE 2.2 URI. The writers leave the field out.
+    /// </summary>
+    ckNone,
+    /// <summary>
+    /// CPE 2.3 formatted string: cpe:2.3:part:vendor:product:version:...
+    /// </summary>
+    ckCpe23,
+    /// <summary>
+    /// CPE 2.2 URI: cpe:/part:vendor:product:version:...
+    /// </summary>
+    ckCpe22
   );
 
   /// <summary>
@@ -121,6 +146,14 @@ type
     /// human-readable licence summary. Empty when the row omits it.
     /// </summary>
     Copyright: string;
+    /// <summary>
+    /// Optional CPE. A CPE 2.3 formatted string or a CPE 2.2 URI, the forms
+    /// CycloneDX 1.6 accepts. Not used for matching. Not derived. Written on
+    /// the library component when set (CycloneDX cpe, SPDX 2.3 externalRefs
+    /// referenceType cpe23Type or cpe22Type, SPDX 3.0.1 externalIdentifier
+    /// cpe23 or cpe22). Empty when the row omits it or the value was rejected.
+    /// </summary>
+    Cpe: string;
   end;
 
   /// <summary>
@@ -206,6 +239,14 @@ function StripDelphiScopePrefix(const AUnitName: string): string;
 /// words stays a name.
 /// </summary>
 function ClassifyLicence(const AValue: string; out ANormalised: string): TLicenceKind;
+
+/// <summary>
+/// Classifies a CPE value. A CPE 2.3 formatted string is ckCpe23. A CPE 2.2
+/// URI is ckCpe22. Both are the forms named by the CycloneDX 1.6 schema.
+/// Anything else, including an empty string, is ckNone. The value is not
+/// rewritten and no CPE is derived from a name or a version.
+/// </summary>
+function ClassifyCpe(const AValue: string): TCpeKind;
 
 /// <summary>
 /// Appends CycloneDX 1.6 licenses to a component. An empty value writes
@@ -328,15 +369,17 @@ function MatchManifestUnit(const AManifest: TComponentManifest;
 
 /// <summary>
 /// Source path used for folder rules. The resolver's source path when it
-/// recorded one, otherwise FilePath when that file is a .pas. Empty when
-/// only a unit name, or a DCU in an output folder, is known.
+/// recorded one, otherwise FilePath when that file is a .pas or a shipped
+/// .pas, .dpr, or .dpk. Empty when only a unit name, or a DCU in an output
+/// folder, is known.
 /// </summary>
 function ArtefactFolderPath(const AArtefact: TArtefactInfo): string;
 
 /// <summary>
 /// Unit name of a unit-evidence artefact. The stored unit name when it is
-/// set, otherwise the file name without its extension. Empty when the
-/// artefact is not unit evidence.
+/// set, otherwise the file name without its extension. A library-mode
+/// source file that is a .pas, .dpr, or .dpk uses that file name, so a
+/// manifest row can match it. Empty for every other artefact.
 /// </summary>
 function ArtefactUnitName(const AArtefact: TArtefactInfo): string;
 
@@ -351,7 +394,8 @@ function TryAddNameOnlyLibraryUnit(const AManifest: TComponentManifest;
   const AArtefacts: TArtefactList): Boolean;
 
 /// <summary>
-/// Groups unit-evidence artefacts that match a library row.
+/// Groups artefacts that match a library row. Build mode matches
+/// unit-evidence. Library mode matches a shipped .pas, .dpr, or .dpk.
 /// </summary>
 function BuildManifestPlan(const AManifest: TComponentManifest;
   const AArtefacts: TArtefactList): TManifestPlan;
@@ -463,6 +507,16 @@ const
   );
 
   cMinPrefixLength = 3;
+
+  // CycloneDX 1.6 XSD simple type "cpe", anchored so the whole string must
+  // match. The schema accepts a CPE 2.3 formatted string and a CPE 2.2 URI.
+  // A single quote in the 2.3 pattern is written twice because this is a
+  // Pascal string. The 2.3 literal is split: one Pascal string literal
+  // cannot be longer than 255 characters.
+  scCpe23Pattern =
+    '^cpe:2\.3:[aho\*\-](:(((\?*|\*?)([a-zA-Z0-9\-\._]|(\\[\\\*\?!"#$$%&''\(\)\+,/:;<=>@\[\]\^`\{\|}~]))+(\?*|\*?))|[\*\-])){5}' +
+    '(:(([a-zA-Z]{2,3}(-([a-zA-Z]{2}|[0-9]{3}))?)|[\*\-]))(:(((\?*|\*?)([a-zA-Z0-9\-\._]|(\\[\\\*\?!"#$$%&''\(\)\+,/:;<=>@\[\]\^`\{\|}~]))+(\?*|\*?))|[\*\-])){4}$';
+  scCpe22Pattern = '^[c][pP][eE]:/[AHOaho]?(:[A-Za-z0-9\._\-~%]*){0,6}$';
 
 function StripDelphiScopePrefix(const AUnitName: string): string;
 var
@@ -635,6 +689,28 @@ begin
   Result := lkName;
 end;
 
+function ClassifyCpe(const AValue: string): TCpeKind;
+begin
+  // Checked in this order so a formatted string is not read as a URI.
+  // The two shapes do not overlap: 2.3 starts with "cpe:2.3:" and 2.2
+  // starts with "cpe:/".
+  if (AValue <> '') and TRegEx.IsMatch(AValue, scCpe23Pattern) then
+    Exit(ckCpe23);
+  if (AValue <> '') and TRegEx.IsMatch(AValue, scCpe22Pattern) then
+    Exit(ckCpe22);
+  Result := ckNone;
+end;
+
+function SpdxCpeReferenceType(AKind: TCpeKind): string;
+begin
+  case AKind of
+    ckCpe23: Result := 'cpe23Type';
+    ckCpe22: Result := 'cpe22Type';
+  else
+    Result := '';
+  end;
+end;
+
 function PurlEncode(const AValue: string): string;
 var
   LBytes: TBytes;
@@ -733,27 +809,55 @@ begin
     Result := 'component-' + IntToStr(AIndex);
 end;
 
+function IsShippedPascalFile(const AArtefact: TArtefactInfo): Boolean;
+var
+  LExt: string;
+begin
+  Result := False;
+  if not AArtefact.LibrarySourceFile then
+    Exit;
+  LExt := TPath.GetExtension(AArtefact.RelativePath);
+  if LExt = '' then
+    LExt := TPath.GetExtension(AArtefact.FilePath);
+  Result := SameText(LExt, '.pas') or SameText(LExt, '.dpr') or
+    SameText(LExt, '.dpk');
+end;
+
 function ArtefactUnitName(const AArtefact: TArtefactInfo): string;
+
+  function NameFromPath: string;
+  begin
+    Result := TPath.GetFileNameWithoutExtension(AArtefact.RelativePath);
+    if Result = '' then
+      Result := TPath.GetFileNameWithoutExtension(AArtefact.FilePath);
+  end;
+
 begin
   Result := '';
-  if not SameText(AArtefact.ArtefactType, 'unit-evidence') then
-    Exit;
-  Result := Trim(AArtefact.UnitName);
-  if Result <> '' then
-    Exit;
-  Result := TPath.GetFileNameWithoutExtension(AArtefact.RelativePath);
-  if Result = '' then
-    Result := TPath.GetFileNameWithoutExtension(AArtefact.FilePath);
+  if SameText(AArtefact.ArtefactType, 'unit-evidence') then
+  begin
+    Result := Trim(AArtefact.UnitName);
+    if Result <> '' then
+      Exit;
+    Exit(NameFromPath);
+  end;
+
+  // Library mode lists shipped source as type file. The manifest matches a
+  // .pas, .dpr, or .dpk by the file name, the same name the uses graph uses.
+  if IsShippedPascalFile(AArtefact) then
+    Result := NameFromPath;
 end;
 
 function ArtefactFolderPath(const AArtefact: TArtefactInfo): string;
 begin
   // The .pas the resolver recorded. A DCU in the output folder is not a
   // package folder: without a source path, folder rules do not match it.
+  // A shipped .pas, .dpr, or .dpk uses its file path the same way.
   Result := Trim(AArtefact.SourcePath);
   if Result <> '' then
     Exit;
-  if SameText(TPath.GetExtension(AArtefact.FilePath), '.pas') then
+  if SameText(TPath.GetExtension(AArtefact.FilePath), '.pas') or
+    IsShippedPascalFile(AArtefact) then
     Result := AArtefact.FilePath;
 end;
 
@@ -943,6 +1047,23 @@ begin
   LStatus := ReadJsonText(AObject, 'copyright', Result.Copyright);
   if LStatus = jtsWrongType then
     AddWarning(AWarnings, LContext + ': "copyright" should be a string and was ignored');
+
+  // A blank cpe is the same as leaving the field out. A non-string is
+  // ignored. A string that is neither CPE form is omitted and the row
+  // still matches. The run is not failed.
+  LStatus := ReadJsonText(AObject, 'cpe', Result.Cpe);
+  if LStatus = jtsWrongType then
+  begin
+    Result.Cpe := '';
+    AddWarning(AWarnings, LContext + ': "cpe" should be a string and was ignored');
+  end
+  else if (Result.Cpe <> '') and (ClassifyCpe(Result.Cpe) = ckNone) then
+  begin
+    AddWarning(AWarnings, LContext + ': "cpe" "' + Result.Cpe +
+      '" is not a CPE 2.3 formatted string (cpe:2.3:part:vendor:product:version:...) ' +
+      'or a CPE 2.2 URI (cpe:/part:vendor:product:version:...) and was omitted');
+    Result.Cpe := '';
+  end;
 
   Result.Prefixes := ReadStringArray(AObject, 'units_prefix', LContext, AWarnings);
   Result.ExactUnits := ReadStringArray(AObject, 'units_exact', LContext, AWarnings);
@@ -2496,6 +2617,11 @@ begin
   if AEntry.Copyright <> '' then
     Result.AddPair('copyright', AEntry.Copyright);
 
+  // CycloneDX 1.6 places cpe after copyright and before purl. A row with
+  // no accepted value keeps the field out.
+  if ClassifyCpe(AEntry.Cpe) <> ckNone then
+    Result.AddPair('cpe', AEntry.Cpe);
+
   LPurl := BuildDelphiPurl(AEntry.Name, AEntry.Version, AEntry.Purl);
   if LPurl <> '' then
     Result.AddPair('purl', LPurl);
@@ -2668,7 +2794,7 @@ var
     LPurl: string;
   begin
     // bom-1.6.xsd component order: supplier, author, name, version,
-    // hashes, licenses, copyright, purl, externalReferences.
+    // hashes, licenses, copyright, cpe, purl, externalReferences.
     AddLine(AIndentLevel, '<component type="' + EscapeXml(AEntry.ComponentType) +
       '" bom-ref="' + EscapeXml(ABomRef) + '">');
     if AEntry.Vendor <> '' then
@@ -2696,6 +2822,10 @@ var
     if AEntry.Copyright <> '' then
       AddLine(AIndentLevel + 1, '<copyright>' + EscapeXml(AEntry.Copyright) +
         '</copyright>');
+    // Same slot as the JSON property: after copyright, before purl, and
+    // only when the row has an accepted CPE.
+    if ClassifyCpe(AEntry.Cpe) <> ckNone then
+      AddLine(AIndentLevel + 1, '<cpe>' + EscapeXml(AEntry.Cpe) + '</cpe>');
     LPurl := BuildDelphiPurl(AEntry.Name, AEntry.Version, AEntry.Purl);
     if LPurl <> '' then
       AddLine(AIndentLevel + 1, '<purl>' + EscapeXml(LPurl) + '</purl>');
@@ -2968,7 +3098,8 @@ function BuildSpdxLibraryPackage(const AEntry: TComponentEntry; AIndex: Integer;
   const ASpdxId: string): TJSONObject;
 var
   LKind: TLicenceKind;
-  LToken, LPurl: string;
+  LCpeKind: TCpeKind;
+  LToken, LPurl, LCpeType: string;
   LRefs: TJSONArray;
   LRef: TJSONObject;
 begin
@@ -3000,7 +3131,11 @@ begin
     Result.AddPair('copyrightText', 'NOASSERTION');
 
   LPurl := BuildDelphiPurl(AEntry.Name, AEntry.Version, AEntry.Purl);
-  if (LPurl <> '') or (AEntry.VendorUrl <> '') then
+  LCpeKind := ClassifyCpe(AEntry.Cpe);
+  LCpeType := SpdxCpeReferenceType(LCpeKind);
+  // A package with no purl, no website, and no CPE keeps externalRefs out,
+  // which is the previous output.
+  if (LPurl <> '') or (AEntry.VendorUrl <> '') or (LCpeType <> '') then
   begin
     LRefs := TJSONArray.Create;
     Result.AddPair('externalRefs', LRefs);
@@ -3019,6 +3154,14 @@ begin
       LRef.AddPair('referenceCategory', 'OTHER');
       LRef.AddPair('referenceType', 'website');
       LRef.AddPair('referenceLocator', AEntry.VendorUrl);
+    end;
+    if LCpeType <> '' then
+    begin
+      LRef := TJSONObject.Create;
+      LRefs.Add(LRef);
+      LRef.AddPair('referenceCategory', 'SECURITY');
+      LRef.AddPair('referenceType', LCpeType);
+      LRef.AddPair('referenceLocator', AEntry.Cpe);
     end;
   end;
 end;

@@ -51,6 +51,16 @@
       "units_prefix": ["AdvGrid", "AdvEdit"],
       "purl": "pkg:generic/tms-vcl-ui-pack@13.0",
       "notes": "Optional purl overrides the generated pkg:delphi locator. Commercial is emitted as license.name"
+    },
+    {
+      "name": "OpenSSL",
+      "version": "3.0.2",
+      "vendor": "OpenSSL",
+      "licence": "Apache-2.0",
+      "type": "library",
+      "cpe": "cpe:2.3:a:openssl:openssl:3.0.2:*:*:*:*:*:*:*",
+      "units_prefix": ["OpenSSL"],
+      "notes": "Optional cpe. DX.Comply writes this value and does not look one up or build one from the name. A CPE 2.2 URI such as cpe:/a:openssl:openssl:3.0.2 is also accepted. Anything else is a warning and is left out."
     }
   ],
   "own_code_units": ["MainForm", "AppSettings"],

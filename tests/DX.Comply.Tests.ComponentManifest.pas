@@ -7,8 +7,8 @@
 /// Covers matching (exact beats prefix, first row wins, shared prefixes,
 /// scope stripping, case, own-code folders, component folders), licence
 /// classification, PURL generation, writer output, optional copyright text
-/// in CycloneDX, SPDX 2.3 and SPDX 3.0.1, and the CLI / config precedence
-/// for --manifest.
+/// in CycloneDX, SPDX 2.3 and SPDX 3.0.1, optional CPE text in those same
+/// formats, library mode, and the CLI / config precedence for --manifest.
 /// </remarks>
 ///
 /// <copyright>
@@ -274,6 +274,65 @@ type
     /// </summary>
     [Test]
     procedure Spdx3_CopyrightText_WhenManifestOmitsIt;
+
+    /// <summary>
+    /// A CPE 2.3 formatted string and a CPE 2.2 URI are stored. Matching
+    /// ignores them. Issue #181.
+    /// </summary>
+    [Test]
+    procedure Parse_Cpe_Valid_IsStored;
+    /// <summary>
+    /// A value that is neither CPE form, and a non-string, are warnings.
+    /// The row stays loaded and the CPE is left empty. Issue #181.
+    /// </summary>
+    [Test]
+    procedure Parse_Cpe_Invalid_WarnsAndOmits;
+    /// <summary>
+    /// A missing cpe, a blank cpe, and null are empty and do not warn.
+    /// Issue #181.
+    /// </summary>
+    [Test]
+    procedure Parse_Cpe_AbsentOrBlank_IsEmpty;
+    /// <summary>
+    /// CycloneDX JSON and XML write cpe on the library component only,
+    /// after copyright and before purl. Issue #181.
+    /// </summary>
+    [Test]
+    procedure CycloneDx_Cpe_WhenManifestSetsIt;
+    /// <summary>
+    /// Omitting cpe, a blank cpe, and an invalid cpe leave CycloneDX
+    /// without a cpe field. The row is still written. Issue #181.
+    /// </summary>
+    [Test]
+    procedure CycloneDx_Cpe_WhenManifestOmitsIt;
+    /// <summary>
+    /// SPDX 2.3 writes SECURITY externalRefs, cpe23Type or cpe22Type.
+    /// Issue #181.
+    /// </summary>
+    [Test]
+    procedure Spdx_Cpe_WhenManifestSetsIt;
+    /// <summary>
+    /// SPDX 2.3 adds no SECURITY externalRef when no CPE is known. Issue #181.
+    /// </summary>
+    [Test]
+    procedure Spdx_Cpe_WhenManifestOmitsIt;
+    /// <summary>
+    /// SPDX 3.0.1 writes externalIdentifier cpe23 or cpe22. Issue #181.
+    /// </summary>
+    [Test]
+    procedure Spdx3_Cpe_WhenManifestSetsIt;
+    /// <summary>
+    /// SPDX 3.0.1 omits externalIdentifier when the row has no CPE. Issue #181.
+    /// </summary>
+    [Test]
+    procedure Spdx3_Cpe_WhenManifestOmitsIt;
+    /// <summary>
+    /// dxcomply.exe --library applies a manifest row to a shipped .pas and
+    /// writes that row's cpe. An invalid cpe is a warning and is omitted.
+    /// Issue #181.
+    /// </summary>
+    [Test]
+    procedure LibraryMode_Cpe_WhenManifestMatchesSource;
   end;
 
 implementation
@@ -308,6 +367,88 @@ end;
 
 const
   cCopyrightNotice = 'Copyright (c) 2020 Smith & Sons';
+  cCpe23 = 'cpe:2.3:a:openssl:openssl:3.0.2:*:*:*:*:*:*:*';
+  cCpe22 = 'cpe:/a:sqlite:sqlite:3.45.0';
+
+function ManifestCpeSet: string;
+begin
+  Result :=
+    '{"components":[' +
+    '{"name":"OpenSSL","version":"3.0.2","vendor":"OpenSSL",' +
+    '"licence":"Apache-2.0","type":"library","copyright":"2020",' +
+    '"cpe":"' + cCpe23 + '","units_exact":["OpenSsl"]},' +
+    '{"name":"SQLite","version":"3.45.0","vendor":"SQLite",' +
+    '"licence":"MIT","type":"library",' +
+    '"cpe":"' + cCpe22 + '","units_exact":["Sqlite"]}]}';
+end;
+
+function ManifestCpeOmitted: string;
+begin
+  // The second row is only spaces. Parsing trims that to empty.
+  // The third row is not a CPE. Parsing warns and clears it.
+  Result :=
+    '{"components":[' +
+    '{"name":"OpenSSL","version":"3.0.2","vendor":"OpenSSL",' +
+    '"licence":"Apache-2.0","type":"library","units_exact":["OpenSsl"]},' +
+    '{"name":"SQLite","version":"3.45.0","vendor":"SQLite",' +
+    '"licence":"MIT","type":"library","cpe":"   ","units_exact":["Sqlite"]},' +
+    '{"name":"Broken","version":"1","vendor":"Broken",' +
+    '"licence":"MIT","type":"library","cpe":"not-a-cpe","units_exact":["Broken"]}]}';
+end;
+
+function SpdxExternalRef(APackage: TJSONObject; const AType: string): TJSONObject;
+var
+  LRefs: TJSONArray;
+  I: Integer;
+  LRef: TJSONObject;
+begin
+  Result := nil;
+  if not Assigned(APackage) or not (APackage.GetValue('externalRefs') is TJSONArray) then
+    Exit;
+  LRefs := TJSONArray(APackage.GetValue('externalRefs'));
+  for I := 0 to LRefs.Count - 1 do
+  begin
+    if not (LRefs.Items[I] is TJSONObject) then
+      Continue;
+    LRef := TJSONObject(LRefs.Items[I]);
+    if (LRef.GetValue('referenceType') <> nil) and
+      SameText(LRef.GetValue<string>('referenceType'), AType) then
+      Exit(LRef);
+  end;
+end;
+
+function Spdx3ExternalId(APackage: TJSONObject; const AType: string): TJSONObject;
+var
+  LIds: TJSONArray;
+  I: Integer;
+  LId: TJSONObject;
+begin
+  Result := nil;
+  if not Assigned(APackage) or
+    not (APackage.GetValue('externalIdentifier') is TJSONArray) then
+    Exit;
+  LIds := TJSONArray(APackage.GetValue('externalIdentifier'));
+  for I := 0 to LIds.Count - 1 do
+  begin
+    if not (LIds.Items[I] is TJSONObject) then
+      Continue;
+    LId := TJSONObject(LIds.Items[I]);
+    if (LId.GetValue('externalIdentifierType') <> nil) and
+      SameText(LId.GetValue<string>('externalIdentifierType'), AType) then
+      Exit(LId);
+  end;
+end;
+
+function WarningContains(const AManifest: TComponentManifest;
+  const AText: string): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 0 to High(AManifest.Warnings) do
+    if Pos(AText, AManifest.Warnings[I]) > 0 then
+      Exit(True);
+end;
 
 function ManifestCopyrightSet: string;
 begin
@@ -1898,6 +2039,555 @@ begin
     end;
   finally
     LJson.Free;
+  end;
+end;
+
+procedure TComponentManifestTests.Parse_Cpe_Valid_IsStored;
+var
+  LManifest: TComponentManifest;
+  LMatch: TManifestMatch;
+  I: Integer;
+begin
+  LManifest := ParseManifest(ManifestCpeSet);
+  Assert.AreEqual(cCpe23, LManifest.Components[0].Cpe);
+  Assert.AreEqual(cCpe22, LManifest.Components[1].Cpe);
+  Assert.AreEqual(Ord(ckCpe23), Ord(ClassifyCpe(LManifest.Components[0].Cpe)));
+  Assert.AreEqual(Ord(ckCpe22), Ord(ClassifyCpe(LManifest.Components[1].Cpe)));
+  for I := 0 to High(LManifest.Warnings) do
+    Assert.IsTrue(Pos('cpe', LManifest.Warnings[I]) = 0, LManifest.Warnings[I]);
+  LMatch := MatchManifestUnit(LManifest, 'OpenSsl');
+  Assert.AreEqual(Ord(mmLibrary), Ord(LMatch.Kind));
+  Assert.AreEqual(0, LMatch.ComponentIndex);
+  Assert.AreEqual(Ord(ckNone), Ord(ClassifyCpe('')));
+end;
+
+procedure TComponentManifestTests.Parse_Cpe_Invalid_WarnsAndOmits;
+var
+  LManifest: TComponentManifest;
+  LError: string;
+begin
+  Assert.IsTrue(TryParseComponentManifest(
+    '{"components":[{"name":"OpenSSL","version":"3.0.2","vendor":"OpenSSL",' +
+    '"licence":"Apache-2.0","type":"library",' +
+    '"cpe":"cpe:2.3:a:openssl:openssl","units_exact":["OpenSsl"]}]}',
+    'components.json', LManifest, LError), LError);
+  Assert.IsTrue(LManifest.Loaded, 'An invalid cpe must not fail the parse');
+  Assert.AreEqual('', LManifest.Components[0].Cpe);
+  Assert.IsTrue(WarningContains(LManifest, 'was omitted'),
+    string.Join(sLineBreak, LManifest.Warnings));
+  Assert.IsTrue(WarningContains(LManifest, 'cpe:2.3:a:openssl:openssl'),
+    string.Join(sLineBreak, LManifest.Warnings));
+
+  Assert.IsTrue(TryParseComponentManifest(
+    '{"components":[{"name":"OpenSSL","version":"3.0.2","vendor":"OpenSSL",' +
+    '"licence":"Apache-2.0","type":"library","cpe":{"id":"openssl"},' +
+    '"units_exact":["OpenSsl"]}]}',
+    'components.json', LManifest, LError), LError);
+  Assert.IsTrue(LManifest.Loaded);
+  Assert.AreEqual('', LManifest.Components[0].Cpe);
+  Assert.IsTrue(WarningContains(LManifest, '"cpe" should be a string and was ignored'),
+    string.Join(sLineBreak, LManifest.Warnings));
+
+  Assert.AreEqual(Ord(ckNone), Ord(ClassifyCpe(
+    'CPE:2.3:a:openssl:openssl:3.0.2:*:*:*:*:*:*:*')));
+  Assert.AreEqual(Ord(ckNone), Ord(ClassifyCpe('not-a-cpe')));
+end;
+
+procedure TComponentManifestTests.Parse_Cpe_AbsentOrBlank_IsEmpty;
+var
+  LWith, LWithout: TComponentManifest;
+  LError: string;
+  I: Integer;
+begin
+  Assert.IsTrue(TryParseComponentManifest(
+    '{"components":[{"name":"OpenSSL","version":"3.0.2","licence":"MIT",' +
+    '"type":"library","cpe":"   ","units_exact":["OpenSsl"]},' +
+    '{"name":"Other","version":"1","licence":"MIT","type":"library",' +
+    '"cpe":null,"units_exact":["Other"]}]}',
+    'test', LWith, LError), LError);
+  Assert.AreEqual('', LWith.Components[0].Cpe);
+  Assert.AreEqual('', LWith.Components[1].Cpe);
+  for I := 0 to High(LWith.Warnings) do
+    Assert.IsTrue(Pos('cpe', LWith.Warnings[I]) = 0, LWith.Warnings[I]);
+
+  LWithout := ParseManifest(
+    '{"components":[{"name":"OpenSSL","version":"3.0.2","licence":"MIT",' +
+    '"type":"library","units_exact":["OpenSsl"]}]}');
+  Assert.AreEqual('', LWithout.Components[0].Cpe);
+  Assert.IsTrue(LWithout.Loaded, 'A row without cpe must stay valid');
+end;
+
+procedure TComponentManifestTests.CycloneDx_Cpe_WhenManifestSetsIt;
+var
+  LWriter: ISbomWriter;
+  LText: string;
+  LJson, LLibrary: TJSONObject;
+  LComponents: TJSONArray;
+  LLibraryXml: string;
+  LValidator: TSbomValidator;
+begin
+  AddUnit('OpenSsl.pas');
+  AddUnit('Sqlite.pas');
+  FMetadata.ComponentManifestJson := ManifestCpeSet;
+
+  LWriter := TCycloneDxJsonWriter.Create;
+  Assert.IsTrue(LWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LText := TFile.ReadAllText(FOutputFile, TEncoding.UTF8);
+  LValidator := TSbomValidator.Create;
+  try
+    AssertValidation(LValidator.ValidateCycloneDxJson(LText));
+  finally
+    LValidator.Free;
+  end;
+
+  LJson := TJSONObject.ParseJSONValue(LText) as TJSONObject;
+  Assert.IsNotNull(LJson);
+  try
+    LComponents := LJson.GetValue('components') as TJSONArray;
+    LLibrary := FindComponent(LComponents, 'OpenSSL');
+    Assert.IsNotNull(LLibrary);
+    Assert.AreEqual(cCpe23, LLibrary.GetValue<string>('cpe'));
+    Assert.IsTrue(Pos('"copyright"', LLibrary.ToString) < Pos('"cpe"', LLibrary.ToString),
+      LLibrary.ToString);
+    Assert.IsTrue(Pos('"cpe"', LLibrary.ToString) < Pos('"purl"', LLibrary.ToString),
+      LLibrary.ToString);
+    LLibrary := FindComponent(LComponents, 'SQLite');
+    Assert.IsNotNull(LLibrary);
+    Assert.AreEqual(cCpe22, LLibrary.GetValue<string>('cpe'));
+    LLibrary := FindComponent(LComponents, 'OpenSsl.pas');
+    Assert.IsNotNull(LLibrary, 'The matched unit stays in the evidence');
+    Assert.IsNull(LLibrary.GetValue('cpe'),
+      'CPE belongs to the library component, not the unit');
+  finally
+    LJson.Free;
+  end;
+
+  LWriter := TCycloneDxXmlWriter.Create;
+  Assert.IsTrue(LWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LText := TFile.ReadAllText(FOutputFile, TEncoding.UTF8);
+  AssertXmlSequence(LText);
+  LValidator := TSbomValidator.Create;
+  try
+    AssertValidation(LValidator.ValidateCycloneDxXml(LText));
+  finally
+    LValidator.Free;
+  end;
+  LLibraryXml := XmlComponentSlice(LText, 'manifest-0');
+  Assert.IsTrue(Pos('<copyright>', LLibraryXml) < Pos('<cpe>', LLibraryXml), LLibraryXml);
+  Assert.IsTrue(Pos('<cpe>', LLibraryXml) < Pos('<purl>', LLibraryXml), LLibraryXml);
+  Assert.IsTrue(Pos('<cpe>' + cCpe23 + '</cpe>', LLibraryXml) > 0, LLibraryXml);
+  LLibraryXml := XmlComponentSlice(LText, 'manifest-1');
+  Assert.AreEqual(0, Pos('<copyright>', LLibraryXml));
+  Assert.IsTrue(Pos('<licenses>', LLibraryXml) < Pos('<cpe>', LLibraryXml), LLibraryXml);
+  Assert.IsTrue(Pos('<cpe>', LLibraryXml) < Pos('<purl>', LLibraryXml), LLibraryXml);
+  Assert.IsTrue(Pos('<cpe>' + cCpe22 + '</cpe>', LLibraryXml) > 0, LLibraryXml);
+  Assert.AreEqual(0, Pos('<cpe>', XmlComponentSlice(LText, 'comp-0')));
+end;
+
+procedure TComponentManifestTests.CycloneDx_Cpe_WhenManifestOmitsIt;
+var
+  LWriter: ISbomWriter;
+  LText: string;
+  LJson, LLibrary: TJSONObject;
+  LComponents: TJSONArray;
+  I: Integer;
+  LValidator: TSbomValidator;
+begin
+  AddUnit('OpenSsl.pas');
+  AddUnit('Sqlite.pas');
+  AddUnit('Broken.pas');
+  FMetadata.ComponentManifestJson := ManifestCpeOmitted;
+
+  LWriter := TCycloneDxJsonWriter.Create;
+  Assert.IsTrue(LWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LText := TFile.ReadAllText(FOutputFile, TEncoding.UTF8);
+  LValidator := TSbomValidator.Create;
+  try
+    AssertValidation(LValidator.ValidateCycloneDxJson(LText));
+  finally
+    LValidator.Free;
+  end;
+  Assert.AreEqual(0, Pos('"cpe"', LText),
+    'Omitting cpe, a blank cpe, or an invalid cpe must not add the field');
+
+  LJson := TJSONObject.ParseJSONValue(LText) as TJSONObject;
+  Assert.IsNotNull(LJson);
+  try
+    LComponents := LJson.GetValue('components') as TJSONArray;
+    Assert.IsNotNull(FindComponent(LComponents, 'OpenSSL'));
+    Assert.IsNotNull(FindComponent(LComponents, 'SQLite'));
+    Assert.IsNotNull(FindComponent(LComponents, 'Broken'),
+      'An invalid cpe still writes the library component');
+    for I := 0 to LComponents.Count - 1 do
+    begin
+      LLibrary := LComponents.Items[I] as TJSONObject;
+      Assert.IsNull(LLibrary.GetValue('cpe'), LLibrary.GetValue<string>('name'));
+    end;
+  finally
+    LJson.Free;
+  end;
+
+  LWriter := TCycloneDxXmlWriter.Create;
+  Assert.IsTrue(LWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LText := TFile.ReadAllText(FOutputFile, TEncoding.UTF8);
+  AssertXmlSequence(LText);
+  LValidator := TSbomValidator.Create;
+  try
+    AssertValidation(LValidator.ValidateCycloneDxXml(LText));
+  finally
+    LValidator.Free;
+  end;
+  Assert.AreEqual(0, Pos('<cpe', LText), LText);
+  Assert.IsTrue(Pos('bom-ref="manifest-2"', LText) > 0,
+    'A rejected cpe still matches the row');
+end;
+
+procedure TComponentManifestTests.Spdx_Cpe_WhenManifestSetsIt;
+var
+  LWriter: ISbomWriter;
+  LText: string;
+  LJson, LPackage, LRef: TJSONObject;
+  LPackages: TJSONArray;
+  LValidator: TSbomValidator;
+begin
+  AddUnit('OpenSsl.pas');
+  AddUnit('Sqlite.pas');
+  FMetadata.ComponentManifestJson := ManifestCpeSet;
+
+  LWriter := TSpdxJsonWriter.Create;
+  Assert.IsTrue(LWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LText := TFile.ReadAllText(FOutputFile, TEncoding.UTF8);
+  LValidator := TSbomValidator.Create;
+  try
+    AssertValidation(LValidator.ValidateSpdxJson(LText));
+  finally
+    LValidator.Free;
+  end;
+
+  LJson := TJSONObject.ParseJSONValue(LText) as TJSONObject;
+  Assert.IsNotNull(LJson);
+  try
+    LPackages := LJson.GetValue('packages') as TJSONArray;
+    LPackage := FindComponent(LPackages, 'OpenSSL');
+    Assert.IsNotNull(LPackage);
+    LRef := SpdxExternalRef(LPackage, 'cpe23Type');
+    Assert.IsNotNull(LRef, 'The library package must carry cpe23Type');
+    Assert.AreEqual('SECURITY', LRef.GetValue<string>('referenceCategory'));
+    Assert.AreEqual(cCpe23, LRef.GetValue<string>('referenceLocator'));
+    Assert.IsNull(SpdxExternalRef(LPackage, 'cpe22Type'));
+    Assert.IsNotNull(SpdxExternalRef(LPackage, 'purl'),
+      'The package URL stays on the package');
+
+    LPackage := FindComponent(LPackages, 'SQLite');
+    Assert.IsNotNull(LPackage);
+    LRef := SpdxExternalRef(LPackage, 'cpe22Type');
+    Assert.IsNotNull(LRef, 'A CPE 2.2 URI is referenceType cpe22Type');
+    Assert.AreEqual('SECURITY', LRef.GetValue<string>('referenceCategory'));
+    Assert.AreEqual(cCpe22, LRef.GetValue<string>('referenceLocator'));
+
+    LPackage := FindComponent(LPackages, 'OpenSsl.pas');
+    Assert.IsNotNull(LPackage, 'The matched unit stays a package');
+    Assert.IsNull(SpdxExternalRef(LPackage, 'cpe23Type'));
+    Assert.IsNull(SpdxExternalRef(LPackage, 'cpe22Type'));
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TComponentManifestTests.Spdx_Cpe_WhenManifestOmitsIt;
+var
+  LWriter: ISbomWriter;
+  LText: string;
+  LJson, LPackage: TJSONObject;
+  LPackages: TJSONArray;
+  I: Integer;
+  LValidator: TSbomValidator;
+begin
+  AddUnit('OpenSsl.pas');
+  AddUnit('Sqlite.pas');
+  AddUnit('Broken.pas');
+  FMetadata.ComponentManifestJson := ManifestCpeOmitted;
+
+  LWriter := TSpdxJsonWriter.Create;
+  Assert.IsTrue(LWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LText := TFile.ReadAllText(FOutputFile, TEncoding.UTF8);
+  LValidator := TSbomValidator.Create;
+  try
+    AssertValidation(LValidator.ValidateSpdxJson(LText));
+  finally
+    LValidator.Free;
+  end;
+  Assert.AreEqual(0, Pos('cpe23Type', LText), LText);
+  Assert.AreEqual(0, Pos('cpe22Type', LText), LText);
+  Assert.AreEqual(0, Pos('not-a-cpe', LText), LText);
+  Assert.AreEqual(0, Pos('"SECURITY"', LText), LText);
+
+  LJson := TJSONObject.ParseJSONValue(LText) as TJSONObject;
+  Assert.IsNotNull(LJson);
+  try
+    LPackages := LJson.GetValue('packages') as TJSONArray;
+    Assert.IsNotNull(FindComponent(LPackages, 'OpenSSL'));
+    Assert.IsNotNull(FindComponent(LPackages, 'SQLite'));
+    Assert.IsNotNull(FindComponent(LPackages, 'Broken'));
+    for I := 0 to LPackages.Count - 1 do
+    begin
+      LPackage := LPackages.Items[I] as TJSONObject;
+      Assert.IsNull(SpdxExternalRef(LPackage, 'cpe23Type'),
+        LPackage.GetValue<string>('name'));
+      Assert.IsNull(SpdxExternalRef(LPackage, 'cpe22Type'),
+        LPackage.GetValue<string>('name'));
+    end;
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TComponentManifestTests.Spdx3_Cpe_WhenManifestSetsIt;
+var
+  LWriter: ISbomWriter;
+  LText: string;
+  LJson, LPackage, LId: TJSONObject;
+  LValidator: TSbomValidator;
+begin
+  AddUnit('OpenSsl.pas');
+  AddUnit('Sqlite.pas');
+  FMetadata.ComponentManifestJson := ManifestCpeSet;
+
+  LWriter := TSpdx3JsonWriter.Create;
+  Assert.IsTrue(LWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LText := TFile.ReadAllText(FOutputFile, TEncoding.UTF8);
+  LValidator := TSbomValidator.Create;
+  try
+    AssertValidation(LValidator.ValidateSpdx3Json(LText));
+  finally
+    LValidator.Free;
+  end;
+
+  LJson := TJSONObject.ParseJSONValue(LText) as TJSONObject;
+  Assert.IsNotNull(LJson);
+  try
+    LPackage := Spdx3Package(LJson, 'OpenSSL');
+    LId := Spdx3ExternalId(LPackage, 'cpe23');
+    Assert.IsNotNull(LId, 'The software package must carry cpe23');
+    Assert.AreEqual('ExternalIdentifier', LId.GetValue<string>('type'));
+    Assert.AreEqual(cCpe23, LId.GetValue<string>('identifier'));
+    Assert.IsNull(Spdx3ExternalId(LPackage, 'cpe22'));
+
+    LPackage := Spdx3Package(LJson, 'SQLite');
+    LId := Spdx3ExternalId(LPackage, 'cpe22');
+    Assert.IsNotNull(LId, 'A CPE 2.2 URI is externalIdentifierType cpe22');
+    Assert.AreEqual(cCpe22, LId.GetValue<string>('identifier'));
+
+    LPackage := Spdx3Package(LJson, 'OpenSsl.pas');
+    Assert.IsNull(LPackage.GetValue('externalIdentifier'),
+      'The unit package does not take the library CPE');
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TComponentManifestTests.Spdx3_Cpe_WhenManifestOmitsIt;
+var
+  LWriter: ISbomWriter;
+  LText: string;
+  LJson, LItem: TJSONObject;
+  LGraph: TJSONArray;
+  I: Integer;
+  LValidator: TSbomValidator;
+begin
+  AddUnit('OpenSsl.pas');
+  AddUnit('Sqlite.pas');
+  AddUnit('Broken.pas');
+  FMetadata.ComponentManifestJson := ManifestCpeOmitted;
+
+  LWriter := TSpdx3JsonWriter.Create;
+  Assert.IsTrue(LWriter.Write(FOutputFile, FMetadata, FArtefacts, FProjectInfo));
+  LText := TFile.ReadAllText(FOutputFile, TEncoding.UTF8);
+  LValidator := TSbomValidator.Create;
+  try
+    AssertValidation(LValidator.ValidateSpdx3Json(LText));
+  finally
+    LValidator.Free;
+  end;
+  Assert.AreEqual(0, Pos('externalIdentifier', LText),
+    'No CPE means the SPDX 3 property stays absent');
+  Assert.AreEqual(0, Pos('not-a-cpe', LText), LText);
+  Assert.AreEqual(0, Pos(cCpe23, LText), LText);
+
+  LJson := TJSONObject.ParseJSONValue(LText) as TJSONObject;
+  Assert.IsNotNull(LJson);
+  try
+    Assert.IsNotNull(Spdx3Package(LJson, 'OpenSSL'));
+    Assert.IsNotNull(Spdx3Package(LJson, 'SQLite'));
+    Assert.IsNotNull(Spdx3Package(LJson, 'Broken'));
+    LGraph := LJson.GetValue('@graph') as TJSONArray;
+    for I := 0 to LGraph.Count - 1 do
+    begin
+      if not (LGraph.Items[I] is TJSONObject) then
+        Continue;
+      LItem := TJSONObject(LGraph.Items[I]);
+      Assert.IsNull(LItem.GetValue('externalIdentifier'));
+    end;
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TComponentManifestTests.LibraryMode_Cpe_WhenManifestMatchesSource;
+var
+  LDir, LManifestPath, LOutput, LText, LMessage: string;
+  LConfig: TSbomConfig;
+  LGenerator: TDxComplyGenerator;
+  LMessages: TList<string>;
+  LJson, LComponent, LPackage, LRef, LId: TJSONObject;
+  LComponents: TJSONArray;
+  LValidator: TSbomValidator;
+  LWarned: Boolean;
+
+  procedure CaptureProgress(const AMessage: string; const AProgress: Integer);
+  begin
+    LMessages.Add(AMessage);
+  end;
+
+begin
+  LDir := TPath.Combine(TPath.GetTempPath, 'dxc-cpe-' + TGUID.NewGuid.ToString);
+  TDirectory.CreateDirectory(LDir);
+  LMessages := TList<string>.Create;
+  try
+    TFile.WriteAllText(TPath.Combine(LDir, 'OpenSsl.pas'),
+      'unit OpenSsl;' + sLineBreak + 'interface' + sLineBreak +
+      'implementation' + sLineBreak + 'end.' + sLineBreak, TEncoding.UTF8);
+    TFile.WriteAllText(TPath.Combine(LDir, 'Sqlite.pas'),
+      'unit Sqlite;' + sLineBreak + 'interface' + sLineBreak +
+      'implementation' + sLineBreak + 'end.' + sLineBreak, TEncoding.UTF8);
+    TFile.WriteAllText(TPath.Combine(LDir, 'Plain.pas'),
+      'unit Plain;' + sLineBreak + 'interface' + sLineBreak +
+      'implementation' + sLineBreak + 'end.' + sLineBreak, TEncoding.UTF8);
+    LManifestPath := TPath.Combine(LDir, 'components.json');
+    TFile.WriteAllText(LManifestPath,
+      '{"supplier":{"name":"Acme"},"components":[' +
+      '{"name":"OpenSSL","version":"3.0.2","vendor":"OpenSSL","licence":"Apache-2.0",' +
+      '"type":"library","cpe":"' + cCpe23 + '","units_exact":["OpenSsl"]},' +
+      '{"name":"SQLite","version":"3.45.0","vendor":"SQLite","licence":"MIT",' +
+      '"type":"library","cpe":"not-a-cpe","units_exact":["Sqlite"]}]}',
+      TEncoding.UTF8);
+
+    LConfig := TSbomConfig.Default;
+    LConfig.LibraryMode := True;
+    LConfig.SourceDirs := [LDir];
+    LConfig.ManifestFile := LManifestPath;
+    LConfig.Supplier := 'Acme';
+    LConfig.Licence := 'MIT';
+    LConfig.SbomCreator := 'sbom@acme.example';
+
+    LOutput := TPath.Combine(LDir, 'lib.cdx.json');
+    LGenerator := TDxComplyGenerator.Create(LConfig);
+    try
+      LGenerator.OnProgress := CaptureProgress;
+      Assert.IsTrue(LGenerator.Generate('', LOutput, sfCycloneDxJson),
+        string.Join(sLineBreak, LMessages.ToArray));
+    finally
+      LGenerator.Free;
+    end;
+
+    LWarned := False;
+    for LMessage in LMessages do
+      if Pos('was omitted', LMessage) > 0 then
+        LWarned := True;
+    Assert.IsTrue(LWarned, 'Library mode must warn and continue: ' +
+      string.Join(sLineBreak, LMessages.ToArray));
+
+    LText := TFile.ReadAllText(LOutput, TEncoding.UTF8);
+    LValidator := TSbomValidator.Create;
+    try
+      AssertValidation(LValidator.ValidateCycloneDxJson(LText));
+    finally
+      LValidator.Free;
+    end;
+    LJson := TJSONObject.ParseJSONValue(LText) as TJSONObject;
+    try
+      LComponents := LJson.GetValue('components') as TJSONArray;
+      LComponent := FindComponent(LComponents, 'OpenSSL');
+      Assert.IsNotNull(LComponent, 'The matched row is a library component');
+      Assert.AreEqual(cCpe23, LComponent.GetValue<string>('cpe'));
+      LComponent := FindComponent(LComponents, 'SQLite');
+      Assert.IsNotNull(LComponent, 'An invalid cpe still matches the shipped unit');
+      Assert.IsNull(LComponent.GetValue('cpe'));
+      LComponent := FindComponent(LComponents, 'OpenSsl.pas');
+      Assert.IsNotNull(LComponent);
+      Assert.IsNull(LComponent.GetValue('cpe'));
+      LComponent := FindComponent(LComponents, 'Plain.pas');
+      Assert.IsNotNull(LComponent, 'An unmatched file stays in the SBOM');
+      Assert.IsNull(LComponent.GetValue('cpe'));
+    finally
+      LJson.Free;
+    end;
+
+    LMessages.Clear;
+    LOutput := TPath.Combine(LDir, 'lib.spdx.json');
+    LGenerator := TDxComplyGenerator.Create(LConfig);
+    try
+      LGenerator.OnProgress := CaptureProgress;
+      Assert.IsTrue(LGenerator.Generate('', LOutput, sfSpdxJson),
+        string.Join(sLineBreak, LMessages.ToArray));
+    finally
+      LGenerator.Free;
+    end;
+    LText := TFile.ReadAllText(LOutput, TEncoding.UTF8);
+    LValidator := TSbomValidator.Create;
+    try
+      AssertValidation(LValidator.ValidateSpdxJson(LText));
+    finally
+      LValidator.Free;
+    end;
+    LJson := TJSONObject.ParseJSONValue(LText) as TJSONObject;
+    try
+      LPackage := FindComponent(LJson.GetValue('packages') as TJSONArray, 'OpenSSL');
+      Assert.IsNotNull(LPackage);
+      LRef := SpdxExternalRef(LPackage, 'cpe23Type');
+      Assert.IsNotNull(LRef);
+      Assert.AreEqual('SECURITY', LRef.GetValue<string>('referenceCategory'));
+      Assert.AreEqual(cCpe23, LRef.GetValue<string>('referenceLocator'));
+      LPackage := FindComponent(LJson.GetValue('packages') as TJSONArray, 'SQLite');
+      Assert.IsNotNull(LPackage);
+      Assert.IsNull(SpdxExternalRef(LPackage, 'cpe23Type'));
+      Assert.IsNull(SpdxExternalRef(LPackage, 'cpe22Type'));
+    finally
+      LJson.Free;
+    end;
+
+    LMessages.Clear;
+    LOutput := TPath.Combine(LDir, 'lib.spdx3.json');
+    LGenerator := TDxComplyGenerator.Create(LConfig);
+    try
+      LGenerator.OnProgress := CaptureProgress;
+      Assert.IsTrue(LGenerator.Generate('', LOutput, sfSpdx3Json),
+        string.Join(sLineBreak, LMessages.ToArray));
+    finally
+      LGenerator.Free;
+    end;
+    LText := TFile.ReadAllText(LOutput, TEncoding.UTF8);
+    LValidator := TSbomValidator.Create;
+    try
+      AssertValidation(LValidator.ValidateSpdx3Json(LText));
+    finally
+      LValidator.Free;
+    end;
+    LJson := TJSONObject.ParseJSONValue(LText) as TJSONObject;
+    try
+      LPackage := Spdx3Package(LJson, 'OpenSSL');
+      LId := Spdx3ExternalId(LPackage, 'cpe23');
+      Assert.IsNotNull(LId);
+      Assert.AreEqual(cCpe23, LId.GetValue<string>('identifier'));
+      LPackage := Spdx3Package(LJson, 'SQLite');
+      Assert.IsNull(LPackage.GetValue('externalIdentifier'));
+    finally
+      LJson.Free;
+    end;
+  finally
+    LMessages.Free;
+    if TDirectory.Exists(LDir) then
+      TDirectory.Delete(LDir, True);
   end;
 end;
 

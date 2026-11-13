@@ -68,6 +68,10 @@ A shipped `.pas`, `.dpr`, or `.dpk` depends on the units named in its uses claus
 
 Each of those files is parsed once, and the SBOM write reuses that list. CycloneDX, SPDX 2.3 (`DEPENDS_ON`), and SPDX 3.0.1 (`dependsOn`) write the same edges. Compositions stay the file set described above. They do not say that every uses name was resolved. SPDX 3.0.1 sets `completeness` on the `dependsOn` of each Pascal file from those names.
 
+### Component manifest
+
+`--manifest=<file>` is read in library mode the same way as in build mode. A shipped `.pas`, `.dpr`, or `.dpk` that matches a row (`units_exact`, `units_prefix`, or `units_folder`) is linked from that library component. The row's supplier, licence, version, package URL, `copyright`, and `cpe` are written on that component. A file that matches no row stays as it is. An invalid `cpe` is a warning and is left out. The SBOM is still written.
+
 ### What library mode does not do
 
 It does not compile, read MAP files, or hash binaries. It does not resolve third party units that the library uses from the search path. It does not follow `{$I}` directives or `{$IFDEF}` branches. A customer who builds a product with the library still runs build mode on that product.
