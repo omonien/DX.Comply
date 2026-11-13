@@ -15,6 +15,9 @@
 /// A unit that another unit uses is left off the program, so the chart is
 /// the uses graph. A cycle that nothing outside it uses keeps its lowest
 /// index on the program, and both cycle edges stay.
+/// Library mode uses the same edges for a shipped .pas, .dpr, or .dpk.
+/// The library keeps the Pascal files that no other file uses, and every
+/// file that is not Pascal source.
 /// The resolver caches the clause. This unit reads a .pas only when that
 /// cache is empty, and then stores the names on the artefact.
 /// </remarks>
@@ -84,10 +87,11 @@ type
 function BuildUsesDependencyGraph(const AArtefacts: TArtefactList): TUsesDependencyGraph;
 
 /// <summary>
-/// True for each unit that another unit uses and that can be reached from
-/// a unit the program still lists. The program omits those indexes.
-/// System and SysInit are never marked. A cycle with no outside user keeps
-/// its lowest index unmarked. Nil when AArtefacts is nil.
+/// True for each Pascal source that another source uses and that can be
+/// reached from a source the parent still lists. The parent omits those
+/// indexes. The parent is the built program, or the library for a shipped
+/// source file. System and SysInit are never uses targets. A cycle with no
+/// outside user keeps its lowest index unmarked. Nil when AArtefacts is nil.
 /// </summary>
 function UnitsCoveredByUsesEdges(const AArtefacts: TArtefactList;
   const AGraph: TUsesDependencyGraph): TArray<Boolean>;
@@ -229,12 +233,38 @@ begin
   Result := -1;
 end;
 
+function IsPascalSourcePath(const APath: string): Boolean;
+var
+  LExt: string;
+begin
+  LExt := TPath.GetExtension(APath);
+  Result := SameText(LExt, '.pas') or SameText(LExt, '.dpr') or
+    SameText(LExt, '.dpk');
+end;
+
+function UsesGraphUnitName(const AArtefact: TArtefactInfo): string;
+begin
+  Result := '';
+  if SameText(AArtefact.ArtefactType, 'unit-evidence') then
+    Exit(ArtefactUnitName(AArtefact));
+  // A shipped source file. The unit name is the file name, so UnitA.pas
+  // matches a uses clause that says UnitA. A form or an include does not.
+  if not AArtefact.LibrarySourceFile then
+    Exit;
+  if not (IsPascalSourcePath(AArtefact.FilePath) or
+     IsPascalSourcePath(AArtefact.RelativePath)) then
+    Exit;
+  Result := TPath.GetFileNameWithoutExtension(AArtefact.RelativePath);
+  if Result = '' then
+    Result := TPath.GetFileNameWithoutExtension(AArtefact.FilePath);
+end;
+
 function PascalPath(const AArtefact: TArtefactInfo): string;
 begin
   Result := '';
-  if SameText(TPath.GetExtension(AArtefact.FilePath), '.pas') then
+  if IsPascalSourcePath(AArtefact.FilePath) then
     Exit(AArtefact.FilePath);
-  if SameText(TPath.GetExtension(AArtefact.RelativePath), '.pas') then
+  if IsPascalSourcePath(AArtefact.RelativePath) then
     Result := AArtefact.RelativePath;
 end;
 
@@ -272,7 +302,7 @@ var
 begin
   Result := False;
   ANames := nil;
-  if not SameText(AArtefact.ArtefactType, 'unit-evidence') then
+  if UsesGraphUnitName(AArtefact) = '' then
     Exit;
 
   LPath := PascalPath(AArtefact);
@@ -349,7 +379,7 @@ begin
   try
     for I := 0 to AArtefacts.Count - 1 do
     begin
-      LNames[I] := LowerCase(ArtefactUnitName(AArtefacts[I]));
+      LNames[I] := LowerCase(UsesGraphUnitName(AArtefacts[I]));
       if LNames[I] = '' then
         Continue;
       RememberName(LExact, LNames[I], I);
@@ -485,8 +515,7 @@ begin
     end;
 
     for I := 0 to LCount - 1 do
-      if SameText(AArtefacts[I].ArtefactType, 'unit-evidence') and
-        (LInDegree[I] = 0) then
+      if (UsesGraphUnitName(AArtefacts[I]) <> '') and (LInDegree[I] = 0) then
         LAnchor[I] := True;
 
     for I := 0 to LCount - 1 do
@@ -498,8 +527,7 @@ begin
     repeat
       LPromoted := False;
       for I := 0 to LCount - 1 do
-        if SameText(AArtefacts[I].ArtefactType, 'unit-evidence') and
-          not LReached[I] then
+        if (UsesGraphUnitName(AArtefacts[I]) <> '') and not LReached[I] then
         begin
           LAnchor[I] := True;
           ReachFrom(LAdj, LQueue, LReached, I);
@@ -509,8 +537,7 @@ begin
     until not LPromoted;
 
     for I := 0 to LCount - 1 do
-      Result[I] := SameText(AArtefacts[I].ArtefactType, 'unit-evidence') and
-        not LAnchor[I];
+      Result[I] := (UsesGraphUnitName(AArtefacts[I]) <> '') and not LAnchor[I];
   finally
     LQueue.Free;
     for I := 0 to LCount - 1 do

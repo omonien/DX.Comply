@@ -66,6 +66,7 @@ type
     function Spdx3PackageId(const ADoc: TJSONObject; const AName: string): string;
     function Spdx3DependsOn(const ADoc: TJSONObject; const AFrom: string): TJSONObject;
     procedure AddResolvedUnit(const AUnit: TResolvedUnitInfo);
+    procedure AddLibrarySource(const ARelativePath: string);
     procedure AssertJsonChain(AJson: TJSONObject);
   public
     [Setup]
@@ -147,6 +148,13 @@ type
     [Test]
     procedure Spdx3_Chain_DependsOn;
 
+    /// <summary>
+    /// A shipped .pas, .dpr, or .dpk uses the same edges. A form stays on
+    /// the library. Each Pascal file is parsed once.
+    /// </summary>
+    [Test]
+    procedure Json_LibrarySource_WritesUsesEdges;
+
     /// <summary>A manifest library is complete. A matched DCU stays incomplete.</summary>
     [Test]
     procedure Json_ManifestLibrary_IsComplete;
@@ -225,7 +233,7 @@ begin
   LInfo.FilePath := TPath.Combine(FTempDir, ARelativePath);
   LInfo.ArtefactType := AArtefactType;
   LInfo.FileSize := 10;
-  LInfo.Hash := 'aa';
+  LInfo.Hash := StringOfChar('a', 64);
   FArtefacts.Add(LInfo);
 end;
 
@@ -424,9 +432,24 @@ begin
   LInfo.FilePath := AUnit.ResolvedPath;
   LInfo.ArtefactType := 'unit-evidence';
   LInfo.FileSize := 10;
-  LInfo.Hash := 'aa';
+  LInfo.Hash := StringOfChar('a', 64);
   LInfo.UsesCached := AUnit.UsesCached;
   LInfo.UsedUnitNames := Copy(AUnit.UsedUnitNames, 0, Length(AUnit.UsedUnitNames));
+  FArtefacts.Add(LInfo);
+end;
+
+procedure TDependencyGraphTests.AddLibrarySource(const ARelativePath: string);
+var
+  LInfo: TArtefactInfo;
+begin
+  LInfo := Default(TArtefactInfo);
+  LInfo.RelativePath := ARelativePath;
+  LInfo.ComponentName := ARelativePath;
+  LInfo.FilePath := TPath.Combine(FTempDir, ARelativePath);
+  LInfo.ArtefactType := 'file';
+  LInfo.LibrarySourceFile := True;
+  LInfo.FileSize := 10;
+  LInfo.Hash := StringOfChar('a', 64);
   FArtefacts.Add(LInfo);
 end;
 
@@ -908,6 +931,112 @@ begin
     Assert.AreEqual('comp-2', LDepends.Items[0].Value);
   finally
     LJson.Free;
+  end;
+end;
+
+procedure TDependencyGraphTests.Json_LibrarySource_WritesUsesEdges;
+var
+  LJson, LSpdx, LSpdx3, LRel: TJSONObject;
+  LDeps, LDepends, LTo: TJSONArray;
+  LValidator: TSbomValidator;
+  LCheck: TValidationResult;
+  LWriter: ISbomWriter;
+  LText, LDpr, LA, LB, LC: string;
+begin
+  TFile.WriteAllText(TPath.Combine(FTempDir, 'GraphApp.dpr'),
+    'program GraphApp;' + sLineBreak +
+    'uses' + sLineBreak +
+    '  UnitA in ''UnitA.pas'';' + sLineBreak +
+    'begin' + sLineBreak +
+    'end.' + sLineBreak, TEncoding.UTF8);
+  WriteUnit('UnitA', ['UnitB']);
+  WriteUnit('UnitB', ['UnitC']);
+  WriteUnit('UnitC');
+  TFile.WriteAllText(TPath.Combine(FTempDir, 'Notes.dfm'),
+    'object Notes: TForm end' + sLineBreak, TEncoding.UTF8);
+
+  AddLibrarySource('GraphApp.dpr');
+  AddLibrarySource('UnitA.pas');
+  AddLibrarySource('UnitB.pas');
+  AddLibrarySource('UnitC.pas');
+  AddLibrarySource('Notes.dfm');
+  FProjectInfo.ProjectName := 'GraphApp';
+
+  TUsesClauseParser.ResetParseCount;
+  LJson := WriteJson;
+  try
+    LValidator := TSbomValidator.Create;
+    try
+      LCheck := LValidator.ValidateCycloneDxJson(
+        TFile.ReadAllText(FJsonFile, TEncoding.UTF8));
+      Assert.IsTrue(LCheck.IsValid, string.Join(sLineBreak, LCheck.Errors));
+    finally
+      LValidator.Free;
+    end;
+
+    Assert.AreEqual(NativeInt(4), NativeInt(TUsesClauseParser.ParseCount),
+      'each shipped Pascal file is parsed once');
+
+    LDeps := LJson.GetValue('dependencies') as TJSONArray;
+    LDepends := DependsOf(LDeps, 'GraphApp');
+    Assert.AreEqual(NativeInt(2), NativeInt(LDepends.Count),
+      'the library depends on the program and the form');
+    Assert.AreEqual('comp-0', LDepends.Items[0].Value);
+    Assert.AreEqual('comp-4', LDepends.Items[1].Value);
+
+    LDepends := DependsOf(LDeps, 'comp-0');
+    Assert.AreEqual(NativeInt(1), NativeInt(LDepends.Count));
+    Assert.AreEqual('comp-1', LDepends.Items[0].Value, 'GraphApp.dpr depends on UnitA');
+
+    LDepends := DependsOf(LDeps, 'comp-1');
+    Assert.AreEqual(NativeInt(1), NativeInt(LDepends.Count));
+    Assert.AreEqual('comp-2', LDepends.Items[0].Value, 'UnitA depends on UnitB');
+
+    LDepends := DependsOf(LDeps, 'comp-2');
+    Assert.AreEqual(NativeInt(1), NativeInt(LDepends.Count));
+    Assert.AreEqual('comp-3', LDepends.Items[0].Value, 'UnitB depends on UnitC');
+    Assert.IsNull(DependsOf(LDeps, 'comp-3'));
+  finally
+    LJson.Free;
+  end;
+
+  LSpdx := WriteSpdx;
+  try
+    Assert.AreEqual(NativeInt(4), NativeInt(TUsesClauseParser.ParseCount),
+      'SPDX 2.3 reuses the cached uses list');
+    LDpr := PackageId(LSpdx, 'GraphApp.dpr');
+    LA := PackageId(LSpdx, 'UnitA.pas');
+    LB := PackageId(LSpdx, 'UnitB.pas');
+    LC := PackageId(LSpdx, 'UnitC.pas');
+    Assert.AreNotEqual('', LDpr);
+    Assert.AreNotEqual('', LA);
+    Assert.IsTrue(HasRelationship(LSpdx, LDpr, 'DEPENDS_ON', LA));
+    Assert.IsTrue(HasRelationship(LSpdx, LA, 'DEPENDS_ON', LB));
+    Assert.IsTrue(HasRelationship(LSpdx, LB, 'DEPENDS_ON', LC));
+    Assert.IsFalse(HasRelationship(LSpdx, LA, 'DEPENDS_ON', LC),
+      'the chain is not flattened');
+  finally
+    LSpdx.Free;
+  end;
+
+  LWriter := TSpdx3JsonWriter.Create;
+  Assert.IsTrue(LWriter.Write(FSpdxFile, FMetadata, FArtefacts, FProjectInfo));
+  Assert.AreEqual(NativeInt(4), NativeInt(TUsesClauseParser.ParseCount),
+    'SPDX 3.0.1 reuses the cached uses list');
+  LText := TFile.ReadAllText(FSpdxFile, TEncoding.UTF8);
+  LSpdx3 := TJSONObject.ParseJSONValue(LText) as TJSONObject;
+  try
+    Assert.IsNotNull(LSpdx3);
+    LA := Spdx3PackageId(LSpdx3, 'UnitA.pas');
+    LB := Spdx3PackageId(LSpdx3, 'UnitB.pas');
+    LRel := Spdx3DependsOn(LSpdx3, LA);
+    Assert.IsNotNull(LRel, 'UnitA dependsOn UnitB');
+    Assert.AreEqual('complete', LRel.GetValue<string>('completeness'));
+    LTo := LRel.GetValue('to') as TJSONArray;
+    Assert.AreEqual(NativeInt(1), NativeInt(LTo.Count));
+    Assert.AreEqual(LB, LTo.Items[0].Value);
+  finally
+    LSpdx3.Free;
   end;
 end;
 

@@ -62,6 +62,12 @@ dxcomply --library --project=Source\DEC60.dproj --source-dir=Source --version=6.
 
 The file is read with `--ci`. With `library` set in the file, `--project` may be left out when `sourceDirs` is set.
 
+### Uses edges
+
+A shipped `.pas`, `.dpr`, or `.dpk` depends on the units named in its uses clauses, when that file is also in this SBOM. The match is the file name without the extension. A uses B and B uses C writes those two edges. The library depends on the Pascal files that no other file uses, plus every file that is not Pascal source (a form, an include, a resource) and the required packages. `System` and `SysInit` are not edges. A uses name that is not a shipped file is omitted. No component is added for it. A `.dpk` contains clause is not a uses clause, so it does not add those edges. The units' own uses clauses do.
+
+Each of those files is parsed once, and the SBOM write reuses that list. CycloneDX, SPDX 2.3 (`DEPENDS_ON`), and SPDX 3.0.1 (`dependsOn`) write the same edges. Compositions stay the file set described above. They do not say that every uses name was resolved. SPDX 3.0.1 sets `completeness` on the `dependsOn` of each Pascal file from those names.
+
 ### What library mode does not do
 
 It does not compile, read MAP files, or hash binaries. It does not resolve third party units that the library uses from the search path. It does not follow `{$I}` directives or `{$IFDEF}` branches. A customer who builds a product with the library still runs build mode on that product.
