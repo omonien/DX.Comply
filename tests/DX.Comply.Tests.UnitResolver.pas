@@ -193,6 +193,12 @@ type
     /// </summary>
     [Test]
     procedure Resolve_UnmatchedInstallUnit_IsNamedUnknownSupplier;
+    /// <summary>
+    /// The TMS VCL prefixes from issue #176 must not take product units
+    /// off the Embarcadero rows. AdvGrid and GDIPFill stay with TMS.
+    /// </summary>
+    [Test]
+    procedure Resolve_TmsPrefixes_KeepProductUnitsEmbarcadero;
   end;
 
 implementation
@@ -1625,6 +1631,199 @@ begin
     Assert.AreEqual(0, Pos('DECCipher', LWarnings[0]));
     Assert.AreEqual(0, Pos('MyHelper', LWarnings[0]));
     Assert.AreEqual(0, Pos('System.SysUtils', LWarnings[0]));
+  finally
+    LUnits.Free;
+    LArtefacts.Free;
+    if TDirectory.Exists(LTemp) then
+      TDirectory.Delete(LTemp, True);
+  end;
+end;
+
+procedure TUnitResolverTests.Resolve_TmsPrefixes_KeepProductUnitsEmbarcadero;
+const
+  // units_prefix from the TMS VCL UI Pack row in the reduced manifest
+  // attached to issue #176. No units_exclude, no units_folder.
+  cTmsJson =
+    '{"components":[{"name":"TMS VCL UI Pack","version":"13.0",' +
+    '"vendor":"tmssoftware.com","licence":"Commercial","type":"library",' +
+    '"units_prefix":["Adv","Alv","Asg","GDIP","HTML","PictureContainer","RTF","TMS"]}]}';
+var
+  LAdv: TResolvedUnitInfo;
+  LArtefacts: TArtefactList;
+  LClasses: TResolvedUnitInfo;
+  LData: TComplianceReportData;
+  LError: string;
+  LFill: TResolvedUnitInfo;
+  LGdipApi: TResolvedUnitInfo;
+  LGdipDcu: TResolvedUnitInfo;
+  LGdipObj: TResolvedUnitInfo;
+  LGdipUtil: TResolvedUnitInfo;
+  LHelp: TResolvedUnitInfo;
+  i: Integer;
+  LInstall: string;
+  LManifest: TComponentManifest;
+  LOverview: TReportOverview;
+  LProblem: string;
+  LRtlNames: string;
+  LTemp: string;
+  LTmsNames: string;
+  LUnits: TResolvedUnitList;
+  LVclNames: string;
+
+  function PasText(const AUnitName: string): string;
+  begin
+    Result := 'unit ' + AUnitName + ';' + sLineBreak + 'interface' + sLineBreak +
+      'implementation' + sLineBreak + 'end.';
+  end;
+
+  procedure Note(var AText: string; const APiece: string);
+  begin
+    if AText <> '' then
+      AText := AText + ' ';
+    AText := AText + APiece;
+  end;
+
+  function LicenceNames(const AGroup: TLicenceGroup): string;
+  var
+    i: Integer;
+  begin
+    Result := '';
+    for i := 0 to High(AGroup.Components) do
+    begin
+      if Result <> '' then
+        Result := Result + ', ';
+      Result := Result + AGroup.Components[i].Name;
+    end;
+  end;
+
+  function FindLicence(const AGroups: TArray<TLicenceGroup>;
+    const ATitle: string): TLicenceGroup;
+  var
+    i: Integer;
+  begin
+    Result := Default(TLicenceGroup);
+    for i := 0 to High(AGroups) do
+      if SameText(AGroups[i].Title, ATitle) then
+        Exit(AGroups[i]);
+  end;
+
+  function FindSupplier(const AGroups: TArray<TReportGroup>;
+    const ATitle: string): TReportGroup;
+  var
+    i: Integer;
+  begin
+    Result := Default(TReportGroup);
+    for i := 0 to High(AGroups) do
+      if SameText(AGroups[i].Title, ATitle) then
+        Exit(AGroups[i]);
+  end;
+
+begin
+  LTemp := TPath.Combine(TPath.GetTempPath, TPath.GetRandomFileName);
+  LInstall := TPath.Combine(LTemp, 'Delphi');
+  LArtefacts := TArtefactList.Create;
+  LUnits := TResolvedUnitList.Create;
+  try
+    LGdipApi := ResolveInstallFile(FResolver, LInstall,
+      TPath.Combine(LInstall, 'source\rtl\win'), 'Winapi.GDIPAPI',
+      'Winapi.GDIPAPI.pas', PasText('Winapi.GDIPAPI'), False);
+    LGdipObj := ResolveInstallFile(FResolver, LInstall,
+      TPath.Combine(LInstall, 'source\rtl\win'), 'Winapi.GDIPOBJ',
+      'Winapi.GDIPOBJ.pas', PasText('Winapi.GDIPOBJ'), False);
+    LGdipUtil := ResolveInstallFile(FResolver, LInstall,
+      TPath.Combine(LInstall, 'source\rtl\win'), 'Winapi.GDIPUTIL',
+      'Winapi.GDIPUTIL.pas', PasText('Winapi.GDIPUTIL'), False);
+    LGdipDcu := ResolveInstallFile(FResolver, LInstall,
+      TPath.Combine(LInstall, 'lib\Win32\release'), 'Winapi.GDIPAPI',
+      'Winapi.GDIPAPI.dcu', '', True);
+    LHelp := ResolveInstallFile(FResolver, LInstall,
+      TPath.Combine(LInstall, 'source\vcl'), 'Vcl.HtmlHelpViewer',
+      'Vcl.HtmlHelpViewer.pas', PasText('Vcl.HtmlHelpViewer'), False);
+    LClasses := ResolveInstallFile(FResolver, LInstall,
+      TPath.Combine(LInstall, 'source\rtl\sys'), 'System.Classes',
+      'System.Classes.pas', PasText('System.Classes'), False);
+    LAdv := ResolveInstallFile(FResolver, LInstall,
+      TPath.Combine(LInstall, 'CatalogRepository\tms'), 'AdvGrid',
+      'AdvGrid.pas', PasText('AdvGrid'), False);
+    LFill := ResolveInstallFile(FResolver, LInstall,
+      TPath.Combine(LInstall, 'CatalogRepository\tms'), 'GDIPFill',
+      'GDIPFill.pas', PasText('GDIPFill'), False);
+
+    Assert.AreEqual(uokEmbarcaderoRtl, LGdipApi.OriginKind,
+      'Winapi.GDIPAPI under source\rtl is Embarcadero RTL before the manifest');
+    Assert.AreEqual(uokEmbarcaderoRtl, LGdipObj.OriginKind);
+    Assert.AreEqual(uokEmbarcaderoRtl, LGdipUtil.OriginKind);
+    Assert.AreEqual(uokEmbarcaderoRtl, LGdipDcu.OriginKind,
+      'A scoped GDI+ DCU in lib\Win32\release is Embarcadero RTL');
+    Assert.AreEqual(uokEmbarcaderoVcl, LHelp.OriginKind,
+      'Vcl.HtmlHelpViewer under source\vcl is Embarcadero VCL');
+    Assert.AreEqual(uokEmbarcaderoRtl, LClasses.OriginKind);
+    Assert.AreEqual(uokThirdParty, LAdv.OriginKind,
+      'AdvGrid under CatalogRepository is third party');
+    Assert.AreEqual(uokThirdParty, LFill.OriginKind,
+      'GDIPFill under CatalogRepository is third party');
+
+    Assert.IsTrue(TryParseComponentManifest(cTmsJson, '', LManifest, LError), LError);
+    Assert.AreEqual(0, MatchManifestUnit(LManifest, 'AdvGrid').ComponentIndex,
+      'AdvGrid matches the TMS prefix Adv');
+    Assert.AreEqual(0, MatchManifestUnit(LManifest, 'GDIPFill').ComponentIndex,
+      'GDIPFill matches the TMS prefix GDIP on the full unit name');
+    Assert.AreEqual(NativeInt(Ord(mmNone)),
+      NativeInt(Ord(MatchManifestUnit(LManifest, 'System.Classes').Kind)),
+      'System.Classes does not match the TMS prefixes');
+
+    LUnits.Add(LGdipApi);
+    LUnits.Add(LGdipObj);
+    LUnits.Add(LGdipUtil);
+    LUnits.Add(LGdipDcu);
+    LUnits.Add(LHelp);
+    LUnits.Add(LClasses);
+    LUnits.Add(LAdv);
+    LUnits.Add(LFill);
+    ApplyManifestOverInstallOrigin(LManifest, LInstall, LUnits);
+
+    LData := Default(TComplianceReportData);
+    LData.Metadata.ProductName := 'Demo';
+    LData.Metadata.ComponentManifestJson := cTmsJson;
+    for i := 0 to LUnits.Count - 1 do
+      LArtefacts.Add(ArtefactFromResolved(LUnits[i]));
+    LData.Artefacts := LArtefacts;
+    LOverview := BuildReportOverview(LData);
+
+    LRtlNames := LicenceNames(FindLicence(LOverview.Licences, 'Embarcadero RTL'));
+    LVclNames := LicenceNames(FindLicence(LOverview.Licences, 'Embarcadero VCL'));
+    LTmsNames := FindSupplier(LOverview.Suppliers, 'tmssoftware.com').NamesText;
+    Assert.IsTrue(Pos('System.Classes', LRtlNames) > 0, LRtlNames);
+    Assert.IsTrue(Pos('AdvGrid', LTmsNames) > 0, LTmsNames);
+    Assert.IsTrue(Pos('GDIPFill', LTmsNames) > 0, LTmsNames);
+    Assert.AreEqual('TMS VCL UI Pack',
+      FindLicence(LOverview.Licences, 'Commercial').Components[0].Name);
+
+    LProblem := '';
+    if LUnits[0].OriginKind <> uokEmbarcaderoRtl then
+      Note(LProblem, 'Winapi.GDIPAPI origin is ' + UnitOriginKindToString(LUnits[0].OriginKind) + '.');
+    if LUnits[1].OriginKind <> uokEmbarcaderoRtl then
+      Note(LProblem, 'Winapi.GDIPOBJ origin is ' + UnitOriginKindToString(LUnits[1].OriginKind) + '.');
+    if LUnits[2].OriginKind <> uokEmbarcaderoRtl then
+      Note(LProblem, 'Winapi.GDIPUTIL origin is ' + UnitOriginKindToString(LUnits[2].OriginKind) + '.');
+    if LUnits[3].OriginKind <> uokEmbarcaderoRtl then
+      Note(LProblem, 'Winapi.GDIPAPI.dcu origin is ' + UnitOriginKindToString(LUnits[3].OriginKind) + '.');
+    if LUnits[4].OriginKind <> uokEmbarcaderoVcl then
+      Note(LProblem, 'Vcl.HtmlHelpViewer origin is ' + UnitOriginKindToString(LUnits[4].OriginKind) + '.');
+    if Pos('Winapi.GDIPAPI', LRtlNames) = 0 then
+      Note(LProblem, 'Winapi.GDIPAPI is missing from the Embarcadero RTL licence rows.');
+    if Pos('Winapi.GDIPOBJ', LRtlNames) = 0 then
+      Note(LProblem, 'Winapi.GDIPOBJ is missing from the Embarcadero RTL licence rows.');
+    if Pos('Winapi.GDIPUTIL', LRtlNames) = 0 then
+      Note(LProblem, 'Winapi.GDIPUTIL is missing from the Embarcadero RTL licence rows.');
+    if Pos('Vcl.HtmlHelpViewer', LVclNames) = 0 then
+      Note(LProblem, 'Vcl.HtmlHelpViewer is missing from the Embarcadero VCL licence rows.');
+    if Pos('Winapi.GDIPAPI', LTmsNames) > 0 then
+      Note(LProblem, 'Supplier tmssoftware.com lists Winapi.GDIPAPI.');
+    if Pos('Vcl.HtmlHelpViewer', LTmsNames) > 0 then
+      Note(LProblem, 'Supplier tmssoftware.com lists Vcl.HtmlHelpViewer.');
+    Assert.AreEqual('', LProblem,
+      'GDIP and HTML must not claim product units after the Delphi scope is removed');
   finally
     LUnits.Free;
     LArtefacts.Free;

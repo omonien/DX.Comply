@@ -95,6 +95,13 @@ type
     [Test]
     procedure Suppliers_OwnCodeOutsideProject_IsNamedWhenUnknown;
     /// <summary>
+    /// Every vendor of a library in the licence table is listed in the
+    /// supplier table. Units that live in the project tree are still that
+    /// library. Issue #176, the reduced manifest from 13 Nov 2026.
+    /// </summary>
+    [Test]
+    procedure Suppliers_ListsEveryLicenceVendor_IncludingLocalProject;
+    /// <summary>
     /// Unknown supplier lines group by prefix and shorten long lists the
     /// same way as the console warnings.
     /// </summary>
@@ -769,6 +776,111 @@ begin
   LOverview := BuildReportOverview(FData);
   Assert.AreEqual('4.5.6', VersionOf(LOverview, 'libWernigApp.so'),
     'An empty header version falls back to the project version');
+end;
+
+procedure TReportOverviewTests.Suppliers_ListsEveryLicenceVendor_IncludingLocalProject;
+const
+  // The eight libraries above the Embarcadero block in the licence table
+  // from issue #176, plus Delphi Console. Folder paths are absolute, the
+  // same form the report stores after the components file is loaded.
+  // TMS is matched by the prefixes from that manifest, not by a folder.
+  cJson = '{"components":[' +
+    '{"name":"Delphi Event Bus","version":"2.1","vendor":"Daniele Spinetti",' +
+    '"licence":"Apache-2.0","type":"library","units_folder":["C:/DXComplyIssue176/delphi-event-bus"]},' +
+    '{"name":"Logger Pro","version":"2.1.2","vendor":"Daniele Teti",' +
+    '"licence":"Apache-2.0","type":"library","units_folder":["C:/DXComplyIssue176/LoggerPro"]},' +
+    '{"name":"SVG Icon Image List","version":"4.8.1","vendor":"Ethea S.r.l. and others",' +
+    '"licence":"Apache-2.0","type":"library","units_folder":["C:/DXComplyIssue176/SVGIconImageList"]},' +
+    '{"name":"VSoft Command Line Parser","version":"0.1.9","vendor":"Vincent Parrett",' +
+    '"licence":"Apache-2.0","type":"library","units_folder":["C:/DXComplyIssue176/VSoft.CommandLineParser"]},' +
+    '{"name":"Neslib base library","version":"1.0","vendor":"Erik van Bilsen",' +
+    '"licence":"BSD-2-Clause","type":"library","units_folder":["C:/DXComplyIssue176/Neslib"]},' +
+    '{"name":"Neslib XML","version":"1.0","vendor":"Erik van Bilsen",' +
+    '"licence":"BSD-2-Clause","type":"library","units_folder":["C:/DXComplyIssue176/Neslib.Xml"]},' +
+    '{"name":"Eurekalog","version":"6","vendor":"Neos Eureka S.r.l",' +
+    '"licence":"Commercial","type":"library","units_folder":["C:/DXComplyIssue176/Eurekalog6"]},' +
+    '{"name":"Delphi Console","version":"0","vendor":"Jens Borrisholt",' +
+    '"licence":"MIT","type":"library","units_folder":["C:/DXComplyIssue176/DelphiConsole"]},' +
+    '{"name":"TMS VCL UI Pack","version":"13.0","vendor":"tmssoftware.com",' +
+    '"licence":"Commercial","type":"library",' +
+    '"units_prefix":["Adv","Alv","Asg","GDIP","HTML","PictureContainer","RTF","TMS"]}]}';
+  cLocalVendors: array[0..5] of string = (
+    'Daniele Spinetti', 'Daniele Teti', 'Ethea S.r.l. and others',
+    'Vincent Parrett', 'Erik van Bilsen', 'Neos Eureka S.r.l');
+var
+  LApache: TLicenceGroup;
+  LBsd: TLicenceGroup;
+  LCommercial: TLicenceGroup;
+  LItem: TArtefactInfo;
+  LMit: TLicenceGroup;
+  LMissing: string;
+  LOverview: TReportOverview;
+  LVendor: string;
+
+  procedure AddAt(const AUnitName, AOrigin, ASourcePath: string);
+  begin
+    AddUnit(AUnitName, AOrigin);
+    LItem := FArtefacts[FArtefacts.Count - 1];
+    LItem.UnitName := AUnitName;
+    LItem.SourcePath := ASourcePath;
+    FArtefacts[FArtefacts.Count - 1] := LItem;
+  end;
+
+begin
+  FData.Metadata.ComponentManifestJson := cJson;
+  // Checked into the project tree: the manifest folder matches, and the
+  // resolver records Local project. These are the libraries in the licence
+  // table whose vendors are missing from the supplier list.
+  AddAt('EventBus', 'Local project',
+    'C:\DXComplyIssue176\delphi-event-bus\EventBus.pas');
+  AddAt('LoggerPro', 'Local project',
+    'C:\DXComplyIssue176\LoggerPro\LoggerPro.pas');
+  AddAt('SvgIconImageList', 'Local project',
+    'C:\DXComplyIssue176\SVGIconImageList\SvgIconImageList.pas');
+  AddAt('VSoft.CommandLine.Parser', 'Local project',
+    'C:\DXComplyIssue176\VSoft.CommandLineParser\VSoft.CommandLine.Parser.pas');
+  AddAt('Neslib.Collections', 'Local project',
+    'C:\DXComplyIssue176\Neslib\Neslib.Collections.pas');
+  AddAt('Neslib.Xml', 'Local project',
+    'C:\DXComplyIssue176\Neslib.Xml\Neslib.Xml.pas');
+  AddAt('ExceptionLog7', 'Local project',
+    'C:\DXComplyIssue176\Eurekalog6\ExceptionLog7.pas');
+  // Outside the project: one Delphi Console unit, and one TMS unit.
+  AddAt('Delphi.Console', 'Third party',
+    'C:\DXComplyIssue176\DelphiConsole\Delphi.Console.pas');
+  AddUnit('AdvGrid', 'Third party');
+
+  LOverview := BuildReportOverview(FData);
+  LApache := FindLicence(LOverview.Licences, 'Apache-2.0');
+  LBsd := FindLicence(LOverview.Licences, 'BSD-2-Clause');
+  LCommercial := FindLicence(LOverview.Licences, 'Commercial');
+  LMit := FindLicence(LOverview.Licences, 'MIT');
+  Assert.IsTrue(Pos('Delphi Event Bus', LicenceNames(LApache)) > 0, LicenceNames(LApache));
+  Assert.IsTrue(Pos('Logger Pro', LicenceNames(LApache)) > 0, LicenceNames(LApache));
+  Assert.IsTrue(Pos('SVG Icon Image List', LicenceNames(LApache)) > 0, LicenceNames(LApache));
+  Assert.IsTrue(Pos('VSoft Command Line Parser', LicenceNames(LApache)) > 0, LicenceNames(LApache));
+  Assert.IsTrue(Pos('Neslib base library', LicenceNames(LBsd)) > 0, LicenceNames(LBsd));
+  Assert.IsTrue(Pos('Neslib XML', LicenceNames(LBsd)) > 0, LicenceNames(LBsd));
+  Assert.IsTrue(Pos('Eurekalog', LicenceNames(LCommercial)) > 0, LicenceNames(LCommercial));
+  Assert.IsTrue(Pos('TMS VCL UI Pack', LicenceNames(LCommercial)) > 0, LicenceNames(LCommercial));
+  Assert.IsTrue(Pos('Delphi Console', LicenceNames(LMit)) > 0, LicenceNames(LMit));
+
+  // These two already show up, because their units are Third party.
+  Assert.AreEqual(1, FindGroup(LOverview.Suppliers, 'Jens Borrisholt').Count);
+  Assert.AreEqual('Delphi.Console', FindGroup(LOverview.Suppliers, 'Jens Borrisholt').NamesText);
+  Assert.AreEqual(1, FindGroup(LOverview.Suppliers, 'tmssoftware.com').Count);
+  Assert.AreEqual('AdvGrid', FindGroup(LOverview.Suppliers, 'tmssoftware.com').NamesText);
+
+  LMissing := '';
+  for LVendor in cLocalVendors do
+    if FindGroup(LOverview.Suppliers, LVendor).Count = 0 then
+    begin
+      if LMissing <> '' then
+        LMissing := LMissing + ', ';
+      LMissing := LMissing + LVendor;
+    end;
+  Assert.AreEqual('', LMissing,
+    'The supplier table must list every vendor from the licence table');
 end;
 
 procedure TReportOverviewTests.WithoutManifestLine_OmittedWhenNoneMissing;
