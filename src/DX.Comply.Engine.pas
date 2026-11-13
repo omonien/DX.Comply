@@ -3422,6 +3422,11 @@ begin
 
     DoProgress('Resolving composition evidence...', 28);
     LCompositionEvidence := ResolveCompositionEvidence(LProjectInfo, LBuildEvidence);
+    // A manifest row names the library even when the file sits in the
+    // Delphi install. Product units with no row keep the resolver origin.
+    if LManifest.Loaded then
+      ApplyManifestOverInstallOrigin(LManifest, LProjectInfo.Toolchain.RootDir,
+        LCompositionEvidence.Units);
     DoProgress(Format('Resolved %d composition unit(s)',
       [LCompositionEvidence.Units.Count]), 29);
     ReportWarnings(LCompositionEvidence.Warnings, LReportedWarnings, 29);
