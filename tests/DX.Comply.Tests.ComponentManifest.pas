@@ -2443,17 +2443,19 @@ var
   LComponents: TJSONArray;
   LValidator: TSbomValidator;
   LWarned: Boolean;
-
-  procedure CaptureProgress(const AMessage: string; const AProgress: Integer);
-  begin
-    LMessages.Add(AMessage);
-  end;
-
+  LCapture: TProgressEvent;
 begin
   LDir := TPath.Combine(TPath.GetTempPath, 'dxc-cpe-' + TGUID.NewGuid.ToString);
   TDirectory.CreateDirectory(LDir);
   LMessages := TList<string>.Create;
   try
+    // OnProgress is a method reference. A nested procedure that uses
+    // LMessages cannot be captured (E2555). An anonymous method can.
+    LCapture :=
+      procedure(const AMessage: string; const AProgress: Integer)
+      begin
+        LMessages.Add(AMessage);
+      end;
     TFile.WriteAllText(TPath.Combine(LDir, 'OpenSsl.pas'),
       'unit OpenSsl;' + sLineBreak + 'interface' + sLineBreak +
       'implementation' + sLineBreak + 'end.' + sLineBreak, TEncoding.UTF8);
@@ -2483,7 +2485,7 @@ begin
     LOutput := TPath.Combine(LDir, 'lib.cdx.json');
     LGenerator := TDxComplyGenerator.Create(LConfig);
     try
-      LGenerator.OnProgress := CaptureProgress;
+      LGenerator.OnProgress := LCapture;
       Assert.IsTrue(LGenerator.Generate('', LOutput, sfCycloneDxJson),
         string.Join(sLineBreak, LMessages.ToArray));
     finally
@@ -2527,7 +2529,7 @@ begin
     LOutput := TPath.Combine(LDir, 'lib.spdx.json');
     LGenerator := TDxComplyGenerator.Create(LConfig);
     try
-      LGenerator.OnProgress := CaptureProgress;
+      LGenerator.OnProgress := LCapture;
       Assert.IsTrue(LGenerator.Generate('', LOutput, sfSpdxJson),
         string.Join(sLineBreak, LMessages.ToArray));
     finally
@@ -2560,7 +2562,7 @@ begin
     LOutput := TPath.Combine(LDir, 'lib.spdx3.json');
     LGenerator := TDxComplyGenerator.Create(LConfig);
     try
-      LGenerator.OnProgress := CaptureProgress;
+      LGenerator.OnProgress := LCapture;
       Assert.IsTrue(LGenerator.Generate('', LOutput, sfSpdx3Json),
         string.Join(sLineBreak, LMessages.ToArray));
     finally
