@@ -7,7 +7,7 @@
 /// This unit provides TCycloneDxJsonWriter which generates CycloneDX 1.6 JSON SBOMs:
 /// - Full metadata section with tool information
 /// - Component list with hashes (SHA-256 and SHA-512 when the file could be opened)
-/// - Dependency graph grouped by deliverable, runtime packages, external DLLs and linked units
+/// - Dependency graph grouped by deliverable, runtime packages, external DLLs and units no other unit uses
 /// - Direct uses edges between units whose Pascal source was read
 /// - Schema validation support
 ///
@@ -449,6 +449,7 @@ var
   LDependencies: TJSONArray;
   LOutput: TStringList;
   LGraph: TUsesDependencyGraph;
+  LCovered: TArray<Boolean>;
   I: Integer;
   LRootIndex: Integer;
   LManifest: TComponentManifest;
@@ -482,8 +483,10 @@ begin
     LRoot.AddPair('metadata', LMetadataObj);
 
     // Uses edges are built once. Component properties and compositions share
-    // that result, so an uncached .pas is not parsed twice.
+    // that result, so an uncached .pas is not parsed twice. Covered units
+    // are reached through a uses edge and leave the program's list.
     LGraph := BuildUsesDependencyGraph(AArtefacts);
+    LCovered := UnitsCoveredByUsesEdges(AArtefacts, LGraph);
 
     // Components
     LComponents := TJSONArray.Create;
@@ -517,6 +520,11 @@ begin
     if AMetadata.ComponentManifestJson <> '' then
       ApplyManifestCycloneDxJson(AMetadata.ComponentManifestJson, AArtefacts,
         LComponents, LDependencies, AProjectInfo.ProjectName);
+    // After the manifest rewrite, so a matched unit is still replaced by
+    // its library. A unit another unit uses then drops off the program.
+    RemoveCoveredUnits(LDependencies, AProjectInfo.ProjectName, LCovered);
+    if LRootIndex >= 0 then
+      RemoveCoveredUnits(LDependencies, 'comp-' + IntToStr(LRootIndex), LCovered);
     AppendUsesDependenciesJson(LDependencies, LGraph);
     LRoot.AddPair('dependencies', LDependencies);
 

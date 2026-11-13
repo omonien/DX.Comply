@@ -7,7 +7,7 @@
 /// This unit provides TCycloneDxXmlWriter which generates CycloneDX 1.6 XML SBOMs:
 /// - Full metadata section with tool information
 /// - Component list with hashes (SHA-256 and SHA-512 when the file could be opened)
-/// - Dependency graph grouped by deliverable, runtime packages, external DLLs and linked units
+/// - Dependency graph grouped by deliverable, runtime packages, external DLLs and units no other unit uses
 /// - Direct uses edges between units whose Pascal source was read
 /// - Schema validation support
 ///
@@ -71,7 +71,8 @@ type
       const AGraph: TUsesDependencyGraph; const AProjectName, AOutputFilePath,
       AProjectVersion: string);
     procedure BuildDependencies(const AArtefacts: TArtefactList;
-      const AProjectBomRef, AOutputFilePath: string; const AGraph: TUsesDependencyGraph);
+      const AProjectBomRef, AOutputFilePath: string; const AGraph: TUsesDependencyGraph;
+      const ACovered: TArray<Boolean>);
   public
     function Write(const AOutputPath: string;
       const AMetadata: TSbomMetadata;
@@ -431,14 +432,17 @@ begin
 end;
 
 procedure TCycloneDxXmlWriter.BuildDependencies(const AArtefacts: TArtefactList;
-  const AProjectBomRef, AOutputFilePath: string; const AGraph: TUsesDependencyGraph);
+  const AProjectBomRef, AOutputFilePath: string; const AGraph: TUsesDependencyGraph;
+  const ACovered: TArray<Boolean>);
 var
   I: Integer;
   LGroup: Integer;
   LTargetIndex: Integer;
+  LChildCount: Integer;
 begin
   // Same shape as the JSON writer: project -> deliverable, and the
-  // deliverable depends on runtime packages, external DLLs and linked units.
+  // deliverable depends on runtime packages, external DLLs, and the units
+  // that no other unit uses. Category order is unchanged.
   OpenTag('dependencies');
   LTargetIndex := FindDeliverableTargetIndex(AArtefacts, AProjectBomRef,
     AOutputFilePath);
@@ -448,18 +452,30 @@ begin
     AddLine('<dependency ref="comp-' + IntToStr(LTargetIndex) + '"/>')
   else if Assigned(AArtefacts) then
     for I := 0 to AArtefacts.Count - 1 do
-      AddLine('<dependency ref="comp-' + IntToStr(I) + '"/>');
+      if not IsCoveredUnit(ACovered, I) then
+        AddLine('<dependency ref="comp-' + IntToStr(I) + '"/>');
   CloseTag('dependency');
 
   if (LTargetIndex >= 0) and Assigned(AArtefacts) and (AArtefacts.Count > 1) then
   begin
-    OpenTag('dependency', 'ref="comp-' + IntToStr(LTargetIndex) + '"');
+    LChildCount := 0;
     for LGroup := 0 to 3 do
       for I := 0 to AArtefacts.Count - 1 do
         if (I <> LTargetIndex) and
-           (ArtefactDependencyGroup(AArtefacts[I]) = LGroup) then
-          AddLine('<dependency ref="comp-' + IntToStr(I) + '"/>');
-    CloseTag('dependency');
+           (ArtefactDependencyGroup(AArtefacts[I]) = LGroup) and
+           not IsCoveredUnit(ACovered, I) then
+          Inc(LChildCount);
+    if LChildCount > 0 then
+    begin
+      OpenTag('dependency', 'ref="comp-' + IntToStr(LTargetIndex) + '"');
+      for LGroup := 0 to 3 do
+        for I := 0 to AArtefacts.Count - 1 do
+          if (I <> LTargetIndex) and
+             (ArtefactDependencyGroup(AArtefacts[I]) = LGroup) and
+             not IsCoveredUnit(ACovered, I) then
+            AddLine('<dependency ref="comp-' + IntToStr(I) + '"/>');
+      CloseTag('dependency');
+    end;
   end;
 
   // FIndentLevel is the child level of <dependencies>. The helper indents
@@ -475,6 +491,7 @@ function TCycloneDxXmlWriter.Write(const AOutputPath: string;
 var
   LOutputDir: string;
   LGraph: TUsesDependencyGraph;
+  LCovered: TArray<Boolean>;
   LLibraries, LIncomplete, LComplete: TArray<string>;
   LGroups: TArray<TLibraryCompositionGroup>;
   LGroup: TLibraryCompositionGroup;
@@ -500,16 +517,17 @@ begin
       GenerateUuid + '"');
 
     LGraph := BuildUsesDependencyGraph(AArtefacts);
+    LCovered := UnitsCoveredByUsesEdges(AArtefacts, LGraph);
     BuildMetadata(AMetadata, AProjectInfo);
     BuildComponents(AArtefacts, AMetadata, LGraph, AProjectInfo.ProjectName,
       AProjectInfo.OutputFilePath, AProjectInfo.Version);
     if AMetadata.ComponentManifestJson <> '' then
       AppendManifestDependenciesXml(FLines, AMetadata.ComponentManifestJson,
-        AArtefacts, AProjectInfo.ProjectName, FIndentLevel, LGraph,
+        AArtefacts, AProjectInfo.ProjectName, FIndentLevel, LGraph, LCovered,
         AProjectInfo.OutputFilePath)
     else
       BuildDependencies(AArtefacts, AProjectInfo.ProjectName,
-        AProjectInfo.OutputFilePath, LGraph);
+        AProjectInfo.OutputFilePath, LGraph, LCovered);
 
     if AMetadata.LibraryCompositions then
     begin

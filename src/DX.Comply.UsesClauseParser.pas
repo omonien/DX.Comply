@@ -1,4 +1,4 @@
-/// <summary>
+﻿/// <summary>
 /// DX.Comply.UsesClauseParser
 /// Recursive uses-clause parser for transitive dependency discovery.
 /// </summary>
@@ -33,6 +33,8 @@ type
   /// Handles interface uses, implementation uses, and program/library uses.
   /// </summary>
   TUsesClauseParser = class
+  private
+    class var FParseCount: Integer;
   public
     /// <summary>
     /// Strips all comments, compiler directives, and string literals from
@@ -42,9 +44,19 @@ type
     class function StripCommentsAndStrings(const AContent: string): string;
     /// <summary>
     /// Extracts unit names from all uses clauses in the given source content.
-    /// Returns a deduplicated array of unit names.
+    /// Returns a deduplicated array of unit names. Each call increments
+    /// ParseCount, including a source that has no uses clause.
     /// </summary>
     class function ExtractUsedUnits(const AContent: string): TArray<string>;
+    /// <summary>
+    /// Sets ParseCount back to zero. Tests use this to check that one source
+    /// file is parsed once.
+    /// </summary>
+    class procedure ResetParseCount;
+    /// <summary>
+    /// How many times ExtractUsedUnits has been called since the last reset.
+    /// </summary>
+    class function ParseCount: Integer;
   end;
 
   /// <summary>
@@ -57,21 +69,30 @@ type
       const ASearchPaths, AGlobalSearchPaths, AUnitScopeNames: TList<string>): string;
     class function TryFindPasFile(const AFileName: string;
       const ASearchPaths: TList<string>): string;
-    class function ReadSourceFile(const AFilePath: string): string;
+    class function TryReadSourceFile(const AFilePath: string; out AContent: string): Boolean;
+    /// <summary>
+    /// Uses names for one .pas. AUsesCache stores them by full path so a
+    /// later reader does not parse the file again. A nil cache still parses.
+    /// </summary>
+    class function ReadCachedUses(const ASourcePath: string;
+      const AUsesCache: TDictionary<string, TArray<string>>): TArray<string>;
     class procedure WalkRecursive(const AUnitName, ASourcePath: string;
       const ASearchPaths, AGlobalSearchPaths, AUnitScopeNames: TList<string>;
       const AVisited: TDictionary<string, string>;
+      const AUsesCache: TDictionary<string, TArray<string>>;
       ACurrentDepth, AMaxDepth: Integer);
   public
     /// <summary>
     /// Recursively discovers all transitively referenced units starting from
     /// the given root source file. Returns a flat list of discovered unit names.
     /// Units with no .pas source (DCU-only) are included but recursion stops
-    /// on that branch.
+    /// on that branch. When AUsesCache is set, each .pas is parsed once and
+    /// the uses names are stored there.
     /// </summary>
     class function WalkDependencies(const ARootSourcePath: string;
       const ASearchPaths, AGlobalSearchPaths, AUnitScopeNames: TList<string>;
-      AMaxDepth: Integer = 100): TArray<string>;
+      AMaxDepth: Integer = 100;
+      const AUsesCache: TDictionary<string, TArray<string>> = nil): TArray<string>;
   end;
 
 implementation
@@ -198,6 +219,16 @@ begin
   end;
 end;
 
+class procedure TUsesClauseParser.ResetParseCount;
+begin
+  FParseCount := 0;
+end;
+
+class function TUsesClauseParser.ParseCount: Integer;
+begin
+  Result := FParseCount;
+end;
+
 class function TUsesClauseParser.ExtractUsedUnits(const AContent: string): TArray<string>;
 var
   LStripped: string;
@@ -208,6 +239,7 @@ var
   LNames: TList<string>;
   LSpacePos: Integer;
 begin
+  Inc(FParseCount);
   Result := nil;
   if AContent = '' then
     Exit;
@@ -264,11 +296,13 @@ end;
 
 { TUsesClauseWalker }
 
-class function TUsesClauseWalker.ReadSourceFile(const AFilePath: string): string;
+class function TUsesClauseWalker.TryReadSourceFile(const AFilePath: string;
+  out AContent: string): Boolean;
 var
   LLines: TStringList;
 begin
-  Result := '';
+  Result := False;
+  AContent := '';
   if not TFile.Exists(AFilePath) then
     Exit;
 
@@ -283,10 +317,33 @@ begin
         Exit;
       end;
     end;
-    Result := LLines.Text;
+    AContent := LLines.Text;
+    Result := True;
   finally
     LLines.Free;
   end;
+end;
+
+class function TUsesClauseWalker.ReadCachedUses(const ASourcePath: string;
+  const AUsesCache: TDictionary<string, TArray<string>>): TArray<string>;
+var
+  LKey: string;
+  LContent: string;
+begin
+  Result := nil;
+  if ASourcePath = '' then
+    Exit;
+
+  LKey := LowerCase(TPath.GetFullPath(ASourcePath));
+  if Assigned(AUsesCache) and AUsesCache.TryGetValue(LKey, Result) then
+    Exit;
+
+  if not TryReadSourceFile(ASourcePath, LContent) then
+    Exit;
+
+  Result := TUsesClauseParser.ExtractUsedUnits(LContent);
+  if Assigned(AUsesCache) then
+    AUsesCache.AddOrSetValue(LKey, Result);
 end;
 
 class function TUsesClauseWalker.TryFindPasFile(const AFileName: string;
@@ -376,9 +433,9 @@ end;
 class procedure TUsesClauseWalker.WalkRecursive(const AUnitName, ASourcePath: string;
   const ASearchPaths, AGlobalSearchPaths, AUnitScopeNames: TList<string>;
   const AVisited: TDictionary<string, string>;
+  const AUsesCache: TDictionary<string, TArray<string>>;
   ACurrentDepth, AMaxDepth: Integer);
 var
-  LContent: string;
   LUsedUnits: TArray<string>;
   LUsedUnit, LResolvedPath, LLowerName: string;
 begin
@@ -394,18 +451,14 @@ begin
 
   if ASourcePath = '' then
   begin
-    // No .pas source available — record unit name but stop recursion
+    // No .pas source available. Record the unit name and stop this branch.
     AVisited.AddOrSetValue(LLowerName, '');
     Exit;
   end;
 
   AVisited.AddOrSetValue(LLowerName, ASourcePath);
 
-  LContent := ReadSourceFile(ASourcePath);
-  if LContent = '' then
-    Exit;
-
-  LUsedUnits := TUsesClauseParser.ExtractUsedUnits(LContent);
+  LUsedUnits := ReadCachedUses(ASourcePath, AUsesCache);
   for LUsedUnit in LUsedUnits do
   begin
     if AVisited.ContainsKey(LowerCase(LUsedUnit)) then
@@ -414,16 +467,16 @@ begin
     LResolvedPath := ResolveUnitSourcePath(LUsedUnit, ASearchPaths,
       AGlobalSearchPaths, AUnitScopeNames);
     WalkRecursive(LUsedUnit, LResolvedPath, ASearchPaths, AGlobalSearchPaths,
-      AUnitScopeNames, AVisited, ACurrentDepth + 1, AMaxDepth);
+      AUnitScopeNames, AVisited, AUsesCache, ACurrentDepth + 1, AMaxDepth);
   end;
 end;
 
 class function TUsesClauseWalker.WalkDependencies(const ARootSourcePath: string;
   const ASearchPaths, AGlobalSearchPaths, AUnitScopeNames: TList<string>;
-  AMaxDepth: Integer): TArray<string>;
+  AMaxDepth: Integer;
+  const AUsesCache: TDictionary<string, TArray<string>>): TArray<string>;
 var
   LVisited: TDictionary<string, string>;
-  LContent: string;
   LUsedUnits: TArray<string>;
   LUsedUnit, LResolvedPath: string;
   LKey: string;
@@ -434,17 +487,13 @@ begin
 
   LVisited := TDictionary<string, string>.Create;
   try
-    LContent := ReadSourceFile(ARootSourcePath);
-    if LContent = '' then
-      Exit;
-
-    LUsedUnits := TUsesClauseParser.ExtractUsedUnits(LContent);
+    LUsedUnits := ReadCachedUses(ARootSourcePath, AUsesCache);
     for LUsedUnit in LUsedUnits do
     begin
       LResolvedPath := ResolveUnitSourcePath(LUsedUnit, ASearchPaths,
         AGlobalSearchPaths, AUnitScopeNames);
       WalkRecursive(LUsedUnit, LResolvedPath, ASearchPaths, AGlobalSearchPaths,
-        AUnitScopeNames, LVisited, 1, AMaxDepth);
+        AUnitScopeNames, LVisited, AUsesCache, 1, AMaxDepth);
     end;
 
     SetLength(Result, LVisited.Count);

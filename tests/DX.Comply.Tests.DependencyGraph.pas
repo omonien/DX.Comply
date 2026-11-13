@@ -23,11 +23,16 @@ uses
   System.Generics.Collections,
   System.JSON,
   DUnitX.TestFramework,
+  DX.Comply.BuildEvidence.Intf,
   DX.Comply.CycloneDx.Writer,
   DX.Comply.CycloneDx.XmlWriter,
   DX.Comply.DependencyGraph,
   DX.Comply.Engine.Intf,
-  DX.Comply.Spdx.Writer;
+  DX.Comply.Schema.Validator,
+  DX.Comply.Spdx.Writer,
+  DX.Comply.Spdx3.Writer,
+  DX.Comply.UnitResolver,
+  DX.Comply.UsesClauseParser;
 
 type
   /// <summary>
@@ -57,15 +62,29 @@ type
     function HasRelationship(AJson: TJSONObject; const AFrom, AKind, ATo: string): Boolean;
     function XmlDependencyBody(const AContent, ARef: string): string;
     function PropertyValue(AProperties: TJSONArray; const AName: string): string;
+    function Spdx3Elements(const ADoc: TJSONObject; const AType: string): TArray<TJSONObject>;
+    function Spdx3PackageId(const ADoc: TJSONObject; const AName: string): string;
+    function Spdx3DependsOn(const ADoc: TJSONObject; const AFrom: string): TJSONObject;
+    procedure AddResolvedUnit(const AUnit: TResolvedUnitInfo);
+    procedure AddLibrarySource(const ARelativePath: string);
+    procedure AssertJsonChain(AJson: TJSONObject);
   public
     [Setup]
     procedure Setup;
     [TearDown]
     procedure TearDown;
 
-    /// <summary>A uses B and B uses C. The root depends on the program, not on C directly.</summary>
+    /// <summary>A uses B and B uses C. The application depends on A, not on B or C.</summary>
     [Test]
     procedure Json_Chain_WritesDirectUsesEdges;
+
+    /// <summary>Interface uses and implementation uses are both edges.</summary>
+    [Test]
+    procedure Json_InterfaceAndImplementation_WritesBothEdges;
+
+    /// <summary>System and SysInit stay on the application. A unit that names them does not.</summary>
+    [Test]
+    procedure Json_ImplicitCompilerUnits_StayOnTheApplication;
 
     /// <summary>The B edge is inside A's dependency element, not the first dependency in the file.</summary>
     [Test]
@@ -110,6 +129,31 @@ type
     /// <summary>Cached uses names are used even when the .pas is no longer on disk.</summary>
     [Test]
     procedure Json_CachedUses_DoesNotNeedTheFileOnDisk;
+
+    /// <summary>
+    /// A MAP resolve parses each .pas once. The SBOM write reuses that list
+    /// after the files are gone.
+    /// </summary>
+    [Test]
+    procedure Resolver_MapPath_ParsesEachUnitOnce;
+
+    /// <summary>
+    /// The uses-clause fallback parses the program and each unit once.
+    /// CacheUsedUnits does not parse them again.
+    /// </summary>
+    [Test]
+    procedure Resolver_UsesClausePath_ParsesEachFileOnce;
+
+    /// <summary>SPDX 3.0.1 dependsOn matches the uses edges. Each .pas is parsed once.</summary>
+    [Test]
+    procedure Spdx3_Chain_DependsOn;
+
+    /// <summary>
+    /// A shipped .pas, .dpr, or .dpk uses the same edges. A form stays on
+    /// the library. Each Pascal file is parsed once.
+    /// </summary>
+    [Test]
+    procedure Json_LibrarySource_WritesUsesEdges;
 
     /// <summary>A manifest library is complete. A matched DCU stays incomplete.</summary>
     [Test]
@@ -189,7 +233,7 @@ begin
   LInfo.FilePath := TPath.Combine(FTempDir, ARelativePath);
   LInfo.ArtefactType := AArtefactType;
   LInfo.FileSize := 10;
-  LInfo.Hash := 'aa';
+  LInfo.Hash := StringOfChar('a', 64);
   FArtefacts.Add(LInfo);
 end;
 
@@ -336,10 +380,111 @@ begin
   end;
 end;
 
+function TDependencyGraphTests.Spdx3Elements(const ADoc: TJSONObject;
+  const AType: string): TArray<TJSONObject>;
+var
+  LGraph: TJSONArray;
+  LItem: TJSONObject;
+  I: Integer;
+begin
+  Result := nil;
+  LGraph := ADoc.GetValue('@graph') as TJSONArray;
+  if not Assigned(LGraph) then
+    Exit;
+  for I := 0 to LGraph.Count - 1 do
+  begin
+    LItem := LGraph.Items[I] as TJSONObject;
+    if LItem.GetValue<string>('type') = AType then
+      Result := Result + [LItem];
+  end;
+end;
+
+function TDependencyGraphTests.Spdx3PackageId(const ADoc: TJSONObject;
+  const AName: string): string;
+var
+  LPackage: TJSONObject;
+begin
+  Result := '';
+  for LPackage in Spdx3Elements(ADoc, 'software_Package') do
+    if SameText(LPackage.GetValue<string>('name'), AName) then
+      Exit(LPackage.GetValue<string>('spdxId'));
+end;
+
+function TDependencyGraphTests.Spdx3DependsOn(const ADoc: TJSONObject;
+  const AFrom: string): TJSONObject;
+var
+  LRel: TJSONObject;
+begin
+  Result := nil;
+  for LRel in Spdx3Elements(ADoc, 'Relationship') do
+    if (LRel.GetValue<string>('from') = AFrom) and
+       (LRel.GetValue<string>('relationshipType') = 'dependsOn') then
+      Exit(LRel);
+end;
+
+procedure TDependencyGraphTests.AddResolvedUnit(const AUnit: TResolvedUnitInfo);
+var
+  LInfo: TArtefactInfo;
+begin
+  LInfo := Default(TArtefactInfo);
+  LInfo.UnitName := AUnit.UnitName;
+  LInfo.RelativePath := AUnit.UnitName + '.pas';
+  LInfo.FilePath := AUnit.ResolvedPath;
+  LInfo.ArtefactType := 'unit-evidence';
+  LInfo.FileSize := 10;
+  LInfo.Hash := StringOfChar('a', 64);
+  LInfo.UsesCached := AUnit.UsesCached;
+  LInfo.UsedUnitNames := Copy(AUnit.UsedUnitNames, 0, Length(AUnit.UsedUnitNames));
+  FArtefacts.Add(LInfo);
+end;
+
+procedure TDependencyGraphTests.AddLibrarySource(const ARelativePath: string);
+var
+  LInfo: TArtefactInfo;
+begin
+  LInfo := Default(TArtefactInfo);
+  LInfo.RelativePath := ARelativePath;
+  LInfo.ComponentName := ARelativePath;
+  LInfo.FilePath := TPath.Combine(FTempDir, ARelativePath);
+  LInfo.ArtefactType := 'file';
+  LInfo.LibrarySourceFile := True;
+  LInfo.FileSize := 10;
+  LInfo.Hash := StringOfChar('a', 64);
+  FArtefacts.Add(LInfo);
+end;
+
+procedure TDependencyGraphTests.AssertJsonChain(AJson: TJSONObject);
+var
+  LDeps, LDepends: TJSONArray;
+begin
+  LDeps := AJson.GetValue('dependencies') as TJSONArray;
+  LDepends := DependsOf(LDeps, 'TestApp');
+  Assert.AreEqual(NativeInt(1), NativeInt(LDepends.Count));
+  Assert.AreEqual('comp-0', LDepends.Items[0].Value);
+
+  LDepends := DependsOf(LDeps, 'comp-0');
+  Assert.AreEqual(NativeInt(1), NativeInt(LDepends.Count),
+    'the application depends on UnitA');
+  Assert.AreEqual('comp-1', LDepends.Items[0].Value);
+
+  LDepends := DependsOf(LDeps, 'comp-1');
+  Assert.AreEqual(NativeInt(1), NativeInt(LDepends.Count));
+  Assert.AreEqual('comp-2', LDepends.Items[0].Value, 'UnitA depends on UnitB');
+
+  LDepends := DependsOf(LDeps, 'comp-2');
+  Assert.AreEqual(NativeInt(1), NativeInt(LDepends.Count));
+  Assert.AreEqual('comp-3', LDepends.Items[0].Value, 'UnitB depends on UnitC');
+
+  Assert.IsNull(DependsOf(LDeps, 'comp-3'),
+    'UnitC has an empty uses clause and is omitted, not written as an empty dependsOn');
+end;
+
 procedure TDependencyGraphTests.Json_Chain_WritesDirectUsesEdges;
 var
   LJson: TJSONObject;
-  LDeps, LDepends, LIncomplete, LComplete, LComponents: TJSONArray;
+  LIncomplete, LComplete, LComponents: TJSONArray;
+  LValidator: TSbomValidator;
+  LCheck: TValidationResult;
 begin
   WriteUnit('UnitA', ['UnitB']);
   WriteUnit('UnitB', ['UnitC']);
@@ -351,31 +496,20 @@ begin
 
   LJson := WriteJson;
   try
+    LValidator := TSbomValidator.Create;
+    try
+      LCheck := LValidator.ValidateCycloneDxJson(
+        TFile.ReadAllText(FJsonFile, TEncoding.UTF8));
+      Assert.IsTrue(LCheck.IsValid, string.Join(sLineBreak, LCheck.Errors));
+    finally
+      LValidator.Free;
+    end;
+
     LComponents := LJson.GetValue('components') as TJSONArray;
     Assert.AreEqual(NativeInt(4), NativeInt(LComponents.Count),
       'A uses name that is already a unit must not add another component');
 
-    LDeps := LJson.GetValue('dependencies') as TJSONArray;
-    LDepends := DependsOf(LDeps, 'TestApp');
-    Assert.AreEqual(NativeInt(1), NativeInt(LDepends.Count));
-    Assert.AreEqual('comp-0', LDepends.Items[0].Value);
-
-    LDepends := DependsOf(LDeps, 'comp-0');
-    Assert.AreEqual(NativeInt(3), NativeInt(LDepends.Count));
-    Assert.AreEqual('comp-1', LDepends.Items[0].Value);
-    Assert.AreEqual('comp-2', LDepends.Items[1].Value);
-    Assert.AreEqual('comp-3', LDepends.Items[2].Value);
-
-    LDepends := DependsOf(LDeps, 'comp-1');
-    Assert.AreEqual(NativeInt(1), NativeInt(LDepends.Count));
-    Assert.AreEqual('comp-2', LDepends.Items[0].Value, 'UnitA depends on UnitB');
-
-    LDepends := DependsOf(LDeps, 'comp-2');
-    Assert.AreEqual(NativeInt(1), NativeInt(LDepends.Count));
-    Assert.AreEqual('comp-3', LDepends.Items[0].Value, 'UnitB depends on UnitC');
-
-    Assert.IsNull(DependsOf(LDeps, 'comp-3'),
-      'UnitC has an empty uses clause and is omitted, not written as an empty dependsOn');
+    AssertJsonChain(LJson);
 
     LIncomplete := CompositionRefs(LJson, 'incomplete');
     LComplete := CompositionRefs(LJson, 'complete');
@@ -393,9 +527,83 @@ begin
   end;
 end;
 
+procedure TDependencyGraphTests.Json_InterfaceAndImplementation_WritesBothEdges;
+var
+  LJson: TJSONObject;
+  LDepends: TJSONArray;
+begin
+  TFile.WriteAllText(TPath.Combine(FTempDir, 'UnitA.pas'),
+    'unit UnitA;' + sLineBreak +
+    'interface' + sLineBreak +
+    'uses UnitC;' + sLineBreak +
+    'implementation' + sLineBreak +
+    'uses UnitB;' + sLineBreak +
+    'end.' + sLineBreak, TEncoding.UTF8);
+  WriteUnit('UnitB');
+  WriteUnit('UnitC');
+  AddExe;
+  AddUnit('UnitA');
+  AddUnit('UnitB');
+  AddUnit('UnitC');
+
+  LJson := WriteJson;
+  try
+    LDepends := DependsOf(LJson.GetValue('dependencies') as TJSONArray, 'comp-0');
+    Assert.AreEqual(NativeInt(1), NativeInt(LDepends.Count));
+    Assert.AreEqual('comp-1', LDepends.Items[0].Value);
+
+    LDepends := DependsOf(LJson.GetValue('dependencies') as TJSONArray, 'comp-1');
+    Assert.AreEqual(NativeInt(2), NativeInt(LDepends.Count));
+    Assert.AreEqual('comp-2', LDepends.Items[0].Value, 'UnitB sorts before UnitC');
+    Assert.AreEqual('comp-3', LDepends.Items[1].Value);
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TDependencyGraphTests.Json_ImplicitCompilerUnits_StayOnTheApplication;
+var
+  LJson: TJSONObject;
+  LDeps, LDepends, LProperties: TJSONArray;
+  LComponent: TJSONObject;
+begin
+  WriteUnit('UnitA', ['System', 'SysInit', 'UnitB']);
+  WriteUnit('UnitB');
+  AddExe;
+  AddFile('System.dcu', 'unit-evidence');
+  AddFile('SysInit.dcu', 'unit-evidence');
+  AddUnit('UnitA');
+  AddUnit('UnitB');
+
+  LJson := WriteJson;
+  try
+    LDeps := LJson.GetValue('dependencies') as TJSONArray;
+    LDepends := DependsOf(LDeps, 'comp-0');
+    Assert.AreEqual(NativeInt(3), NativeInt(LDepends.Count));
+    Assert.AreEqual('comp-1', LDepends.Items[0].Value, 'System stays on the application');
+    Assert.AreEqual('comp-2', LDepends.Items[1].Value, 'SysInit stays on the application');
+    Assert.AreEqual('comp-3', LDepends.Items[2].Value, 'UnitA is the uses root');
+
+    LDepends := DependsOf(LDeps, 'comp-3');
+    Assert.AreEqual(NativeInt(1), NativeInt(LDepends.Count));
+    Assert.AreEqual('comp-4', LDepends.Items[0].Value, 'UnitA depends on UnitB only');
+
+    LComponent := (LJson.GetValue('components') as TJSONArray).Items[1] as TJSONObject;
+    LProperties := LComponent.GetValue('properties') as TJSONArray;
+    Assert.AreEqual(cUnresolvedDependenciesValue,
+      PropertyValue(LProperties, cUnresolvedDependenciesProperty));
+    LComponent := (LJson.GetValue('components') as TJSONArray).Items[3] as TJSONObject;
+    LProperties := LComponent.GetValue('properties') as TJSONArray;
+    Assert.AreEqual('', PropertyValue(LProperties, cUnresolvedDependenciesProperty),
+      'UnitA was read, so it is not unresolved-no-source');
+  finally
+    LJson.Free;
+  end;
+end;
+
 procedure TDependencyGraphTests.Xml_Chain_ScopesEdgesToTheSourceElement;
 var
-  LContent, LUnitA, LUnitB, LIncomplete, LComplete: string;
+  LContent, LExe, LUnitA, LUnitB, LIncomplete, LComplete: string;
   LIncompleteAt, LCompleteAt: Integer;
 begin
   WriteUnit('UnitA', ['UnitB']);
@@ -407,6 +615,10 @@ begin
   AddUnit('UnitC');
 
   LContent := WriteXml;
+  LExe := XmlDependencyBody(LContent, 'comp-0');
+  Assert.IsTrue(Pos('<dependency ref="comp-1"/>', LExe) > 0, LExe);
+  Assert.AreEqual(0, Pos('<dependency ref="comp-2"/>', LExe), LExe);
+  Assert.AreEqual(0, Pos('<dependency ref="comp-3"/>', LExe), LExe);
   LUnitA := XmlDependencyBody(LContent, 'comp-1');
   LUnitB := XmlDependencyBody(LContent, 'comp-2');
   Assert.IsTrue(Pos('<dependency ref="comp-2"/>', LUnitA) > 0, LUnitA);
@@ -567,6 +779,11 @@ begin
     LDepends := DependsOf(LDeps, 'comp-2');
     Assert.AreEqual(NativeInt(1), NativeInt(LDepends.Count));
     Assert.AreEqual('comp-1', LDepends.Items[0].Value);
+    LDepends := DependsOf(LDeps, 'comp-0');
+    Assert.AreEqual(NativeInt(1), NativeInt(LDepends.Count),
+      'the cycle stays attached to the application');
+    Assert.AreEqual('comp-1', LDepends.Items[0].Value,
+      'the lowest index of the cycle stays on the application');
     LComplete := CompositionRefs(LJson, 'complete');
     Assert.AreEqual(NativeInt(2), NativeInt(LComplete.Count));
   finally
@@ -619,11 +836,10 @@ begin
     Assert.AreEqual('comp-0', LProject.Items[0].Value);
 
     LProgram := DependsOf(LDeps, 'comp-0');
-    Assert.AreEqual(NativeInt(4), NativeInt(LProgram.Count));
+    Assert.AreEqual(NativeInt(3), NativeInt(LProgram.Count));
     Assert.AreEqual('comp-1', LProgram.Items[0].Value, 'runtime package stays first');
     Assert.AreEqual('comp-2', LProgram.Items[1].Value, 'external DLL stays second');
-    Assert.AreEqual('comp-3', LProgram.Items[2].Value);
-    Assert.AreEqual('comp-4', LProgram.Items[3].Value);
+    Assert.AreEqual('comp-3', LProgram.Items[2].Value, 'UnitA stays, UnitB is reached through it');
 
     LUses := DependsOf(LDeps, 'comp-3');
     Assert.AreEqual(NativeInt(1), NativeInt(LUses.Count));
@@ -718,6 +934,112 @@ begin
   end;
 end;
 
+procedure TDependencyGraphTests.Json_LibrarySource_WritesUsesEdges;
+var
+  LJson, LSpdx, LSpdx3, LRel: TJSONObject;
+  LDeps, LDepends, LTo: TJSONArray;
+  LValidator: TSbomValidator;
+  LCheck: TValidationResult;
+  LWriter: ISbomWriter;
+  LText, LDpr, LA, LB, LC: string;
+begin
+  TFile.WriteAllText(TPath.Combine(FTempDir, 'GraphApp.dpr'),
+    'program GraphApp;' + sLineBreak +
+    'uses' + sLineBreak +
+    '  UnitA in ''UnitA.pas'';' + sLineBreak +
+    'begin' + sLineBreak +
+    'end.' + sLineBreak, TEncoding.UTF8);
+  WriteUnit('UnitA', ['UnitB']);
+  WriteUnit('UnitB', ['UnitC']);
+  WriteUnit('UnitC');
+  TFile.WriteAllText(TPath.Combine(FTempDir, 'Notes.dfm'),
+    'object Notes: TForm end' + sLineBreak, TEncoding.UTF8);
+
+  AddLibrarySource('GraphApp.dpr');
+  AddLibrarySource('UnitA.pas');
+  AddLibrarySource('UnitB.pas');
+  AddLibrarySource('UnitC.pas');
+  AddLibrarySource('Notes.dfm');
+  FProjectInfo.ProjectName := 'GraphApp';
+
+  TUsesClauseParser.ResetParseCount;
+  LJson := WriteJson;
+  try
+    LValidator := TSbomValidator.Create;
+    try
+      LCheck := LValidator.ValidateCycloneDxJson(
+        TFile.ReadAllText(FJsonFile, TEncoding.UTF8));
+      Assert.IsTrue(LCheck.IsValid, string.Join(sLineBreak, LCheck.Errors));
+    finally
+      LValidator.Free;
+    end;
+
+    Assert.AreEqual(NativeInt(4), NativeInt(TUsesClauseParser.ParseCount),
+      'each shipped Pascal file is parsed once');
+
+    LDeps := LJson.GetValue('dependencies') as TJSONArray;
+    LDepends := DependsOf(LDeps, 'GraphApp');
+    Assert.AreEqual(NativeInt(2), NativeInt(LDepends.Count),
+      'the library depends on the program and the form');
+    Assert.AreEqual('comp-0', LDepends.Items[0].Value);
+    Assert.AreEqual('comp-4', LDepends.Items[1].Value);
+
+    LDepends := DependsOf(LDeps, 'comp-0');
+    Assert.AreEqual(NativeInt(1), NativeInt(LDepends.Count));
+    Assert.AreEqual('comp-1', LDepends.Items[0].Value, 'GraphApp.dpr depends on UnitA');
+
+    LDepends := DependsOf(LDeps, 'comp-1');
+    Assert.AreEqual(NativeInt(1), NativeInt(LDepends.Count));
+    Assert.AreEqual('comp-2', LDepends.Items[0].Value, 'UnitA depends on UnitB');
+
+    LDepends := DependsOf(LDeps, 'comp-2');
+    Assert.AreEqual(NativeInt(1), NativeInt(LDepends.Count));
+    Assert.AreEqual('comp-3', LDepends.Items[0].Value, 'UnitB depends on UnitC');
+    Assert.IsNull(DependsOf(LDeps, 'comp-3'));
+  finally
+    LJson.Free;
+  end;
+
+  LSpdx := WriteSpdx;
+  try
+    Assert.AreEqual(NativeInt(4), NativeInt(TUsesClauseParser.ParseCount),
+      'SPDX 2.3 reuses the cached uses list');
+    LDpr := PackageId(LSpdx, 'GraphApp.dpr');
+    LA := PackageId(LSpdx, 'UnitA.pas');
+    LB := PackageId(LSpdx, 'UnitB.pas');
+    LC := PackageId(LSpdx, 'UnitC.pas');
+    Assert.AreNotEqual('', LDpr);
+    Assert.AreNotEqual('', LA);
+    Assert.IsTrue(HasRelationship(LSpdx, LDpr, 'DEPENDS_ON', LA));
+    Assert.IsTrue(HasRelationship(LSpdx, LA, 'DEPENDS_ON', LB));
+    Assert.IsTrue(HasRelationship(LSpdx, LB, 'DEPENDS_ON', LC));
+    Assert.IsFalse(HasRelationship(LSpdx, LA, 'DEPENDS_ON', LC),
+      'the chain is not flattened');
+  finally
+    LSpdx.Free;
+  end;
+
+  LWriter := TSpdx3JsonWriter.Create;
+  Assert.IsTrue(LWriter.Write(FSpdxFile, FMetadata, FArtefacts, FProjectInfo));
+  Assert.AreEqual(NativeInt(4), NativeInt(TUsesClauseParser.ParseCount),
+    'SPDX 3.0.1 reuses the cached uses list');
+  LText := TFile.ReadAllText(FSpdxFile, TEncoding.UTF8);
+  LSpdx3 := TJSONObject.ParseJSONValue(LText) as TJSONObject;
+  try
+    Assert.IsNotNull(LSpdx3);
+    LA := Spdx3PackageId(LSpdx3, 'UnitA.pas');
+    LB := Spdx3PackageId(LSpdx3, 'UnitB.pas');
+    LRel := Spdx3DependsOn(LSpdx3, LA);
+    Assert.IsNotNull(LRel, 'UnitA dependsOn UnitB');
+    Assert.AreEqual('complete', LRel.GetValue<string>('completeness'));
+    LTo := LRel.GetValue('to') as TJSONArray;
+    Assert.AreEqual(NativeInt(1), NativeInt(LTo.Count));
+    Assert.AreEqual(LB, LTo.Items[0].Value);
+  finally
+    LSpdx3.Free;
+  end;
+end;
+
 procedure TDependencyGraphTests.Json_ManifestLibrary_IsComplete;
 var
   LJson: TJSONObject;
@@ -750,6 +1072,255 @@ begin
       if LIncomplete.Items[I].Value = 'comp-1' then
         LFoundUnit := True;
     Assert.IsTrue(LFoundUnit, 'The DCU stays in the incomplete set');
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TDependencyGraphTests.Resolver_MapPath_ParsesEachUnitOnce;
+var
+  LResolver: TUnitResolver;
+  LProject: TProjectInfo;
+  LEvidence: TBuildEvidence;
+  LComposition: TCompositionEvidence;
+  LItem: TBuildEvidenceItem;
+  LJson: TJSONObject;
+  LUnit: TResolvedUnitInfo;
+
+  procedure AddMap(const AName: string);
+  begin
+    LItem := Default(TBuildEvidenceItem);
+    LItem.SourceKind := besMapFile;
+    LItem.UnitName := AName;
+    LItem.FilePath := TPath.Combine(FTempDir, 'TestApp.map');
+    LEvidence.EvidenceItems.Add(LItem);
+  end;
+
+  function FindResolved(const AName: string): TResolvedUnitInfo;
+  var
+    I: Integer;
+  begin
+    Result := Default(TResolvedUnitInfo);
+    for I := 0 to LComposition.Units.Count - 1 do
+      if SameText(LComposition.Units[I].UnitName, AName) then
+        Exit(LComposition.Units[I]);
+    Assert.Fail(AName + ' was not resolved');
+  end;
+
+begin
+  WriteUnit('UnitA', ['UnitB']);
+  WriteUnit('UnitB', ['UnitC']);
+  WriteUnit('UnitC');
+
+  LResolver := TUnitResolver.Create;
+  LProject := TProjectInfo.Create;
+  LEvidence := TBuildEvidence.Create;
+  try
+    LProject.ProjectPath := TPath.Combine(FTempDir, 'TestApp.dproj');
+    LProject.ProjectDir := FTempDir;
+    LProject.ProjectName := 'TestApp';
+    LProject.Platform := 'Win64';
+    LProject.Configuration := 'Release';
+    LEvidence.SearchPaths.Add(FTempDir);
+    AddMap('UnitA');
+    AddMap('UnitB');
+    AddMap('UnitC');
+
+    TUsesClauseParser.ResetParseCount;
+    LComposition := LResolver.Resolve(LProject, LEvidence);
+    try
+      Assert.AreEqual(NativeInt(3), NativeInt(LComposition.Units.Count));
+      Assert.AreEqual(NativeInt(3), NativeInt(TUsesClauseParser.ParseCount),
+        'the MAP path parses each .pas once');
+      LUnit := FindResolved('UnitA');
+      Assert.IsTrue(LUnit.UsesCached);
+      Assert.AreEqual('UnitB', LUnit.UsedUnitNames[0]);
+      Assert.IsTrue(FindResolved('UnitB').UsesCached);
+      Assert.IsTrue(FindResolved('UnitC').UsesCached);
+
+      AddExe;
+      AddResolvedUnit(FindResolved('UnitA'));
+      AddResolvedUnit(FindResolved('UnitB'));
+      AddResolvedUnit(FindResolved('UnitC'));
+    finally
+      LComposition.Free;
+    end;
+  finally
+    LEvidence.Free;
+    LProject.Free;
+    LResolver.Free;
+  end;
+
+  TFile.Delete(TPath.Combine(FTempDir, 'UnitA.pas'));
+  TFile.Delete(TPath.Combine(FTempDir, 'UnitB.pas'));
+  TFile.Delete(TPath.Combine(FTempDir, 'UnitC.pas'));
+  LJson := WriteJson;
+  try
+    Assert.AreEqual(NativeInt(3), NativeInt(TUsesClauseParser.ParseCount),
+      'the SBOM write reuses the cached uses list');
+    AssertJsonChain(LJson);
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TDependencyGraphTests.Resolver_UsesClausePath_ParsesEachFileOnce;
+var
+  LResolver: TUnitResolver;
+  LProject: TProjectInfo;
+  LEvidence: TBuildEvidence;
+  LComposition: TCompositionEvidence;
+  LJson: TJSONObject;
+  LUnit: TResolvedUnitInfo;
+
+  function FindResolved(const AName: string): TResolvedUnitInfo;
+  var
+    I: Integer;
+  begin
+    Result := Default(TResolvedUnitInfo);
+    for I := 0 to LComposition.Units.Count - 1 do
+      if SameText(LComposition.Units[I].UnitName, AName) then
+        Exit(LComposition.Units[I]);
+    Assert.Fail(AName + ' was not resolved');
+  end;
+
+begin
+  TFile.WriteAllText(TPath.Combine(FTempDir, 'TestApp.dpr'),
+    'program TestApp;' + sLineBreak +
+    'uses' + sLineBreak +
+    '  UnitA;' + sLineBreak +
+    'begin' + sLineBreak +
+    'end.' + sLineBreak, TEncoding.UTF8);
+  WriteUnit('UnitA', ['UnitB']);
+  WriteUnit('UnitB', ['UnitC']);
+  WriteUnit('UnitC');
+
+  LResolver := TUnitResolver.Create;
+  LProject := TProjectInfo.Create;
+  LEvidence := TBuildEvidence.Create;
+  try
+    LProject.ProjectPath := TPath.Combine(FTempDir, 'TestApp.dproj');
+    LProject.ProjectDir := FTempDir;
+    LProject.ProjectName := 'TestApp';
+    LProject.Platform := 'Win32';
+    LProject.Configuration := 'Debug';
+    LEvidence.SearchPaths.Add(FTempDir);
+
+    TUsesClauseParser.ResetParseCount;
+    LComposition := LResolver.Resolve(LProject, LEvidence);
+    try
+      Assert.AreEqual(NativeInt(3), NativeInt(LComposition.Units.Count));
+      Assert.AreEqual(NativeInt(4), NativeInt(TUsesClauseParser.ParseCount),
+        'the program and each unit are parsed once');
+      LUnit := FindResolved('UnitA');
+      Assert.IsTrue(LUnit.UsesCached);
+      Assert.AreEqual('UnitB', LUnit.UsedUnitNames[0]);
+      Assert.IsTrue(FindResolved('UnitC').UsesCached);
+
+      AddExe;
+      AddResolvedUnit(FindResolved('UnitA'));
+      AddResolvedUnit(FindResolved('UnitB'));
+      AddResolvedUnit(FindResolved('UnitC'));
+    finally
+      LComposition.Free;
+    end;
+  finally
+    LEvidence.Free;
+    LProject.Free;
+    LResolver.Free;
+  end;
+
+  TFile.Delete(TPath.Combine(FTempDir, 'UnitA.pas'));
+  TFile.Delete(TPath.Combine(FTempDir, 'UnitB.pas'));
+  TFile.Delete(TPath.Combine(FTempDir, 'UnitC.pas'));
+  LJson := WriteJson;
+  try
+    Assert.AreEqual(NativeInt(4), NativeInt(TUsesClauseParser.ParseCount),
+      'CacheUsedUnits and the SBOM write do not parse again');
+    AssertJsonChain(LJson);
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TDependencyGraphTests.Spdx3_Chain_DependsOn;
+var
+  LWriter: ISbomWriter;
+  LJson, LRel: TJSONObject;
+  LText, LExe, LA, LB, LC: string;
+  LTo: TJSONArray;
+  LValidator: TSbomValidator;
+  LCheck: TValidationResult;
+  LContainsA, LContainsB, LContainsC: Boolean;
+  I: Integer;
+  LItem: TJSONObject;
+begin
+  WriteUnit('UnitA', ['UnitB']);
+  WriteUnit('UnitB', ['UnitC']);
+  WriteUnit('UnitC');
+  AddExe;
+  AddUnit('UnitA');
+  AddUnit('UnitB');
+  AddUnit('UnitC');
+
+  TUsesClauseParser.ResetParseCount;
+  LWriter := TSpdx3JsonWriter.Create;
+  Assert.IsTrue(LWriter.Write(FSpdxFile, FMetadata, FArtefacts, FProjectInfo));
+  Assert.AreEqual(NativeInt(3), NativeInt(TUsesClauseParser.ParseCount),
+    'SPDX 3.0.1 parses each unit once');
+
+  LText := TFile.ReadAllText(FSpdxFile, TEncoding.UTF8);
+  LValidator := TSbomValidator.Create;
+  try
+    LCheck := LValidator.ValidateSpdx3Json(LText);
+    Assert.IsTrue(LCheck.IsValid, string.Join(sLineBreak, LCheck.Errors));
+  finally
+    LValidator.Free;
+  end;
+
+  LJson := TJSONObject.ParseJSONValue(LText) as TJSONObject;
+  try
+    Assert.IsNotNull(LJson, 'SPDX 3.0.1 JSON must parse');
+    LExe := Spdx3PackageId(LJson, 'TestApp.exe');
+    LA := Spdx3PackageId(LJson, 'UnitA.pas');
+    LB := Spdx3PackageId(LJson, 'UnitB.pas');
+    LC := Spdx3PackageId(LJson, 'UnitC.pas');
+    Assert.AreNotEqual('', LA);
+
+    LContainsA := False;
+    LContainsB := False;
+    LContainsC := False;
+    for LItem in Spdx3Elements(LJson, 'Relationship') do
+      if (LItem.GetValue<string>('from') = LExe) and
+         (LItem.GetValue<string>('relationshipType') = 'contains') then
+      begin
+        LTo := LItem.GetValue('to') as TJSONArray;
+        for I := 0 to LTo.Count - 1 do
+        begin
+          if LTo.Items[I].Value = LA then
+            LContainsA := True;
+          if LTo.Items[I].Value = LB then
+            LContainsB := True;
+          if LTo.Items[I].Value = LC then
+            LContainsC := True;
+        end;
+      end;
+    Assert.IsTrue(LContainsA and LContainsB and LContainsC,
+      'the program still contains every linked unit');
+
+    LRel := Spdx3DependsOn(LJson, LA);
+    Assert.IsNotNull(LRel, 'UnitA dependsOn UnitB');
+    Assert.AreEqual('complete', LRel.GetValue<string>('completeness'));
+    LTo := LRel.GetValue('to') as TJSONArray;
+    Assert.AreEqual(NativeInt(1), NativeInt(LTo.Count));
+    Assert.AreEqual(LB, LTo.Items[0].Value);
+
+    LRel := Spdx3DependsOn(LJson, LB);
+    Assert.IsNotNull(LRel, 'UnitB dependsOn UnitC');
+    LTo := LRel.GetValue('to') as TJSONArray;
+    Assert.AreEqual(LC, LTo.Items[0].Value);
+    Assert.IsNull(Spdx3DependsOn(LJson, LExe),
+      'the program has no dependsOn edge to a unit');
   finally
     LJson.Free;
   end;

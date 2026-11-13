@@ -516,6 +516,20 @@ type
     [Test]
     procedure Generate_NeighborExe_UsesOwnVersionOrNa;
 
+    /// <summary>
+    /// A MAP file plus the unit sources, through Generate, writes UnitA to
+    /// UnitB to UnitC. The program depends on UnitA.
+    /// </summary>
+    [Test]
+    procedure Generate_MapUsesGraph_IsMultiLevel;
+
+    /// <summary>
+    /// Library mode, through Generate, writes the same chain for shipped
+    /// Pascal files. The library depends on the program, not on every file.
+    /// </summary>
+    [Test]
+    procedure GenerateLibrary_UsesGraph_IsMultiLevel;
+
   end;
 
   /// <summary>Build mode file components carry the product version.</summary>
@@ -3483,6 +3497,237 @@ begin
   Assert.IsTrue(Pos('| plugin.dll | library | ' +
     FileDateVersion(TPath.Combine(LOutput, 'plugin.dll')) + ' |', LReportText) > 0,
     'the report shows the file date for a DLL without version info');
+end;
+
+function JsonBomRefEnding(const AJson: TJSONObject; const AFileName: string): string;
+var
+  LComponents: TJSONArray;
+  LComponent: TJSONObject;
+  LName, LSuffix: string;
+  I: Integer;
+begin
+  Result := '';
+  LComponents := AJson.GetValue('components') as TJSONArray;
+  if not Assigned(LComponents) then
+    Exit;
+  LSuffix := '/' + AFileName;
+  for I := 0 to LComponents.Count - 1 do
+  begin
+    LComponent := LComponents.Items[I] as TJSONObject;
+    LName := LComponent.GetValue<string>('name', '');
+    if SameText(LName, AFileName) or
+       SameText(Copy(LName, Length(LName) - Length(AFileName), MaxInt), LSuffix) or
+       SameText(Copy(LName, Length(LName) - Length(AFileName), MaxInt), '\' + AFileName) then
+      Exit(LComponent.GetValue<string>('bom-ref', ''));
+  end;
+end;
+
+function JsonDependsOn(const AJson: TJSONObject; const ARef: string): TJSONArray;
+var
+  LDeps: TJSONArray;
+  LDep: TJSONObject;
+  I: Integer;
+begin
+  Result := nil;
+  LDeps := AJson.GetValue('dependencies') as TJSONArray;
+  if not Assigned(LDeps) then
+    Exit;
+  for I := 0 to LDeps.Count - 1 do
+  begin
+    LDep := LDeps.Items[I] as TJSONObject;
+    if SameText(LDep.GetValue<string>('ref', ''), ARef) then
+      Exit(LDep.GetValue('dependsOn') as TJSONArray);
+  end;
+end;
+
+function JsonDependsHas(const ADepends: TJSONArray; const ARef: string): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  if not Assigned(ADepends) or (ARef = '') then
+    Exit;
+  for I := 0 to ADepends.Count - 1 do
+    if ADepends.Items[I].Value = ARef then
+      Exit(True);
+end;
+
+procedure WriteChainUnit(const ADir, AName, AUsesName: string);
+var
+  LUses: string;
+begin
+  LUses := '';
+  if AUsesName <> '' then
+    LUses := 'uses ' + AUsesName + ';' + sLineBreak;
+  TFile.WriteAllText(TPath.Combine(ADir, AName + '.pas'),
+    'unit ' + AName + ';' + sLineBreak +
+    'interface' + sLineBreak +
+    LUses +
+    'implementation' + sLineBreak +
+    'end.' + sLineBreak, TEncoding.UTF8);
+end;
+
+procedure TEngineTests.Generate_MapUsesGraph_IsMultiLevel;
+var
+  LRoot, LOut, LProject, LContent: string;
+  LConfig: TSbomConfig;
+  LGen: TDxComplyGenerator;
+  LJson: TJSONObject;
+  LExe, LA, LB, LC: string;
+  LDepends: TJSONArray;
+begin
+  LRoot := TPath.Combine(FTempDir, 'usesgraph');
+  LOut := TPath.Combine(LRoot, 'out');
+  TDirectory.CreateDirectory(LOut);
+  TFile.WriteAllText(TPath.Combine(LRoot, 'GraphApp.dpr'),
+    'program GraphApp;' + sLineBreak + 'begin' + sLineBreak + 'end.' + sLineBreak,
+    TEncoding.UTF8);
+  WriteChainUnit(LRoot, 'UnitA', 'UnitB');
+  WriteChainUnit(LRoot, 'UnitB', 'UnitC');
+  WriteChainUnit(LRoot, 'UnitC', '');
+  TFile.WriteAllText(TPath.Combine(LRoot, 'GraphApp.dproj'),
+    '<?xml version="1.0" encoding="utf-8"?>' + sLineBreak +
+    '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">' + sLineBreak +
+    '  <PropertyGroup>' + sLineBreak +
+    '    <MainSource>GraphApp.dpr</MainSource>' + sLineBreak +
+    '    <AppType>Console</AppType>' + sLineBreak +
+    '    <TargetedPlatforms>1</TargetedPlatforms>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '  <PropertyGroup Condition="''$(Base)''!=''''">' + sLineBreak +
+    '    <DCC_ExeOutput>.\out</DCC_ExeOutput>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '</Project>' + sLineBreak, TEncoding.UTF8);
+  TFile.WriteAllBytes(TPath.Combine(LOut, 'GraphApp.exe'), TBytes.Create($4D, $5A, $01));
+  TFile.WriteAllText(TPath.Combine(LOut, 'GraphApp.map'),
+    '  Line numbers for UnitA(UnitA.pas) segment .text' + sLineBreak +
+    '  Line numbers for UnitB(UnitB.pas) segment .text' + sLineBreak +
+    '  Line numbers for UnitC(UnitC.pas) segment .text' + sLineBreak,
+    TEncoding.UTF8);
+  LProject := TPath.Combine(LRoot, 'GraphApp.dproj');
+
+  LConfig := TSbomConfig.Default;
+  LConfig.OutputPath := FOutputFile;
+  LConfig.Configuration := 'Release';
+  LConfig.Platform := 'Win32';
+
+  LGen := TDxComplyGenerator.Create(LConfig);
+  try
+    LGen.OnProgress := OnProgress;
+    Assert.IsTrue(LGen.Generate(LProject, FOutputFile, sfCycloneDxJson),
+      'Generate must succeed. Progress: ' + FProgressMessages.Text);
+  finally
+    LGen.Free;
+  end;
+
+  LContent := TFile.ReadAllText(FOutputFile, TEncoding.UTF8);
+  LJson := TJSONObject.ParseJSONValue(LContent) as TJSONObject;
+  try
+    Assert.IsNotNull(LJson, LContent);
+    LExe := JsonBomRefEnding(LJson, 'GraphApp.exe');
+    LA := JsonBomRefEnding(LJson, 'UnitA.pas');
+    LB := JsonBomRefEnding(LJson, 'UnitB.pas');
+    LC := JsonBomRefEnding(LJson, 'UnitC.pas');
+    Assert.AreNotEqual('', LExe, 'the program must be a component');
+    Assert.AreNotEqual('', LA, 'UnitA must be a component. Progress: ' + FProgressMessages.Text);
+    Assert.AreNotEqual('', LB);
+    Assert.AreNotEqual('', LC);
+
+    LDepends := JsonDependsOn(LJson, LExe);
+    Assert.IsTrue(JsonDependsHas(LDepends, LA),
+      'the program depends on UnitA');
+    Assert.IsFalse(JsonDependsHas(LDepends, LB),
+      'UnitB is reached through UnitA');
+    Assert.IsFalse(JsonDependsHas(LDepends, LC),
+      'UnitC is reached through UnitB');
+
+    LDepends := JsonDependsOn(LJson, LA);
+    Assert.IsTrue(JsonDependsHas(LDepends, LB), 'UnitA depends on UnitB');
+    Assert.IsFalse(JsonDependsHas(LDepends, LC), 'UnitA does not depend on UnitC');
+    LDepends := JsonDependsOn(LJson, LB);
+    Assert.IsTrue(JsonDependsHas(LDepends, LC), 'UnitB depends on UnitC');
+    Assert.IsNull(JsonDependsOn(LJson, LC), 'UnitC has no dependsOn entry');
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TEngineTests.GenerateLibrary_UsesGraph_IsMultiLevel;
+var
+  LRoot, LSrc, LProject, LContent: string;
+  LConfig: TSbomConfig;
+  LGen: TDxComplyGenerator;
+  LJson: TJSONObject;
+  LDpr, LA, LB, LC: string;
+  LDepends: TJSONArray;
+begin
+  LRoot := TPath.Combine(FTempDir, 'libgraph');
+  LSrc := TPath.Combine(LRoot, 'src');
+  TDirectory.CreateDirectory(LSrc);
+  TFile.WriteAllText(TPath.Combine(LSrc, 'GraphApp.dpr'),
+    'program GraphApp;' + sLineBreak +
+    'uses' + sLineBreak +
+    '  UnitA in ''UnitA.pas'';' + sLineBreak +
+    'begin' + sLineBreak +
+    'end.' + sLineBreak, TEncoding.UTF8);
+  WriteChainUnit(LSrc, 'UnitA', 'UnitB');
+  WriteChainUnit(LSrc, 'UnitB', 'UnitC');
+  WriteChainUnit(LSrc, 'UnitC', '');
+  TFile.WriteAllText(TPath.Combine(LRoot, 'GraphApp.dproj'),
+    '<?xml version="1.0" encoding="utf-8"?>' + sLineBreak +
+    '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">' + sLineBreak +
+    '  <PropertyGroup>' + sLineBreak +
+    '    <MainSource>src\GraphApp.dpr</MainSource>' + sLineBreak +
+    '    <AppType>Console</AppType>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '</Project>' + sLineBreak, TEncoding.UTF8);
+  LProject := TPath.Combine(LRoot, 'GraphApp.dproj');
+
+  LConfig := TSbomConfig.Default;
+  LConfig.OutputPath := FOutputFile;
+  LConfig.LibraryMode := True;
+  LConfig.SourceDirs := TArray<string>.Create(LSrc);
+  LConfig.ProductVersion := '1.2.3';
+
+  LGen := TDxComplyGenerator.Create(LConfig);
+  try
+    LGen.OnProgress := OnProgress;
+    Assert.IsTrue(LGen.Generate(LProject, FOutputFile, sfCycloneDxJson),
+      'Generate must succeed. Progress: ' + FProgressMessages.Text);
+  finally
+    LGen.Free;
+  end;
+
+  LContent := TFile.ReadAllText(FOutputFile, TEncoding.UTF8);
+  LJson := TJSONObject.ParseJSONValue(LContent) as TJSONObject;
+  try
+    Assert.IsNotNull(LJson, LContent);
+    LDpr := JsonBomRefEnding(LJson, 'GraphApp.dpr');
+    LA := JsonBomRefEnding(LJson, 'UnitA.pas');
+    LB := JsonBomRefEnding(LJson, 'UnitB.pas');
+    LC := JsonBomRefEnding(LJson, 'UnitC.pas');
+    Assert.AreNotEqual('', LDpr, LContent);
+    Assert.AreNotEqual('', LA);
+    Assert.AreNotEqual('', LB);
+    Assert.AreNotEqual('', LC);
+
+    LDepends := JsonDependsOn(LJson, 'GraphApp');
+    Assert.IsTrue(JsonDependsHas(LDepends, LDpr),
+      'the library depends on GraphApp.dpr');
+    Assert.IsFalse(JsonDependsHas(LDepends, LA),
+      'UnitA is reached through the program');
+    Assert.IsFalse(JsonDependsHas(LDepends, LB));
+    Assert.IsFalse(JsonDependsHas(LDepends, LC));
+
+    LDepends := JsonDependsOn(LJson, LDpr);
+    Assert.IsTrue(JsonDependsHas(LDepends, LA), 'GraphApp.dpr depends on UnitA');
+    Assert.IsFalse(JsonDependsHas(LDepends, LB));
+    LDepends := JsonDependsOn(LJson, LA);
+    Assert.IsTrue(JsonDependsHas(LDepends, LB), 'UnitA depends on UnitB');
+    LDepends := JsonDependsOn(LJson, LB);
+    Assert.IsTrue(JsonDependsHas(LDepends, LC), 'UnitB depends on UnitC');
+  finally
+    LJson.Free;
+  end;
 end;
 
 { TBuildFileVersionTests }

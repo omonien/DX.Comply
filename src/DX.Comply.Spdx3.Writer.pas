@@ -563,7 +563,9 @@ begin
       end;
     end;
 
-    // Completeness, the same split CycloneDX writes as compositions.
+    // Completeness of a uses relationship. A shipped .pas, .dpr, or .dpk
+    // uses the same split as a linked unit. Library compositions in
+    // CycloneDX stay the file set and are not rewritten here.
     var LRootIndex := FindDeliverableTargetIndex(AArtefacts, AProjectName,
       AOutputFilePath);
     if LRootIndex >= 0 then
@@ -579,7 +581,7 @@ begin
     for var i := 0 to High(LGraph.Status) do
     begin
       if (i = LRootIndex) or (i > High(APackageIds)) or
-        not SameText(AArtefacts[i].ArtefactType, 'unit-evidence') then
+        (LGraph.Status[i] = uusNotUnit) then
         Continue;
       var LFrom := Id(APackageIds[i]);
       var LRel: TJSONObject;
