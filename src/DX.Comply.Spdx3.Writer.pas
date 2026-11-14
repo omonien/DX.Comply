@@ -32,6 +32,8 @@
 ///   a notice. That is the JSON-LD name of SoftwareArtifact.copyrightText
 ///   (optional, one string), which software_Package inherits. NOASSERTION
 ///   and NONE are left out, so a package with no known copyright is unchanged.
+/// - An externalRef of type cpe23Type becomes an externalIdentifier of type
+///   cpe23. cpe22Type becomes cpe22. A package with neither is unchanged.
 ///
 /// SPDX 3.0.1 specification: https://spdx.github.io/spdx-spec/v3.0.1/
 /// </remarks>
@@ -444,6 +446,7 @@ begin
   if (LDownload <> '') and not SameText(LDownload, 'NOASSERTION') and not SameText(LDownload, 'NONE') then
     LElement.AddPair('software_downloadLocation', LDownload);
 
+  var LExternalIds: TJSONArray := nil;
   if APackage.GetValue('externalRefs') is TJSONArray then
   begin
     for var LItem in TJSONArray(APackage.GetValue('externalRefs')) do
@@ -454,9 +457,29 @@ begin
       if SameText(JsonText(LRef, 'referenceType'), 'purl') then
         LElement.AddPair('software_packageUrl', JsonText(LRef, 'referenceLocator'))
       else if SameText(JsonText(LRef, 'referenceType'), 'website') then
-        LElement.AddPair('software_homePage', JsonText(LRef, 'referenceLocator'));
+        LElement.AddPair('software_homePage', JsonText(LRef, 'referenceLocator'))
+      else if SameText(JsonText(LRef, 'referenceType'), 'cpe23Type') or
+        SameText(JsonText(LRef, 'referenceType'), 'cpe22Type') then
+      begin
+        // Element.externalIdentifier. A blank locator is not an identifier.
+        var LLocator := Trim(JsonText(LRef, 'referenceLocator'));
+        if LLocator = '' then
+          Continue;
+        if not Assigned(LExternalIds) then
+          LExternalIds := TJSONArray.Create;
+        var LIdentifier := TJSONObject.Create;
+        LIdentifier.AddPair('type', 'ExternalIdentifier');
+        if SameText(JsonText(LRef, 'referenceType'), 'cpe22Type') then
+          LIdentifier.AddPair('externalIdentifierType', 'cpe22')
+        else
+          LIdentifier.AddPair('externalIdentifierType', 'cpe23');
+        LIdentifier.AddPair('identifier', LLocator);
+        LExternalIds.Add(LIdentifier);
+      end;
     end;
   end;
+  if Assigned(LExternalIds) then
+    LElement.AddPair('externalIdentifier', LExternalIds);
 
   if JsonText(APackage, 'versionInfo') <> '' then
     LElement.AddPair('software_packageVersion', JsonText(APackage, 'versionInfo'));

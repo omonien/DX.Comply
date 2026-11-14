@@ -2893,8 +2893,17 @@ var
   LFile: TLibrarySourceFile;
   LArtefact: TArtefactInfo;
   I: Integer;
+  LManifest: TComponentManifest;
+  LManifestJson: string;
+  LManifestPath: string;
+  LManifestError: string;
+  LDormantWarnings: TArray<string>;
+  LWarningIndex: Integer;
 begin
   Result := False;
+  LManifest := Default(TComponentManifest);
+  LManifestJson := '';
+  LManifestPath := '';
   LProjectPath := Trim(AProjectPath);
   LHasProject := LProjectPath <> '';
 
@@ -3008,6 +3017,23 @@ begin
         ExtractFileName(ExcludeTrailingPathDelimiter(LCommonRoot));
       if LProjectInfo.ProjectName = '' then
         LProjectInfo.ProjectName := 'library';
+    end;
+
+    // The same manifest build mode reads. A bad file stops the run. A bad
+    // cpe is a warning on the manifest and does not stop it.
+    if Trim(FConfig.ManifestFile) <> '' then
+    begin
+      LManifestPath := ResolveManifestPath(LProjectInfo.ProjectDir, FConfig.ManifestFile);
+      if not TryLoadComponentManifest(LManifestPath, LManifest, LManifestJson,
+        LManifestError) then
+      begin
+        DoProgress('Error: Invalid component manifest "' + LManifestPath + '": ' +
+          LManifestError, -1);
+        Exit;
+      end;
+      for LWarningIndex := 0 to High(LManifest.Warnings) do
+        DoProgress('Warning: ' + LManifestPath + ': ' +
+          LManifest.Warnings[LWarningIndex], 13);
     end;
 
     LMainSource := '';
@@ -3130,6 +3156,17 @@ begin
     SetLength(LMetadata.Properties, 1);
     LMetadata.Properties[0] := TSbomProperty.Create(
       'net.developer-experts.dx-comply:document.profile', 'library-source');
+
+    if LManifest.Loaded then
+    begin
+      LDormantWarnings := DormantComponentWarnings(LManifest,
+        BuildManifestPlan(LManifest, LArtefacts));
+      for LWarningIndex := 0 to High(LDormantWarnings) do
+        DoProgress('Warning: ' + LManifestPath + ': ' +
+          LDormantWarnings[LWarningIndex], 68);
+      ApplyManifestPublisher(LManifest, LMetadata);
+      LMetadata.ComponentManifestJson := LManifestJson;
+    end;
 
     LCraWarnings := TList<string>.Create;
     for LCraText in BuildCraMetadataWarnings(FConfig, LMetadata, LProjectInfo,

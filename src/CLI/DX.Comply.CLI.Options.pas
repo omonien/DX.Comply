@@ -950,9 +950,11 @@ begin
     Line('                                no purl is written.');
     Line('                                File key: product.repoUrl');
     Line('  --manifest=<file>             Component manifest (components.json)');
-    Line('                                Groups third-party units into libraries');
-    Line('                                with supplier, licence, version, type');
-    Line('                                and PURL. Relative to the project directory.');
+    Line('                                Groups matched units into libraries');
+    Line('                                with supplier, licence, version, type,');
+    Line('                                PURL, and an optional CPE. Also used');
+    Line('                                with --library. Relative to the project');
+    Line('                                directory.');
     Line('                                Overrides the manifest key in .dxcomply.json');
     Line('  --map-dir=<path>              Directory containing the pre-built MAP file');
     Line('  --delphi7-root=<path>         Delphi 7 install directory (RootDir).');
