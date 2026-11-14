@@ -858,7 +858,7 @@ begin
   Assert.AreEqual('AdvGrid', LTms.NamesText);
   Assert.AreEqual(0, LOverview.ThirdPartyUnitCount,
     'Local project units are not counted as third party');
-  Assert.AreEqual(1, Length(LOverview.PrefixRejections));
+  Assert.AreEqual(NativeInt(1), NativeInt(Length(LOverview.PrefixRejections)));
   Assert.AreEqual('Winapi.GDIPAPI', LOverview.PrefixRejections[0].UnitName);
   Assert.AreEqual('GDIP', LOverview.PrefixRejections[0].Prefix);
   Assert.AreEqual('TMS VCL UI Pack', LOverview.PrefixRejections[0].RowName);
@@ -868,7 +868,7 @@ end;
 procedure TReportOverviewTests.PrefixRejections_EmptyWhenNoneRefused;
 begin
   AddUnit('System.Classes', 'Embarcadero RTL');
-  Assert.AreEqual(0, Length(BuildReportOverview(FData).PrefixRejections));
+  Assert.AreEqual(NativeInt(0), NativeInt(Length(BuildReportOverview(FData).PrefixRejections)));
 end;
 
 initialization
