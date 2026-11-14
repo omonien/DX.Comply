@@ -100,6 +100,7 @@ type
     FManifestFile: string;
     FManifestExplicit: Boolean;
     FSbomCreator: string;
+    FPrefixMatch: string;
     FVersionFromGitTag: Boolean;
     FParseError: string;
     /// <summary>
@@ -655,6 +656,20 @@ begin
         FManifestFile := LValue;
         FManifestExplicit := True;
       end
+      else if (LKey = 'match-prefixes') or (LKey = 'match.prefixes') then
+      begin
+        if SameText(Trim(LValue), 'legacy') or SameText(Trim(LValue), 'corroborated') then
+        begin
+          FPrefixMatch := LowerCase(Trim(LValue));
+          Include(FExplicitOverrides, scoPrefixMatch);
+        end
+        else
+        begin
+          FParseError := 'Invalid value for --match-prefixes: ' + LValue +
+            ' (expected corroborated or legacy)';
+          Exit(False);
+        end;
+      end
       else if LKey = 'sbom-creator' then
       begin
         if Trim(LValue) = '' then
@@ -949,6 +964,12 @@ begin
     Line('                                version is known. Without a version,');
     Line('                                no purl is written.');
     Line('                                File key: product.repoUrl');
+    Line('  --match-prefixes=<mode>       corroborated (default) or legacy.');
+    Line('                                legacy applies a prefix with no dot');
+    Line('                                outside an Embarcadero product path,');
+    Line('                                for this release. A prefix never');
+    Line('                                reassigns a product shipped path.');
+    Line('                                File key: matchPrefixes');
     Line('  --manifest=<file>             Component manifest (components.json)');
     Line('                                Groups matched units into libraries');
     Line('                                with supplier, licence, version, type,');
@@ -1093,6 +1114,7 @@ begin
   Result.IncludeCompositionEvidence  := not FNoCompositionEvidence;
   Result.ManifestFile                := FManifestFile;
   Result.ManifestFileExplicit        := FManifestExplicit;
+  Result.PrefixMatch                 := FPrefixMatch;
   Result.ExplicitOverrides           := FExplicitOverrides;
   Result.IncludePlatformInOutput     := FIncludePlatformInOutput;
 

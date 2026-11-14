@@ -269,6 +269,12 @@ type
     /// </summary>
     [Test]
     procedure HelpText_DescribesOptionalBrackets;
+    /// <summary>
+    /// --match-prefixes and the matchPrefixes file key select corroborated
+    /// or legacy. An unknown value is rejected on the command line.
+    /// </summary>
+    [Test]
+    procedure Parse_MatchPrefixes_SetsMode;
   end;
 
 implementation
@@ -1385,6 +1391,53 @@ begin
     'scan-tree help must not say it is kept for one release');
   Assert.IsTrue(Pos('resolve library units', LHelp) = 0,
     '--bds-version must not be limited to legacy library units');
+end;
+
+procedure TCliOptionsTests.Parse_MatchPrefixes_SetsMode;
+var
+  LGen: TDxComplyGenerator;
+  LOptions: TCliOptions;
+  LPath: string;
+begin
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsTrue(LOptions.Parse(['--project=App.dproj', '--match-prefixes=Legacy']));
+    Assert.AreEqual('legacy', LOptions.ToSbomConfig.PrefixMatch);
+    Assert.IsTrue(scoPrefixMatch in LOptions.ToSbomConfig.ExplicitOverrides);
+  finally
+    LOptions.Free;
+  end;
+
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsTrue(LOptions.Parse(['--project=App.dproj', '--match.prefixes=corroborated']));
+    Assert.AreEqual('corroborated', LOptions.ToSbomConfig.PrefixMatch);
+  finally
+    LOptions.Free;
+  end;
+
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsFalse(LOptions.Parse(['--project=App.dproj', '--match-prefixes=strict']));
+    Assert.IsTrue(Pos('Invalid value for --match-prefixes: strict', LOptions.ParseError) > 0,
+      LOptions.ParseError);
+  finally
+    LOptions.Free;
+  end;
+
+  Assert.Contains(TCliOptions.HelpText, '--match-prefixes=<mode>');
+  Assert.Contains(TCliOptions.HelpText, 'File key: matchPrefixes');
+
+  LPath := TPath.Combine(TPath.GetTempPath, 'dxcomply-match-prefixes-test.json');
+  TFile.WriteAllText(LPath, '{"matchPrefixes":"legacy"}', TEncoding.UTF8);
+  LGen := TDxComplyGenerator.Create;
+  try
+    Assert.AreEqual('legacy', LGen.LoadConfig(LPath).PrefixMatch);
+  finally
+    LGen.Free;
+    if TFile.Exists(LPath) then
+      TFile.Delete(LPath);
+  end;
 end;
 
 initialization

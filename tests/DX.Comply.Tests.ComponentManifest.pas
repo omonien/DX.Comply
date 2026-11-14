@@ -118,6 +118,16 @@ type
     /// <summary>A folder beats units_prefix and own_code_prefixes.</summary>
     [Test]
     procedure Match_FolderBeatsPrefix;
+    /// <summary>
+    /// A prefix with no dot does not assign. A prefix that contains a dot does.
+    /// A prefix never assigns a unit in an Embarcadero product path.
+    /// match.prefixes legacy still assigns a prefix with no dot off that path.
+    /// </summary>
+    [Test]
+    procedure Match_CorroboratedPrefix_RequiresADot_AndSkipsProductPath;
+    /// <summary>An unknown match.prefixes value warns and stays corroborated.</summary>
+    [Test]
+    procedure Parse_MatchPrefixes_Unknown_StaysCorroborated;
     /// <summary>units_exclude takes a unit out of that row's folder.</summary>
     [Test]
     procedure Match_UnitsExclude_SkipsFolder;
@@ -333,6 +343,14 @@ type
     /// </summary>
     [Test]
     procedure LibraryMode_Cpe_WhenManifestMatchesSource;
+    /// <summary>
+    /// Library mode with a project passes the install root into the manifest,
+    /// so a short prefix does not assign a shipped .pas under source\rtl.
+    /// units_exact still assigns on that path and keeps the row's cpe.
+    /// A prefix outside the product tree still assigns in legacy mode.
+    /// </summary>
+    [Test]
+    procedure LibraryMode_Prefix_ProductPath_KeepsInstallOrigin;
   end;
 
 implementation
@@ -453,7 +471,7 @@ end;
 function ManifestCopyrightSet: string;
 begin
   Result :=
-    '{"components":[' +
+    '{"match":{"prefixes":"legacy"},"components":[' +
     '{"name":"OmniThreadLibrary","version":"3.7.8","vendor":"Primo Gabrijelcic",' +
     '"licence":"MIT","type":"library",' +
     '"copyright":"' + cCopyrightNotice + '","units_exact":["OtlTask"]},' +
@@ -466,7 +484,7 @@ begin
   // The second row sets copyright to spaces. Parsing trims that to empty,
   // which is the same as leaving the field out.
   Result :=
-    '{"components":[' +
+    '{"match":{"prefixes":"legacy"},"components":[' +
     '{"name":"OmniThreadLibrary","version":"3.7.8","vendor":"Primo Gabrijelcic",' +
     '"licence":"MIT","type":"library","units_exact":["OtlTask"]},' +
     '{"name":"SynEdit","version":"3.0","vendor":"SynEdit Contributors",' +
@@ -537,6 +555,7 @@ function TComponentManifestTests.SampleManifestJson: string;
 begin
   Result :=
     '{' +
+    '"match":{"prefixes":"legacy"},' +
     '"schema_version":"1.0",' +
     '"last_updated":"2026-03-26",' +
     '"supplier":{"name":"Acme GmbH","url":"https://acme.example"},' +
@@ -680,7 +699,7 @@ var
   LMatch: TManifestMatch;
 begin
   LManifest := ParseManifest(
-    '{"components":[' +
+    '{"match":{"prefixes":"legacy"},"components":[' +
     '{"name":"ByPrefix","version":"1","vendor":"A","licence":"MIT","type":"library",' +
     '"units_prefix":["Otl"]},' +
     '{"name":"ByExact","version":"1","vendor":"A","licence":"MIT","type":"library",' +
@@ -699,7 +718,7 @@ var
   LMatch: TManifestMatch;
 begin
   LManifest := ParseManifest(
-    '{"components":[' +
+    '{"match":{"prefixes":"legacy"},"components":[' +
     '{"name":"First","version":"1","vendor":"A","licence":"MIT","type":"library",' +
     '"units_exact":["GpLists"]},' +
     '{"name":"Second","version":"1","vendor":"A","licence":"MIT","type":"library",' +
@@ -715,7 +734,7 @@ var
   LMatch: TManifestMatch;
 begin
   LManifest := ParseManifest(
-    '{"components":[' +
+    '{"match":{"prefixes":"legacy"},"components":[' +
     '{"name":"First","version":"1","vendor":"A","licence":"MIT","type":"library",' +
     '"units_prefix":["Spring"]},' +
     '{"name":"Second","version":"1","vendor":"A","licence":"MIT","type":"library",' +
@@ -751,7 +770,7 @@ var
 
 begin
   LManifest := ParseManifest(
-    '{"components":[' +
+    '{"match":{"prefixes":"legacy"},"components":[' +
     '{"name":"TMS FNC Core","version":"4.2.3.7","vendor":"TMS Software",' +
     '"licence":"LicenseRef-Proprietary","type":"library","units_prefix":["FMX.TMSFNC"]},' +
     '{"name":"TMS FNC UI Pack","version":"7.1.2.2","vendor":"TMS Software",' +
@@ -776,7 +795,7 @@ begin
     'The shortened file name does not start with FMX.TMSFNC');
 
   LManifest := ParseManifest(
-    '{"components":[' +
+    '{"match":{"prefixes":"legacy"},"components":[' +
     '{"name":"TMS FNC UI Pack","version":"7.1.2.2","vendor":"TMS Software",' +
     '"licence":"LicenseRef-Proprietary","type":"library","units_prefix":["FMX.TMSFNC"]},' +
     '{"name":"TMS FNC Core","version":"4.2.3.7","vendor":"TMS Software",' +
@@ -793,7 +812,7 @@ var
   LManifest: TComponentManifest;
 begin
   LManifest := ParseManifest(
-    '{"components":[' +
+    '{"match":{"prefixes":"legacy"},"components":[' +
     '{"name":"Base","version":"1","vendor":"A","licence":"MIT","type":"library",' +
     '"units_prefix":["Neslib"]},' +
     '{"name":"Xml","version":"1","vendor":"A","licence":"MIT","type":"library",' +
@@ -807,7 +826,7 @@ begin
     'own_code_units keeps priority over any prefix');
 
   LManifest := ParseManifest(
-    '{"components":[' +
+    '{"match":{"prefixes":"legacy"},"components":[' +
     '{"name":"Xml","version":"1","vendor":"A","licence":"MIT","type":"library",' +
     '"units_prefix":["Neslib.Xml"]},' +
     '{"name":"Base","version":"1","vendor":"A","licence":"MIT","type":"library",' +
@@ -823,7 +842,7 @@ var
   LManifest: TComponentManifest;
 begin
   LManifest := ParseManifest(
-    '{"components":[' +
+    '{"match":{"prefixes":"legacy"},"components":[' +
     '{"name":"Abbrevia","version":"5","vendor":"A","licence":"MPL-1.1","type":"library",' +
     '"units_prefix":["Ab"],"units_exclude":["AboutBox","abcd"]},' +
     '{"name":"Other","version":"1","vendor":"B","licence":"MIT","type":"library",' +
@@ -843,7 +862,7 @@ var
   LManifest: TComponentManifest;
 begin
   LManifest := ParseManifest(
-    '{"components":[' +
+    '{"match":{"prefixes":"legacy"},"components":[' +
     '{"name":"Skia4Delphi","version":"6","vendor":"A","licence":"MIT","type":"library",' +
     '"units_prefix":["Skia"],"units_exclude":["Vcl.Skia","FMX.Skia.Canvas"]}' +
     ']}');
@@ -865,7 +884,7 @@ var
   LMatch: TManifestMatch;
 begin
   LManifest := ParseManifest(
-    '{"components":[' +
+    '{"match":{"prefixes":"legacy"},"components":[' +
     '{"name":"Spring4D","version":"2","vendor":"A","licence":"Apache-2.0","type":"framework",' +
     '"units_prefix":["Spring"]}' +
     ']}');
@@ -882,7 +901,7 @@ var
   LMatch: TManifestMatch;
 begin
   LManifest := ParseManifest(
-    '{"components":[' +
+    '{"match":{"prefixes":"legacy"},"components":[' +
     '{"name":"BarLib","version":"1","vendor":"A","licence":"MIT","type":"library",' +
     '"units_prefix":["Bar"]}' +
     ']}');
@@ -899,7 +918,7 @@ var
   LMatch: TManifestMatch;
 begin
   LManifest := ParseManifest(
-    '{"components":[' +
+    '{"match":{"prefixes":"legacy"},"components":[' +
     '{"name":"OTL","version":"1","vendor":"A","licence":"MIT","type":"library",' +
     '"units_prefix":["Otl"],"units_exact":["GpLists"]}' +
     ']}');
@@ -917,7 +936,7 @@ var
   LMatch: TManifestMatch;
 begin
   LManifest := ParseManifest(
-    '{"components":[' +
+    '{"match":{"prefixes":"legacy"},"components":[' +
     '{"name":"AppLib","version":"1","vendor":"A","licence":"MIT","type":"library",' +
     '"units_prefix":["App"]}' +
     '],"own_code_units":["AppSettings"]}');
@@ -933,7 +952,7 @@ var
   LMatch: TManifestMatch;
 begin
   LManifest := ParseManifest(
-    '{"components":[' +
+    '{"match":{"prefixes":"legacy"},"components":[' +
     '{"name":"Vendored","version":"1","vendor":"A","licence":"MIT","type":"library",' +
     '"units_exact":["MainForm"]}' +
     '],"own_code_units":["MainForm"]}');
@@ -949,7 +968,7 @@ var
   LMatch: TManifestMatch;
 begin
   LManifest := ParseManifest(
-    '{"components":[' +
+    '{"match":{"prefixes":"legacy"},"components":[' +
     '{"name":"AppLib","version":"1","vendor":"A","licence":"MIT","type":"library",' +
     '"units_prefix":["app"]}' +
     '],"own_code_prefixes":["app"]}');
@@ -958,7 +977,7 @@ begin
     'A library prefix is tested before own_code_prefixes');
 
   LManifest := ParseManifest(
-    '{"components":[],"own_code_prefixes":["app"]}');
+    '{"match":{"prefixes":"legacy"},"components":[],"own_code_prefixes":["app"]}');
   LMatch := MatchManifestUnit(LManifest, 'System.AppSettings');
   Assert.AreEqual(Ord(mmOwnCode), Ord(LMatch.Kind));
 end;
@@ -1061,7 +1080,7 @@ begin
   Assert.AreEqual(Ord(lkSpdxId), Ord(LKind));
 
   LManifest := ParseManifest(
-    '{"components":[' +
+    '{"match":{"prefixes":"legacy"},"components":[' +
     '{"name":"A","version":"1","vendor":"V","licence":"LicenseRef-Proprietary","units_exact":["A"]},' +
     '{"name":"B","version":"1","vendor":"V","licence":" licenseref-Freeware-with-source ","units_exact":["B"]},' +
     '{"name":"C","version":"1","vendor":"V","licence":"Commercial","units_exact":["C"]},' +
@@ -1151,7 +1170,7 @@ var
   LUnit, LExe: TArtefactInfo;
 begin
   LManifest := ParseManifest(
-    '{"components":[{"name":"Wrapped","version":"1","vendor":"A","licence":"MIT",' +
+    '{"match":{"prefixes":"legacy"},"components":[{"name":"Wrapped","version":"1","vendor":"A","licence":"MIT",' +
     '"type":"library","units_exact":["Data.DB"]}],' +
     '"own_code_units":["MainForm","System.SysUtils"],' +
     '"own_code_prefixes":["App"],' +
@@ -1274,7 +1293,7 @@ var
   LManifest: TComponentManifest;
 begin
   LManifest := ParseManifest(
-    '{"components":[{"name":"Lib","version":"1","vendor":"A","license":"Apache-2.0",' +
+    '{"match":{"prefixes":"legacy"},"components":[{"name":"Lib","version":"1","vendor":"A","license":"Apache-2.0",' +
     '"license_url":"https://www.apache.org/licenses/LICENSE-2.0","type":"library",' +
     '"units_exact":["LibUnit"]}]}');
   Assert.AreEqual('Apache-2.0', LManifest.Components[0].Licence);
@@ -1288,7 +1307,7 @@ var
   I: Integer;
 begin
   LWith := ParseManifest(
-    '{"components":[' +
+    '{"match":{"prefixes":"legacy"},"components":[' +
     '{"name":"Neslib XML","version":"1.0","copyright":"2020",' +
     '"vendor":"Neslib","licence":"MIT","type":"library","units_exact":["Neslib.Xml"]},' +
     '{"name":"Other","version":"2","copyright":"Copyright (c) 2019 Example",' +
@@ -1305,7 +1324,7 @@ begin
   Assert.AreEqual(1, MatchManifestUnit(LWith, 'Example.Collections').ComponentIndex);
 
   LWithout := ParseManifest(
-    '{"components":[{"name":"Neslib XML","version":"1.0",' +
+    '{"match":{"prefixes":"legacy"},"components":[{"name":"Neslib XML","version":"1.0",' +
     '"vendor":"Neslib","licence":"MIT","type":"library","units_exact":["Neslib.Xml"]}]}');
   Assert.AreEqual('', LWithout.Components[0].Copyright);
   Assert.IsTrue(LWithout.Loaded, 'A row without copyright must stay valid');
@@ -1321,7 +1340,7 @@ var
   LFound: Boolean;
 begin
   LManifest := ParseManifest(
-    '{"components":[{"name":"Lib","version":"1","copyright":{"year":2020},' +
+    '{"match":{"prefixes":"legacy"},"components":[{"name":"Lib","version":"1","copyright":{"year":2020},' +
     '"vendor":"A","licence":"MIT","type":"library","units_exact":["LibUnit"]}]}');
   Assert.AreEqual('', LManifest.Components[0].Copyright);
   Assert.IsTrue(LManifest.Loaded);
@@ -1342,7 +1361,7 @@ var
   LFound: Boolean;
 begin
   LManifest := ParseManifest(
-    '{"schema_version":"1.0","last_updated":"2026-03-26",' +
+    '{"match":{"prefixes":"legacy"},"schema_version":"1.0","last_updated":"2026-03-26",' +
     '"supplier":{"name":"Acme"},' +
     '"components":[{"name":"Indy","version":"10","vendor":"Indy","licence":"BSD-3-Clause",' +
     '"type":"library","units_prefix":["Id"]}]}');
@@ -2593,12 +2612,159 @@ begin
   end;
 end;
 
+procedure TComponentManifestTests.LibraryMode_Prefix_ProductPath_KeepsInstallOrigin;
+var
+  LRoot, LInstall, LProject, LRtl, LVendor, LManifestPath, LOutput, LText: string;
+  LMessage, LProductRef, LVendorRef, LExactRef: string;
+  LConfig: TSbomConfig;
+  LGenerator: TDxComplyGenerator;
+  LMessages: TList<string>;
+  LJson, LComponent, LDependency: TJSONObject;
+  LComponents, LDependencies: TJSONArray;
+  LCapture: TProgressEvent;
+  LRefused: Boolean;
+
+  function BomRefForFile(AComponents: TJSONArray; const AFileName: string): string;
+  var
+    I: Integer;
+    LItem: TJSONObject;
+    LName: string;
+  begin
+    Result := '';
+    if not Assigned(AComponents) then
+      Exit;
+    for I := 0 to AComponents.Count - 1 do
+    begin
+      if not (AComponents.Items[I] is TJSONObject) then
+        Continue;
+      LItem := TJSONObject(AComponents.Items[I]);
+      if LItem.GetValue('name') = nil then
+        Continue;
+      LName := LItem.GetValue('name').Value;
+      LName := StringReplace(LName, '/', '\', [rfReplaceAll]);
+      if SameText(LName, AFileName) or
+        SameText(LName, AFileName + '.pas') or
+        ((Length(LName) >= Length(AFileName) + 5) and
+        SameText(Copy(LName, Length(LName) - Length(AFileName) - 4, MaxInt),
+          '\' + AFileName + '.pas')) then
+      begin
+        if LItem.GetValue('bom-ref') <> nil then
+          Exit(LItem.GetValue('bom-ref').Value);
+      end;
+    end;
+  end;
+
+begin
+  LRoot := TPath.Combine(TPath.GetTempPath, 'dxc-libprefix-' + TGUID.NewGuid.ToString);
+  LInstall := TPath.Combine(LRoot, 'install');
+  LProject := TPath.Combine(LRoot, 'proj');
+  LRtl := TPath.Combine(LInstall, 'source\rtl');
+  LVendor := TPath.Combine(LProject, 'vendor');
+  TDirectory.CreateDirectory(TPath.Combine(LRtl, 'win'));
+  TDirectory.CreateDirectory(LVendor);
+  LMessages := TList<string>.Create;
+  try
+    LCapture :=
+      procedure(const AMessage: string; const AProgress: Integer)
+      begin
+        LMessages.Add(AMessage);
+      end;
+    TFile.WriteAllText(TPath.Combine(LRtl, 'win\Winapi.GDIPAPI.pas'),
+      'unit Winapi.GDIPAPI;' + sLineBreak + 'interface' + sLineBreak +
+      'implementation' + sLineBreak + 'end.' + sLineBreak, TEncoding.UTF8);
+    TFile.WriteAllText(TPath.Combine(LRtl, 'System.Classes.pas'),
+      'unit System.Classes;' + sLineBreak + 'interface' + sLineBreak +
+      'implementation' + sLineBreak + 'end.' + sLineBreak, TEncoding.UTF8);
+    TFile.WriteAllText(TPath.Combine(LVendor, 'GDIPFill.pas'),
+      'unit GDIPFill;' + sLineBreak + 'interface' + sLineBreak +
+      'implementation' + sLineBreak + 'end.' + sLineBreak, TEncoding.UTF8);
+    TFile.WriteAllText(TPath.Combine(LProject, 'Demo.dpr'),
+      'program Demo;' + sLineBreak + 'begin' + sLineBreak + 'end.' + sLineBreak,
+      TEncoding.UTF8);
+    LManifestPath := TPath.Combine(LProject, 'components.json');
+    TFile.WriteAllText(LManifestPath,
+      '{"match":{"prefixes":"legacy"},"components":[' +
+      '{"name":"Pack","version":"1.0","vendor":"Example","licence":"MIT",' +
+      '"type":"library","cpe":"' + cCpe23 + '","units_prefix":["GDIP"]},' +
+      '{"name":"RtlExact","version":"1.0","vendor":"Example","licence":"MIT",' +
+      '"type":"library","cpe":"' + cCpe23 + '","units_exact":["System.Classes"]}]}',
+      TEncoding.UTF8);
+
+    LConfig := TSbomConfig.Default;
+    LConfig.LibraryMode := True;
+    LConfig.Delphi7Root := LInstall;
+    LConfig.SourceDirs := [LRtl, LVendor];
+    LConfig.ManifestFile := LManifestPath;
+    LConfig.Supplier := 'Example';
+    LConfig.Licence := 'MIT';
+    LConfig.SbomCreator := 'sbom@example.test';
+
+    LOutput := TPath.Combine(LProject, 'lib.cdx.json');
+    LGenerator := TDxComplyGenerator.Create(LConfig);
+    try
+      LGenerator.OnProgress := LCapture;
+      Assert.IsTrue(LGenerator.Generate(TPath.Combine(LProject, 'Demo.dpr'),
+        LOutput, sfCycloneDxJson),
+        string.Join(sLineBreak, LMessages.ToArray));
+    finally
+      LGenerator.Free;
+    end;
+
+    LRefused := False;
+    for LMessage in LMessages do
+      if (Pos('Prefix match not applied', LMessage) > 0) and
+        (Pos('Winapi.GDIPAPI', LMessage) > 0) and
+        (Pos('prefix GDIP', LMessage) > 0) and
+        (Pos('row Pack', LMessage) > 0) then
+        LRefused := True;
+    Assert.IsTrue(LRefused, 'The product-path prefix must be logged: ' +
+      string.Join(sLineBreak, LMessages.ToArray));
+
+    LText := TFile.ReadAllText(LOutput, TEncoding.UTF8);
+    LJson := TJSONObject.ParseJSONValue(LText) as TJSONObject;
+    try
+      LComponents := LJson.GetValue('components') as TJSONArray;
+      LComponent := FindComponent(LComponents, 'Pack');
+      Assert.IsNotNull(LComponent, 'The prefix still matches a file outside the product tree');
+      Assert.AreEqual(cCpe23, LComponent.GetValue<string>('cpe'));
+      LComponent := FindComponent(LComponents, 'RtlExact');
+      Assert.IsNotNull(LComponent, 'units_exact still matches a product-path source file');
+      Assert.AreEqual(cCpe23, LComponent.GetValue<string>('cpe'));
+
+      LProductRef := BomRefForFile(LComponents, 'Winapi.GDIPAPI');
+      LVendorRef := BomRefForFile(LComponents, 'GDIPFill');
+      LExactRef := BomRefForFile(LComponents, 'System.Classes');
+      Assert.AreNotEqual('', LProductRef, 'The product-path unit stays in the SBOM');
+      Assert.AreNotEqual('', LVendorRef, 'The file outside the product tree stays in the SBOM');
+      Assert.AreNotEqual('', LExactRef, 'The exact-matched unit stays in the SBOM');
+
+      LDependencies := LJson.GetValue('dependencies') as TJSONArray;
+      LDependency := FindDependency(LDependencies, 'manifest-0');
+      Assert.IsNotNull(LDependency, 'Pack is the first manifest library');
+      Assert.IsTrue(DependsOnContains(LDependency, LVendorRef),
+        'Legacy mode assigns GDIPFill, which is not on a product path');
+      Assert.IsFalse(DependsOnContains(LDependency, LProductRef),
+        'A product path blocks the GDIP prefix');
+      LDependency := FindDependency(LDependencies, 'manifest-1');
+      Assert.IsNotNull(LDependency, 'RtlExact is the second manifest library');
+      Assert.IsTrue(DependsOnContains(LDependency, LExactRef),
+        'units_exact assigns System.Classes on the product path');
+    finally
+      LJson.Free;
+    end;
+  finally
+    LMessages.Free;
+    if TDirectory.Exists(LRoot) then
+      TDirectory.Delete(LRoot, True);
+  end;
+end;
+
 procedure TComponentManifestTests.Match_OwnCodeFolder_IncludesSubfolders;
 var
   LManifest: TComponentManifest;
 begin
   LManifest := ParseManifest(
-    '{"components":[],"own_code_folders":["' +
+    '{"match":{"prefixes":"legacy"},"components":[],"own_code_folders":["' +
     JsonPath('C:\DXComplyFolderTest\src') + '"]}');
   AssertFolderMatch(LManifest, 'Main',
     'C:\DXComplyFolderTest\src\App\Main.pas', mmOwnCode, -1,
@@ -2613,7 +2779,7 @@ var
   LManifest: TComponentManifest;
 begin
   LManifest := ParseManifest(
-    '{"components":[' +
+    '{"match":{"prefixes":"legacy"},"components":[' +
     '{"name":"JVCL","version":"1","vendor":"A","licence":"MPL-1.1","type":"library",' +
     '"units_folder":["' + JsonPath('C:\DXComplyFolderTest\JVCL') + '"]}]}');
   AssertFolderMatch(LManifest, 'JvCore',
@@ -2626,7 +2792,7 @@ var
   LManifest: TComponentManifest;
 begin
   LManifest := ParseManifest(
-    '{"components":[' +
+    '{"match":{"prefixes":"legacy"},"components":[' +
     '{"name":"JVCL","version":"1","vendor":"A","licence":"MPL-1.1","type":"library",' +
     '"units_folder":["' + JsonPath('C:\DXComplyFolderTest\JVCL') + '"]}]}');
   AssertFolderMatch(LManifest, 'JvCore',
@@ -2645,7 +2811,7 @@ var
   LManifest: TComponentManifest;
 begin
   LManifest := ParseManifest(
-    '{"components":[' +
+    '{"match":{"prefixes":"legacy"},"components":[' +
     '{"name":"JVCL","version":"1","vendor":"A","licence":"MPL-1.1","type":"library",' +
     '"units_folder":["' + JsonPath('C:\DXComplyFolderTest\src\ThirdParty\JVCL') + '"]}' +
     '],"own_code_folders":["' + JsonPath('C:\DXComplyFolderTest\src') + '"]}');
@@ -2657,7 +2823,7 @@ begin
     'The rest of the own-code tree stays own code');
 
   LManifest := ParseManifest(
-    '{"components":[' +
+    '{"match":{"prefixes":"legacy"},"components":[' +
     '{"name":"JVCL","version":"1","vendor":"A","licence":"MPL-1.1","type":"library",' +
     '"units_folder":["' + JsonPath('C:\DXComplyFolderTest\JVCL') + '"]}' +
     '],"own_code_folders":["' + JsonPath('C:\DXComplyFolderTest\JVCL\Patches') + '"]}');
@@ -2674,7 +2840,7 @@ var
   LManifest: TComponentManifest;
 begin
   LManifest := ParseManifest(
-    '{"components":[' +
+    '{"match":{"prefixes":"legacy"},"components":[' +
     '{"name":"JVCL","version":"1","vendor":"A","licence":"MPL-1.1","type":"library",' +
     '"units_folder":["' + JsonPath('C:\DXComplyFolderTest\JVCL') + '"]},' +
     '{"name":"Special","version":"1","vendor":"A","licence":"MIT","type":"library",' +
@@ -2693,7 +2859,7 @@ var
   LManifest: TComponentManifest;
 begin
   LManifest := ParseManifest(
-    '{"components":[' +
+    '{"match":{"prefixes":"legacy"},"components":[' +
     '{"name":"JVCL","version":"1","vendor":"A","licence":"MPL-1.1","type":"library",' +
     '"units_folder":["' + JsonPath('C:\DXComplyFolderTest\JVCL') + '"]}' +
     '],"own_code_units":["JvPatch"]}');
@@ -2710,7 +2876,7 @@ var
   LManifest: TComponentManifest;
 begin
   LManifest := ParseManifest(
-    '{"components":[' +
+    '{"match":{"prefixes":"legacy"},"components":[' +
     '{"name":"ByPrefix","version":"1","vendor":"A","licence":"MIT","type":"library",' +
     '"units_prefix":["Jv"]},' +
     '{"name":"ByFolder","version":"1","vendor":"A","licence":"MIT","type":"library",' +
@@ -2721,7 +2887,7 @@ begin
     'A component folder beats a prefix, whatever the row order');
 
   LManifest := ParseManifest(
-    '{"components":[' +
+    '{"match":{"prefixes":"legacy"},"components":[' +
     '{"name":"ByPrefix","version":"1","vendor":"A","licence":"MIT","type":"library",' +
     '"units_prefix":["App"]}' +
     '],"own_code_folders":["' + JsonPath('C:\DXComplyFolderTest\src') + '"]}');
@@ -2735,7 +2901,7 @@ var
   LManifest: TComponentManifest;
 begin
   LManifest := ParseManifest(
-    '{"components":[' +
+    '{"match":{"prefixes":"legacy"},"components":[' +
     '{"name":"JVCL","version":"1","vendor":"A","licence":"MPL-1.1","type":"library",' +
     '"units_folder":["' + JsonPath('C:\DXComplyFolderTest\JVCL') + '"],' +
     '"units_prefix":["Jv"],"units_exclude":["JvSkip","Vcl.Skia"]},' +
@@ -2758,7 +2924,7 @@ var
   LManifest: TComponentManifest;
 begin
   LManifest := ParseManifest(
-    '{"components":[' +
+    '{"match":{"prefixes":"legacy"},"components":[' +
     '{"name":"JVCL","version":"1","vendor":"A","licence":"MPL-1.1","type":"library",' +
     '"units_folder":["' + JsonPath('C:\DXComplyFolderTest\JVCL') + '"],' +
     '"units_prefix":["Jv"]}' +
@@ -2777,7 +2943,7 @@ var
   LManifest: TComponentManifest;
 begin
   LManifest := ParseManifest(
-    '{"components":[' +
+    '{"match":{"prefixes":"legacy"},"components":[' +
     '{"name":"JVCL","version":"1","vendor":"A","licence":"MPL-1.1","type":"library",' +
     '"units_folder":["C:/DXComplyFolderTest/JVCL"]}]}');
   AssertFolderMatch(LManifest, 'JvCore',
@@ -2790,7 +2956,7 @@ var
   LManifest: TComponentManifest;
 begin
   LManifest := ParseManifest(
-    '{"components":[' +
+    '{"match":{"prefixes":"legacy"},"components":[' +
     '{"name":"First","version":"1","vendor":"A","licence":"MIT","type":"library",' +
     '"units_folder":["' + JsonPath('C:\DXComplyFolderTest\JVCL') + '"]},' +
     '{"name":"Second","version":"1","vendor":"A","licence":"MIT","type":"library",' +
@@ -2810,7 +2976,7 @@ var
   LDir, LFile: string;
 begin
   Assert.IsTrue(TryParseComponentManifest(
-    '{"components":[' +
+    '{"match":{"prefixes":"legacy"},"components":[' +
     '{"name":"JVCL","version":"1","vendor":"A","licence":"MPL-1.1","type":"library",' +
     '"units_folder":["' + JsonPath('C:\DXComplyFolderTest\Missing') + '"]}]}',
     'test', LManifest, LError), LError);
@@ -2831,7 +2997,7 @@ begin
   try
     TFile.WriteAllText(LFile, 'not a folder');
     Assert.IsTrue(TryParseComponentManifest(
-      '{"components":[' +
+      '{"match":{"prefixes":"legacy"},"components":[' +
       '{"name":"JVCL","version":"1","vendor":"A","licence":"MPL-1.1","type":"library",' +
       '"units_folder":["' + JsonPath(LFile) + '"]}]}',
       'test', LManifest, LError), LError);
@@ -2870,7 +3036,7 @@ begin
     TFile.WriteAllText(LOwnPath, 'unit Main;');
     LManifestPath := TPath.Combine(LManifestDir, 'components.json');
     TFile.WriteAllText(LManifestPath,
-      '{"components":[{"name":"JVCL","version":"1","vendor":"A","licence":"MPL-1.1",' +
+      '{"match":{"prefixes":"legacy"},"components":[{"name":"JVCL","version":"1","vendor":"A","licence":"MPL-1.1",' +
       '"type":"library","units_folder":["../vendor/JVCL"]}],' +
       '"own_code_folders":["../src","../missing-src"]}');
 
@@ -2905,7 +3071,7 @@ begin
       'The loaded text keeps own-code folders absolute for a later parse');
 
     Assert.IsTrue(TryParseComponentManifest(
-      '{"components":[{"name":"JVCL","version":"1","vendor":"A","licence":"MPL-1.1",' +
+      '{"match":{"prefixes":"legacy"},"components":[{"name":"JVCL","version":"1","vendor":"A","licence":"MPL-1.1",' +
       '"type":"library","units_folder":["libs/JVCL"]}]}',
       'test', LManifest, LError), LError);
     LMissingNamed := False;
@@ -2934,7 +3100,7 @@ var
   LArtefact: TArtefactInfo;
 begin
   Assert.IsTrue(TryParseComponentManifest(
-    '{"components":[{"name":"JVCL","version":"1","vendor":"A","licence":"MPL-1.1",' +
+    '{"match":{"prefixes":"legacy"},"components":[{"name":"JVCL","version":"1","vendor":"A","licence":"MPL-1.1",' +
     '"type":"library","units_folder":["' + JsonPath('C:\DXComplyFolderTest\JVCL') + '"]}]}',
     'test', LManifest, LError), LError);
   for I := 0 to High(LManifest.Warnings) do
@@ -2972,7 +3138,7 @@ var
   LArtefact: TArtefactInfo;
 begin
   LManifest := ParseManifest(
-    '{"components":[{"name":"JVCL","version":"1","vendor":"A","licence":"MPL-1.1",' +
+    '{"match":{"prefixes":"legacy"},"components":[{"name":"JVCL","version":"1","vendor":"A","licence":"MPL-1.1",' +
     '"type":"library","units_folder":["' + JsonPath('C:\DXComplyFolderTest\JVCL') + '"]}]}');
 
   LArtefact := Default(TArtefactInfo);
@@ -3010,7 +3176,7 @@ var
   LDormant: TArray<string>;
 begin
   LManifest := ParseManifest(
-    '{"components":[' +
+    '{"match":{"prefixes":"legacy"},"components":[' +
     '{"name":"TMS FNC Core","version":"4.2.3.7","vendor":"TMS Software",' +
     '"licence":"LicenseRef-Proprietary","type":"library","units_prefix":["FMX.TMSFNC"]},' +
     '{"name":"TMS FNC UI Pack","version":"7.1.2.2","vendor":"TMS Software",' +
@@ -3043,6 +3209,93 @@ begin
   Assert.IsTrue(Pos('component "TMS FNC UI Pack" matched no units', LDormant[0]) > 0,
     LDormant[0]);
   Assert.AreEqual(0, Pos('TMS FNC Core', LDormant[0]));
+end;
+
+procedure TComponentManifestTests.Match_CorroboratedPrefix_RequiresADot_AndSkipsProductPath;
+var
+  LLegacy: TComponentManifest;
+  LManifest: TComponentManifest;
+  LMatch: TManifestMatch;
+  LPrefix: string;
+  LRow: string;
+const
+  cJson =
+    '{"components":[' +
+    '{"name":"Neslib","version":"1","vendor":"A","licence":"MIT","type":"library",' +
+    '"units_prefix":["Neslib"]},' +
+    '{"name":"Neslib XML","version":"1","vendor":"A","licence":"MIT","type":"library",' +
+    '"units_prefix":["Neslib.Xml"]},' +
+    '{"name":"Pack","version":"1","vendor":"A","licence":"MIT","type":"library",' +
+    '"units_prefix":["Adv","GDIP","FMX.TMSFNC"]}]}';
+  cProduct = 'C:\DXProduct\source\rtl\win\Winapi.GDIPAPI.pas';
+begin
+  LManifest := ParseManifest(cJson);
+  Assert.AreEqual(Ord(pmmCorroborated), Ord(LManifest.PrefixMode));
+  Assert.AreEqual(Ord(mmNone), Ord(MatchManifestUnit(LManifest, 'Neslib.Utils').Kind),
+    'A prefix with no dot does not assign');
+  LMatch := MatchManifestUnit(LManifest, 'Neslib.Xml.Reader');
+  Assert.AreEqual(Ord(mmLibrary), Ord(LMatch.Kind));
+  Assert.AreEqual(1, LMatch.ComponentIndex, 'The dotted prefix still wins');
+  LMatch := MatchManifestUnit(LManifest, 'FMX.TMSFNCButton');
+  Assert.AreEqual(2, LMatch.ComponentIndex, 'A dotted prefix assigns when there is no product path');
+  Assert.AreEqual(Ord(mmNone), Ord(MatchManifestUnit(LManifest, 'AdvGrid').Kind));
+
+  LManifest.InstallRoot := 'C:\DXProduct';
+  Assert.AreEqual(Ord(mmNone), Ord(MatchManifestUnit(LManifest, 'Winapi.GDIPAPI', cProduct).Kind),
+    'GDIP does not take a product RTL unit');
+  Assert.AreEqual(Ord(mmNone), Ord(MatchManifestUnit(LManifest, 'FMX.TMSFNCButton',
+    'C:\DXProduct\source\fmx\FMX.TMSFNCButton.pas').Kind),
+    'A dotted prefix does not reassign a product path');
+  Assert.IsTrue(TryRejectedLibraryPrefix(LManifest, 'Winapi.GDIPAPI', cProduct, LPrefix, LRow));
+  Assert.AreEqual('GDIP', LPrefix);
+  Assert.AreEqual('Pack', LRow);
+  Assert.IsTrue(Pos('kept origin Embarcadero RTL',
+    RejectedPrefixLogLine('Winapi.GDIPAPI', LPrefix, LRow, 'Embarcadero RTL')) > 0);
+
+  // units_exact and units_folder still assign on a product path.
+  LManifest := ParseManifest(
+    '{"components":[{"name":"Pack","version":"1","vendor":"A","licence":"MIT",' +
+    '"type":"library","units_exact":["Winapi.GDIPAPI"],' +
+    '"units_folder":["C:\\DXProduct\\source\\rtl"]}]}');
+  LManifest.InstallRoot := 'C:\DXProduct';
+  Assert.AreEqual(Ord(mmLibrary), Ord(MatchManifestUnit(LManifest, 'Winapi.GDIPAPI', cProduct).Kind),
+    'units_exact still assigns on a product path');
+
+  LLegacy := ParseManifest('{"match":{"prefixes":"legacy"},"components":[' +
+    '{"name":"Pack","version":"1","vendor":"A","licence":"MIT","type":"library",' +
+    '"units_prefix":["Adv"]}]}');
+  Assert.AreEqual(Ord(pmmLegacy), Ord(LLegacy.PrefixMode));
+  Assert.AreEqual(Ord(mmLibrary), Ord(MatchManifestUnit(LLegacy, 'AdvGrid').Kind),
+    'legacy still assigns a prefix with no dot when there is no product path');
+  LLegacy.InstallRoot := 'C:\DXProduct';
+  Assert.AreEqual(Ord(mmNone), Ord(MatchManifestUnit(LLegacy, 'AdvGrid',
+    'C:\DXProduct\source\vcl\AdvGrid.pas').Kind),
+    'legacy never reassigns a product path');
+end;
+
+procedure TComponentManifestTests.Parse_MatchPrefixes_Unknown_StaysCorroborated;
+var
+  I: Integer;
+  LFound: Boolean;
+  LManifest: TComponentManifest;
+begin
+  LManifest := ParseManifest(
+    '{"match":{"prefixes":"strict"},"components":[{"name":"Pack","version":"1",' +
+    '"vendor":"A","licence":"MIT","type":"library","units_prefix":["Adv"]}]}');
+  Assert.AreEqual(Ord(pmmCorroborated), Ord(LManifest.PrefixMode));
+  LFound := False;
+  for I := 0 to High(LManifest.Warnings) do
+    if Pos('match.prefixes "strict"', LManifest.Warnings[I]) > 0 then
+      LFound := True;
+  Assert.IsTrue(LFound, 'An unknown match.prefixes value must be reported');
+  Assert.AreEqual(Ord(mmNone), Ord(MatchManifestUnit(LManifest, 'AdvGrid').Kind));
+  LFound := False;
+  for I := 0 to High(LManifest.Warnings) do
+    if (Pos('prefix "Adv"', LManifest.Warnings[I]) > 0) and
+      (Pos('has no dot', LManifest.Warnings[I]) > 0) and
+      (Pos('not applied', LManifest.Warnings[I]) > 0) then
+      LFound := True;
+  Assert.IsTrue(LFound, 'A prefix with no dot must say it is not applied');
 end;
 
 initialization

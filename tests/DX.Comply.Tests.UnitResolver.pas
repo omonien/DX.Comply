@@ -177,11 +177,17 @@ type
     [Test]
     procedure Resolve_CatalogRepositoryUnderDocuments_ClassifiesAsThirdParty;
     /// <summary>
-    /// A DCU in a product lib folder is Embarcadero until a manifest row
-    /// matches it. The row then wins.
+    /// A DCU in a product lib folder stays Embarcadero when the only match
+    /// is a units_prefix. units_exact still wins over that location.
     /// </summary>
     [Test]
     procedure Resolve_ProductLibDcuWithManifest_MatchesComponent;
+    /// <summary>
+    /// Winapi.GDIP* and Vcl.HtmlHelpViewer stay Embarcadero when a short
+    /// prefix would otherwise claim them. Issue #176.
+    /// </summary>
+    [Test]
+    procedure Resolve_ShortPrefix_KeepsProductUnitsEmbarcadero;
     /// <summary>A folder added under source or lib is third party.</summary>
     [Test]
     procedure Resolve_UserFoldersUnderInstall_ClassifyAsThirdParty;
@@ -1218,7 +1224,7 @@ end;
 
 function DecManifest(const AMatchField, AMatchValue: string): string;
 begin
-  Result := '{"components":[{"name":"DEC","vendor":"Example","licence":"MIT",' +
+  Result := '{"match":{"prefixes":"legacy"},"components":[{"name":"DEC","vendor":"Example","licence":"MIT",' +
     '"type":"library","' + AMatchField + '":["' + AMatchValue + '"]}]}';
 end;
 
@@ -1455,6 +1461,7 @@ var
   LError: string;
   LInstall: string;
   LManifest: TComponentManifest;
+  LPath: string;
   LTemp: string;
   LUnit: TResolvedUnitInfo;
   LUnits: TResolvedUnitList;
@@ -1470,17 +1477,114 @@ begin
 
     Assert.IsTrue(TryParseComponentManifest(DecManifest('units_prefix', 'DEC'),
       '', LManifest, LError), LError);
-    AssertDecComponent(DecManifest('units_prefix', 'DEC'),
-      'DECCipher', LUnit.SourcePath, 'units_prefix');
+    LManifest.InstallRoot := LInstall;
+    LUnits := TResolvedUnitList.Create;
+    try
+      LUnits.Add(LUnit);
+      ApplyManifestOverInstallOrigin(LManifest, LInstall, LUnits);
+      Assert.AreEqual(uokEmbarcaderoRtl, LUnits[0].OriginKind,
+        'A prefix does not reassign a unit in the product lib folder');
+      LPath := LUnit.SourcePath;
+      if LPath = '' then
+        LPath := LUnit.ResolvedPath;
+      Assert.AreEqual(Ord(mmNone), Ord(MatchManifestUnit(
+        LManifest, 'DECCipher', LPath).Kind),
+        'The same prefix does not assign once the install root is known');
+    finally
+      LUnits.Free;
+    end;
+
+    AssertDecComponent(DecManifest('units_exact', 'DECCipher'),
+      'DECCipher', LUnit.SourcePath, 'units_exact');
+    Assert.IsTrue(TryParseComponentManifest(DecManifest('units_exact', 'DECCipher'),
+      '', LManifest, LError), LError);
     LUnits := TResolvedUnitList.Create;
     try
       LUnits.Add(LUnit);
       ApplyManifestOverInstallOrigin(LManifest, LInstall, LUnits);
       Assert.AreEqual(uokThirdParty, LUnits[0].OriginKind,
-        'A matching manifest row wins over the product lib location');
+        'units_exact still wins over the product lib location');
     finally
       LUnits.Free;
     end;
+  finally
+    if TDirectory.Exists(LTemp) then
+      TDirectory.Delete(LTemp, True);
+  end;
+end;
+
+procedure TUnitResolverTests.Resolve_ShortPrefix_KeepsProductUnitsEmbarcadero;
+const
+  cJson = '{"components":[{"name":"TMS VCL UI Pack","vendor":"tmssoftware.com",' +
+    '"licence":"Commercial","type":"library",' +
+    '"units_prefix":["Adv","GDIP","HTML","TMS"]}]}';
+var
+  LArtefact: TArtefactInfo;
+  LArtefacts: TArtefactList;
+  LEntry: TComponentEntry;
+  LError: string;
+  LGdip: TResolvedUnitInfo;
+  LHelp: TResolvedUnitInfo;
+  LInstall: string;
+  LLine: string;
+  LManifest: TComponentManifest;
+  LTemp: string;
+  LUnits: TResolvedUnitList;
+begin
+  LTemp := TPath.Combine(TPath.GetTempPath, TPath.GetRandomFileName);
+  LInstall := TPath.Combine(LTemp, 'Delphi');
+  try
+    LGdip := ResolveInstallFile(FResolver, LInstall,
+      TPath.Combine(LInstall, 'source\rtl\win'), 'Winapi.GDIPAPI',
+      'Winapi.GDIPAPI.pas',
+      'unit Winapi.GDIPAPI;' + sLineBreak + 'interface' + sLineBreak +
+      'implementation' + sLineBreak + 'end.', False);
+    LHelp := ResolveInstallFile(FResolver, LInstall,
+      TPath.Combine(LInstall, 'source\vcl'), 'Vcl.HtmlHelpViewer',
+      'Vcl.HtmlHelpViewer.pas',
+      'unit Vcl.HtmlHelpViewer;' + sLineBreak + 'interface' + sLineBreak +
+      'implementation' + sLineBreak + 'end.', False);
+    Assert.AreEqual(uokEmbarcaderoRtl, LGdip.OriginKind);
+    Assert.AreEqual(uokEmbarcaderoVcl, LHelp.OriginKind);
+
+    Assert.IsTrue(TryParseComponentManifest(cJson, '', LManifest, LError), LError);
+    LManifest.InstallRoot := LInstall;
+    Assert.AreEqual(Ord(mmNone), Ord(MatchManifestUnit(LManifest, 'Winapi.GDIPAPI',
+      LGdip.SourcePath).Kind), 'GDIP must not take Winapi.GDIPAPI');
+    Assert.AreEqual(Ord(mmNone), Ord(MatchManifestUnit(LManifest, 'Vcl.HtmlHelpViewer',
+      LHelp.SourcePath).Kind), 'HTML must not take Vcl.HtmlHelpViewer');
+    // A dotted prefix is still refused on a product path.
+    LEntry := LManifest.Components[0];
+    LEntry.Prefixes := TArray<string>.Create('Winapi.GDIP');
+    LManifest.Components[0] := LEntry;
+    Assert.AreEqual(Ord(mmNone), Ord(MatchManifestUnit(LManifest, 'Winapi.GDIPAPI',
+      LGdip.SourcePath).Kind), 'A dotted prefix does not reassign a product path');
+
+    LEntry.Prefixes := TArray<string>.Create('Adv', 'GDIP', 'HTML', 'TMS');
+    LManifest.Components[0] := LEntry;
+    LUnits := TResolvedUnitList.Create;
+    try
+      LUnits.Add(LGdip);
+      LUnits.Add(LHelp);
+      ApplyManifestOverInstallOrigin(LManifest, LInstall, LUnits);
+      Assert.AreEqual(uokEmbarcaderoRtl, LUnits[0].OriginKind);
+      Assert.AreEqual(uokEmbarcaderoVcl, LUnits[1].OriginKind);
+    finally
+      LUnits.Free;
+    end;
+
+    LArtefact := ArtefactFromResolved(LGdip);
+    LArtefacts := TArtefactList.Create;
+    try
+      LArtefacts.Add(LArtefact);
+      LLine := RejectedPrefixLogLines(LManifest, LArtefacts)[0];
+    finally
+      LArtefacts.Free;
+    end;
+    Assert.IsTrue(Pos('unit Winapi.GDIPAPI', LLine) > 0, LLine);
+    Assert.IsTrue(Pos('prefix GDIP', LLine) > 0, LLine);
+    Assert.IsTrue(Pos('row TMS VCL UI Pack', LLine) > 0, LLine);
+    Assert.IsTrue(Pos('kept origin Embarcadero RTL', LLine) > 0, LLine);
   finally
     if TDirectory.Exists(LTemp) then
       TDirectory.Delete(LTemp, True);
@@ -1516,7 +1620,7 @@ end;
 procedure TUnitResolverTests.Resolve_UnmatchedInstallUnit_IsNamedUnknownSupplier;
 const
   cManifestJson =
-    '{"components":[{"name":"DEC","vendor":"Example","licence":"MIT",' +
+    '{"match":{"prefixes":"legacy"},"components":[{"name":"DEC","vendor":"Example","licence":"MIT",' +
     '"units_prefix":["DEC"]}],"own_code_units":["MyHelper"]}';
 var
   LArtefacts: TArtefactList;

@@ -399,7 +399,7 @@ procedure TSpdx3WriterTests.Build_UnitLicences_EmbarcaderoAndOwnCode;
 begin
   FMetadata.Licence := 'MIT';
   FMetadata.ComponentManifestJson :=
-    '{"components":[],"own_code_units":["MainForm"],"own_code_prefixes":["App"],' +
+    '{"match":{"prefixes":"legacy"},"components":[],"own_code_units":["MainForm"],"own_code_prefixes":["App"],' +
     '"own_code_folders":["' +
     StringReplace('C:\DXComplyFolderTest\src', '\', '\\', [rfReplaceAll]) + '"]}';
   AddArtefact('TestProject.exe', 'application', 'abc');
@@ -502,7 +502,7 @@ procedure TSpdx3WriterTests.Build_LicenseRef_IsNotDoubled;
 begin
   FMetadata.Licence := 'LicenseRef-Proprietary';
   FMetadata.ComponentManifestJson :=
-    '{"components":[' +
+    '{"match":{"prefixes":"legacy"},"components":[' +
     '{"name":"FreeLib","version":"1","vendor":"A","licence":"LicenseRef-Freeware-with-source",' +
     '"type":"library","units_exact":["FreeUnit"]},' +
     '{"name":"Spaced","version":"1","vendor":"A","licence":"LicenseRef-My Terms",' +

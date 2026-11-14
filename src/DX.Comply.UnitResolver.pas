@@ -139,10 +139,11 @@ type
   end;
 
 /// <summary>
-/// A units_exact, units_prefix, or units_folder match names a third-party
-/// library. That match wins over a Delphi-install location that classified
-/// the unit as Embarcadero. The origin becomes Third party. A unit that
-/// does not match, including a product RTL unit, is left as resolved.
+/// A units_exact or units_folder match names a third-party library. That
+/// match wins over a Delphi-install location that classified the unit as
+/// Embarcadero. The origin becomes Third party. A units_prefix match does
+/// not. A prefix never reassigns a unit in an Embarcadero product path.
+/// A unit that does not match stays as resolved.
 /// </summary>
 procedure ApplyManifestOverInstallOrigin(const AManifest: TComponentManifest;
   const AInstallRoot: string; const AUnits: TResolvedUnitList);
@@ -460,134 +461,11 @@ begin
   Result := PathIsUnderDirectory(APath, ABaseDirectory);
 end;
 
-type
-  TFirstSegment = record
-    Name: string;
-    HasMore: Boolean;
-  end;
-
-function FirstPathSegment(const APath, ABaseDirectory: string): TFirstSegment;
-var
-  LBase: string;
-  LPath: string;
-  LRest: string;
-  LSlash: Integer;
-begin
-  Result.Name := '';
-  Result.HasMore := False;
-  if not PathIsUnderDirectory(APath, ABaseDirectory) then
-    Exit;
-
-  LBase := ExcludeTrailingPathDelimiter(LowerCase(TPath.GetFullPath(ABaseDirectory)));
-  LPath := LowerCase(TPath.GetFullPath(APath));
-  if NativeInt(Length(LPath)) <= NativeInt(Length(LBase)) then
-    Exit;
-
-  LRest := Copy(LPath, Length(LBase) + 1, MaxInt);
-  if StartsText('\', LRest) or StartsText('/', LRest) then
-    LRest := Copy(LRest, 2, MaxInt);
-  if NativeInt(Length(LRest)) = 0 then
-    Exit;
-
-  LSlash := Pos('\', LRest);
-  if LSlash = 0 then
-    LSlash := Pos('/', LRest);
-  if LSlash = 0 then
-    Result.Name := LRest
-  else
-  begin
-    Result.Name := Copy(LRest, 1, LSlash - 1);
-    Result.HasMore := NativeInt(Length(LRest)) > NativeInt(LSlash);
-  end;
-end;
-
-function IsReleaseOrDebugFolder(const AName: string): Boolean;
-begin
-  Result := SameText(AName, 'release') or SameText(AName, 'debug');
-end;
-
-function IsDelphiLibPlatform(const AName: string): Boolean;
-const
-  cPlatforms: array[0..21] of string = (
-    'win32', 'win64', 'win64x', 'winarm64',
-    'linux32', 'linux64', 'linuxarm64',
-    'osx32', 'osx64', 'osxarm64', 'macos64', 'macosarm64',
-    'android', 'android32', 'android64',
-    'iosdevice', 'iosdevice32', 'iosdevice64',
-    'iossim32', 'iossim64', 'iossimarm64', 'iossimulator');
-var
-  i: Integer;
-begin
-  Result := False;
-  for i := Low(cPlatforms) to High(cPlatforms) do
-    if SameText(AName, cPlatforms[i]) then
-      Exit(True);
-end;
-
-function IsEmbarcaderoSourcePath(const APath, ARootDir: string): Boolean;
-const
-  // First-level folders of the product source tree. A library copied into
-  // source\, or installed under Extras or CatalogRepository, is not here.
-  cSourceFolders: array[0..23] of string = (
-    'rtl', 'vcl', 'fmx', 'data', 'databinding', 'dataexplorer',
-    'dunit', 'dunitx', 'experts', 'flatbox2d', 'ibx',
-    'indy', 'indy10', 'indyimpl', 'internet', 'property editors',
-    'soap', 'tethering', 'toolsapi', 'visualizers', 'xml',
-    'db', 'websnap', 'clx');
-var
-  i: Integer;
-  LFolder: TFirstSegment;
-  LSource: string;
-begin
-  Result := False;
-  LSource := TPath.Combine(ARootDir, 'source');
-  if not PathIsUnderDirectory(APath, LSource) then
-    Exit;
-  LFolder := FirstPathSegment(APath, LSource);
-  if LFolder.Name = '' then
-    Exit;
-  for i := Low(cSourceFolders) to High(cSourceFolders) do
-    if SameText(LFolder.Name, cSourceFolders[i]) then
-      Exit(True);
-end;
-
-function IsEmbarcaderoLibPath(const APath, ARootDir: string): Boolean;
-var
-  LFirst: TFirstSegment;
-  LLib: string;
-  LSecond: TFirstSegment;
-begin
-  // Product DCUs live in lib\<platform>\release, lib\<platform>\debug,
-  // directly in lib\<platform>, or (older installs) directly in lib.
-  // lib\<package>\... is a library added under the install.
-  Result := False;
-  LLib := TPath.Combine(ARootDir, 'lib');
-  if not PathIsUnderDirectory(APath, LLib) then
-    Exit;
-
-  LFirst := FirstPathSegment(APath, LLib);
-  if LFirst.Name = '' then
-    Exit;
-  if not LFirst.HasMore then
-    Exit(True);
-  if IsReleaseOrDebugFolder(LFirst.Name) then
-    Exit(True);
-
-  // release and debug count only under a product platform folder.
-  // lib\SomeLibrary\release is a folder added under the install.
-  LSecond := FirstPathSegment(APath, TPath.Combine(LLib, LFirst.Name));
-  if not IsDelphiLibPlatform(LFirst.Name) then
-    Exit;
-  if IsReleaseOrDebugFolder(LSecond.Name) then
-    Exit(True);
-  if not LSecond.HasMore then
-    Exit(True);
-end;
 
 function TUnitResolver.IsEmbarcaderoShippedPath(const APath, ARootDir: string): Boolean;
 begin
-  Result := IsEmbarcaderoSourcePath(APath, ARootDir) or
-    IsEmbarcaderoLibPath(APath, ARootDir);
+  // Same product-folder rule the prefix veto uses, so the two cannot drift.
+  Result := IsEmbarcaderoProductPath(APath, ARootDir);
 end;
 
 function ManifestSourcePath(const AUnit: TResolvedUnitInfo): string;
@@ -615,12 +493,19 @@ var
   i: Integer;
   LLocation: string;
   LMatch: TManifestMatch;
+  LManifest: TComponentManifest;
+  LSource: string;
   LUnit: TResolvedUnitInfo;
 begin
   if not AManifest.Loaded or not Assigned(AUnits) then
     Exit;
   if Trim(AInstallRoot) = '' then
     Exit;
+
+  // The prefix veto reads InstallRoot from the manifest. The caller passes
+  // the toolchain root here, including when the parsed file did not carry it.
+  LManifest := AManifest;
+  LManifest.InstallRoot := AInstallRoot;
 
   for i := 0 to AUnits.Count - 1 do
   begin
@@ -634,8 +519,12 @@ begin
       not PathIsUnderDirectory(LUnit.ResolvedPath, AInstallRoot) then
       Continue;
 
-    LMatch := MatchManifestUnit(AManifest, LUnit.UnitName,
-      ManifestSourcePath(LUnit));
+    // Folder rules use the source path. A product DCU with no separate .pas
+    // still has to be visible to the prefix veto, including lib\<platform>\release.
+    LSource := ManifestSourcePath(LUnit);
+    if (LSource = '') and IsEmbarcaderoProductPath(LLocation, AInstallRoot) then
+      LSource := LLocation;
+    LMatch := MatchManifestUnit(LManifest, LUnit.UnitName, LSource);
     if LMatch.Kind <> mmLibrary then
       Continue;
 

@@ -369,6 +369,7 @@ Add a `.dxcomply.json` to your project folder and pass `--ci` so `dxcomply.exe` 
   "exclude": ["build/**/Debug/**", "**/*.dcu"],
   "scanDirs": ["redist"],
   "manifest": "components.json",
+  "matchPrefixes": "corroborated",
   "sbomCreator": "sbom@example.com",
   "strict": false,
   "product": {
@@ -413,7 +414,7 @@ When `--ci` is set and the file exists, values are merged in this order:
 2. Keys present in `.dxcomply.json`.
 3. Command-line options you actually pass. Those win over the file.
 
-An option you leave off the command line does not override the file, even though that option has a default. `dxcomply --ci --config-name=Debug` uses Debug even when the file says `"configName": "Release"`. `dxcomply --ci` with no `--config-name` uses the file's `configName`, or `Release` when the key is absent. The same rule applies to `--platform`, `--format`, `--output`, `--product`, `--version`, `--supplier`, `--supplier-url`, `--licence`, `--sbom-creator`, `--report`, `--report-content`, `--report-group-by-folder`, `--include`, `--exclude`, `--map-dir`, `--manifest`, `--strict`, `--spdx-version`, and `--no-composition-evidence`.
+An option you leave off the command line does not override the file, even though that option has a default. `dxcomply --ci --config-name=Debug` uses Debug even when the file says `"configName": "Release"`. `dxcomply --ci` with no `--config-name` uses the file's `configName`, or `Release` when the key is absent. The same rule applies to `--platform`, `--format`, `--output`, `--product`, `--version`, `--supplier`, `--supplier-url`, `--licence`, `--sbom-creator`, `--report`, `--report-content`, `--report-group-by-folder`, `--include`, `--exclude`, `--map-dir`, `--manifest`, `--match-prefixes`, `--strict`, `--spdx-version`, and `--no-composition-evidence`.
 
 If you pass `--include` or `--exclude`, that list replaces the file's list. `--report` overrides the file's enabled flag and format, and leaves the file's report output path as it is. `--report-content` overrides `report.content` only.
 
@@ -438,17 +439,25 @@ The units come from the MAP file, including a Delphi 7 `.dpr` with its `.dof` an
 
 `units_folder` is an array, the same shape as `units_exact`, `units_prefix`, and `units_exclude`. One row can name more than one package folder. `own_code_folders` is the same kind of list for your own units, next to `own_code_units` and `own_code_prefixes`. A folder stands for every unit whose source file is in that folder or in a folder under it. There is no switch to turn that off. A neighboring folder is not included: `C:\Libs\JVCL` does not match `C:\Libs\JVCL2\Unit.pas`. Comparison ignores case, and `/` and `\` are the same. A relative path is resolved from the directory of the components file, not from the project directory, and `..` is applied. A folder that is not on disk produces a warning, and the rule is still applied. A path that is a file is not applied.
 
-Folder rules need the unit's source path. The MAP file names the unit. DX.Comply uses the `.pas` it finds, including when the linked file is a DCU in the output directory and the `.pas` is on the search path. A DCU that lives in the package folder itself (not in the project output directory) is matched by that path when no `.pas` was found. A unit that stays a name with no file, and a DCU in the output directory whose `.pas` was not found, are not matched by a folder. `units_exact`, `own_code_units`, `units_prefix`, and `own_code_prefixes` still match those units by name.
+Folder rules need the unit's source path. The MAP file names the unit. DX.Comply uses the `.pas` it finds, including when the linked file is a DCU in the output directory and the `.pas` is on the search path. A DCU that lives in the package folder itself (not in the project output directory) is matched by that path when no `.pas` was found. A unit that stays a name with no file, and a DCU in the output directory whose `.pas` was not found, are not matched by a folder. `units_exact` and `own_code_units` still match those units by name. A `units_prefix` matches a name-only unit only when the prefix rule below allows that prefix.
 
 The first hit wins, in this order:
 
-1. `units_exact` (the first matching row).
+1. `units_exact` (the first matching row). `units_exclude` does not apply to an exact name.
 2. `own_code_units`.
-3. The longest matching folder, from `units_folder` and `own_code_folders` together. `units_exclude` keeps a unit out of that row's folders as well as its prefixes. On a tie the first component row wins, and a component folder wins over an own-code folder of the same length.
-4. `units_prefix`. A prefix matches when the unit name starts with it. A trailing dot is not required, so `FMX.TMSFNC` matches `FMX.TMSFNCButton` and `FMX.TMSFNC.Types`. Among prefixes the longest one wins, whatever the order of the rows, so a row with `Neslib.Xml` gets `Neslib.Xml.Reader` even when a row with `Neslib` comes first. When two rows use the same prefix, the units go to the first row in the file. The log names both rows and that prefix. Give the other row `units_exact`, or a longer `units_prefix`. Matching uses the unit name from the MAP file. That still works when the file on disk is only the part after the last dot, so the library is listed even when those units are classified as local project code.
-5. `own_code_prefixes`.
+3. The longest matching folder, from `units_folder` and `own_code_folders` together. `units_exclude` keeps a unit out of that row's folders. On a tie the first component row wins, and a component folder wins over an own-code folder of the same length. A folder on an Embarcadero product path still matches. The log names the unit, the row and the origin.
+4. `units_prefix`, when the prefix rule allows it. A prefix matches when the unit name starts with it. A trailing dot is not required, so `FMX.TMSFNC` matches `FMX.TMSFNCButton` and `FMX.TMSFNC.Types`. Among prefixes the longest one wins, whatever the order of the rows, so a row with `Neslib.Xml` gets `Neslib.Xml.Reader` even when a row with `Neslib` comes first. When two rows use the same prefix, the units go to the first row in the file. The log names both rows and that prefix. Give the other row `units_exact`, `units_folder`, or a longer `units_prefix`. Matching uses the unit name from the MAP file. That still works when the file on disk is only the part after the last dot, so the library is listed even when those units are classified as local project code.
+5. `own_code_prefixes`. A short own-code prefix still assigns. It does not attach a third-party supplier.
 
-`units_exclude` lists unit names that the prefixes and folders of that row do not match. This helps with a short prefix: `"units_prefix": ["Ab"], "units_exclude": ["AboutBox"]` gives every `Ab*` unit to the row except `AboutBox`, which can still match another row or stay unmatched. The same list keeps a unit out of a `units_folder` on that row. For a unit with a Delphi scope, write the name either way: `Vcl.Skia` and `Skia` both keep the unit `Vcl.Skia` out of a row with the prefix `Skia`. A prefix shorter than 3 characters gets a warning, but it is still applied.
+`match.prefixes` in the components file selects the prefix rule. Leave it out, or set `"match": {"prefixes": "corroborated"}`, for the default. A prefix assigns a library only when it contains a dot, such as `FMX.TMSFNC` or `Neslib.Xml`, and the unit file is not in an Embarcadero product path. A prefix with no dot, such as `Adv`, `TMS`, `DEC`, `GDIP` or `HTML`, does not assign. The unit keeps the origin from its path. The HTML and Markdown reports list it under **Prefix matches not applied**, with the unit, the prefix, the row and the origin that was kept. The log line names the same four fields. Prefer `units_folder` for the package directory, or `units_exact` for the unit name, instead of a short prefix.
+
+`"match": {"prefixes": "legacy"}` is the one-release switch. A prefix with no dot still assigns when the file is outside an Embarcadero product path. It never reassigns a unit in a product shipped path. The same switch is `--match-prefixes=legacy` (also `--match.prefixes`) and the `.dxcomply.json` key `matchPrefixes`. The command line wins over the config file, and the config file wins over the components file. After this release, corroborated is the rule.
+
+A product shipped path is a product source tree under the Delphi install (`source\rtl`, `source\vcl`, `source\fmx`, `source\data`, and the other source trees shipped in that folder) or a product lib folder (`lib\<platform>\release`, `lib\<platform>\debug`, a DCU in `lib\<platform>`, or a DCU placed directly in `lib`). `Extras` and a GetIt `CatalogRepository` are not product paths. `units_exact` and `units_folder` still assign a unit in a product path. A prefix does not, in either mode. When the install root is unknown, a product path cannot be detected, so that check does not run.
+
+`units_exclude` lists unit names that the prefixes and folders of that row do not match. It does not apply to `units_exact`. For a unit with a Delphi scope, write the name either way: `Vcl.Skia` and `Skia` both keep the unit `Vcl.Skia` out of a row with the prefix `Skia`. A prefix shorter than 3 characters gets a warning. In corroborated mode it is not applied. In legacy mode it is still applied outside a product path.
+
+The origin summary lists a supplier for every manifest row that matched a unit and names a vendor, including when those units are classified as local project code.
 
 `own_code_units`, `own_code_prefixes`, and `own_code_folders` mark the project's own units. Those units stay in the evidence. They are not dropped, and they are not attributed to a third-party library. A file that lives outside the project folder is still own code when it matches one of those rules, so it is not listed as an unknown supplier and it is not one of the third-party units without a manifest. When `product.licence` is set, they carry that licence in the SBOM and in the reports. With no product licence they stay without one. Unmatched units stay as they are: one component each, linked from the program that was built.
 
@@ -471,8 +480,8 @@ A file that cannot be read (missing, not JSON, or not an object or array) stops 
 Most Delphi libraries ship without an SBOM or a components file. You write the rows for them yourself, in your own components file. That file belongs to your product and is versioned with it.
 
 1. Run DX.Comply once with `--report=html` and open the report. The section **Third-party units without manifest** lists the units without a row, grouped by unit prefix. The Unknown supplier row in the origin summary names the same kind of units, grouped by prefix.
-2. Add one row per library to your components file: `name`, `version`, `vendor`, `licence`, and `units_prefix`, `units_exact`, or `units_folder` for the units in the list. A package that lives in one directory tree is a `units_folder` entry. Take the licence and the version from the library's licence file, its readme, or your purchase records.
-3. Run DX.Comply again with `--manifest=<file>` (or the `manifest` key in `.dxcomply.json`). The rows you added leave the list, and the units get supplier and licence in the SBOM. A row that matches no unit is reported as a warning, so a typo in a prefix shows up.
+2. Add one row per library to your components file: `name`, `version`, `vendor`, `licence`, and `units_folder` for the package directory or `units_exact` for the unit names. Prefer those over a short `units_prefix`. A prefix with no dot is not applied. A prefix that contains a dot still matches the start of the unit name, except on an Embarcadero product path. Take the licence and the version from the library's licence file, its readme, or your purchase records.
+3. Run DX.Comply again with `--manifest=<file>` (or the `manifest` key in `.dxcomply.json`). The rows you added leave the list, and the units get supplier and licence in the SBOM. A row that matches no unit is reported as a warning. **Prefix matches not applied** names a prefix that matched and was not used. Replace that prefix with `units_folder` or `units_exact`. For this release, `--match-prefixes=legacy` still applies a prefix with no dot outside an Embarcadero product path.
 
 Repeat until the list is empty, or until only units remain whose supplier you cannot name. With `--strict`, a CI build fails while that list is not empty.
 
@@ -562,11 +571,15 @@ The HTML page title and the heading, and the Markdown heading, start with the pr
 
 ### Do I have to list every unit in the component manifest?
 
-No. `own_code_folders` names folders of your own units. `units_folder` on a row names the folder of a third-party package, including its subfolders. A unit known only by its name, with no source file found, is still matched by `units_exact`, `units_prefix`, `own_code_units`, or `own_code_prefixes`. See [Component manifest](#component-manifest).
+No. `own_code_folders` names folders of your own units. `units_folder` on a row names the folder of a third-party package, including its subfolders. Prefer `units_folder` or `units_exact` over a short `units_prefix`. A unit known only by its name, with no source file found, is still matched by `units_exact`, by a `units_prefix` that contains a dot, by `own_code_units`, or by `own_code_prefixes`. A prefix with no dot does not assign that name. See [Component manifest](#component-manifest).
 
 ### Two component rows use the same units_prefix. Which units go where?
 
-The units go to the first row in the file. The log names both rows and the shared prefix. Give the other row `units_exact`, or a longer `units_prefix`. A prefix does not need a trailing dot: `FMX.TMSFNC` matches `FMX.TMSFNCButton` and `FMX.TMSFNC.Types`. A row that still matches no unit is reported as matched no units. The row that does match is listed in the report even when those units are classified as local project code.
+The units go to the first row in the file. The log names both rows and the shared prefix. Give the other row `units_exact`, `units_folder`, or a longer `units_prefix`. A prefix does not need a trailing dot: `FMX.TMSFNC` matches `FMX.TMSFNCButton` and `FMX.TMSFNC.Types`. A prefix with no dot does not assign unless `match.prefixes` is `legacy`. A row that still matches no unit is reported as matched no units. The row that does match is listed in the report even when those units are classified as local project code.
+
+### A units_prefix used to assign my units, and now it does not. What should I change?
+
+Use `units_folder` for the package directory, or `units_exact` for the unit names. A prefix with no dot is not applied on its own. The report section **Prefix matches not applied** names the unit, the prefix, the row and the origin that was kept. The log line names the same four fields. A prefix never reassigns a unit in an Embarcadero product path, including `lib\<platform>\release`. Library mode uses the same rule when the project scan has an install root, so a shipped source file under that path is not assigned by a prefix. For this release, `match.prefixes` set to `legacy` in the components file, `matchPrefixes` in `.dxcomply.json`, or `--match-prefixes=legacy` still applies a prefix with no dot outside a product path. A dotted prefix such as `Neslib.Xml` still assigns when the file is not in a product path.
 
 ### The Android map or libMyApp.so is not found
 

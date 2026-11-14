@@ -118,6 +118,12 @@ type
     /// </summary>
     [Test]
     procedure Write_Title_PrefixesProjectName;
+    /// <summary>
+    /// Prefix matches not applied is written when a prefix was refused,
+    /// and left out when none was.
+    /// </summary>
+    [Test]
+    procedure Write_PrefixMatchesNotApplied_Section;
   end;
 
 implementation
@@ -410,7 +416,7 @@ end;
 procedure THtmlReportWriterTests.Write_UnknownSupplier_ListsUnitsByPrefix;
 begin
   FData.Metadata.ComponentManifestJson :=
-    '{"components":[{"name":"JVCL","version":"3.5","vendor":"Project JEDI",' +
+    '{"match":{"prefixes":"legacy"},"components":[{"name":"JVCL","version":"3.5","vendor":"Project JEDI",' +
     '"licence":"MPL-1.1","units_prefix":["Jv"]}]}';
   var LJv := Default(TArtefactInfo);
   LJv.RelativePath := 'JvComponent.pas';
@@ -500,7 +506,7 @@ end;
 
 procedure THtmlReportWriterTests.Write_LicenceTable_OneRowPerComponent;
 const
-  cRows = '{"components":[' +
+  cRows = '{"match":{"prefixes":"legacy"},"components":[' +
     '{"name":"SVG Icon Image List","version":"4.8.1","licence":"Apache-2.0","units_prefix":["Svg"]},' +
     '{"name":"Logger Pro","version":"2.1.2","licence":"Apache-2.0","copyright":"2020 | 2021","units_prefix":["Logger"]},' +
     '{"name":"delphi Event Bus","version":"2.1","licence":"apache-2.0","copyright":"A & B","units_prefix":["Event"]},' +
@@ -572,6 +578,38 @@ begin
   LContent := TFile.ReadAllText(FOutputPath, TEncoding.UTF8);
   Assert.IsTrue(Pos('<title>DX.Comply SBOM Report</title>', LContent) > 0);
   Assert.IsTrue(Pos('<h1>DX.Comply SBOM Report</h1>', LContent) > 0);
+end;
+
+procedure THtmlReportWriterTests.Write_PrefixMatchesNotApplied_Section;
+var
+  LArtefact: TArtefactInfo;
+  LContent: string;
+  LWriter: IHumanReadableReportWriter;
+begin
+  LWriter := THtmlReportWriter.Create;
+  Assert.IsTrue(LWriter.Write(FOutputPath, FData, THumanReadableReportConfig.Default));
+  LContent := TFile.ReadAllText(FOutputPath, TEncoding.UTF8);
+  Assert.AreEqual(0, Pos('Prefix matches not applied', LContent));
+
+  FData.Metadata.ComponentManifestJson :=
+    '{"components":[{"name":"TMS VCL UI Pack","version":"1","vendor":"tmssoftware.com",' +
+    '"licence":"Commercial","type":"library","units_prefix":["GDIP"]}]}';
+  FData.ProjectInfo.Toolchain.RootDir := 'C:\DXProduct';
+  LArtefact := Default(TArtefactInfo);
+  LArtefact.UnitName := 'Winapi.GDIPAPI';
+  LArtefact.RelativePath := 'Winapi.GDIPAPI.pas';
+  LArtefact.SourcePath := 'C:\DXProduct\source\rtl\win\Winapi.GDIPAPI.pas';
+  LArtefact.ArtefactType := 'unit-evidence';
+  LArtefact.Origin := 'Embarcadero RTL';
+  FArtefacts.Add(LArtefact);
+
+  Assert.IsTrue(LWriter.Write(FOutputPath, FData, THumanReadableReportConfig.Default));
+  LContent := TFile.ReadAllText(FOutputPath, TEncoding.UTF8);
+  Assert.IsTrue(Pos('id="prefix-matches-not-applied"', LContent) > 0);
+  Assert.IsTrue(Pos('<h2>Prefix matches not applied</h2>', LContent) > 0);
+  Assert.IsTrue(Pos('<th>Unit</th><th>Prefix</th><th>Row</th><th>Kept origin</th>', LContent) > 0);
+  Assert.IsTrue(Pos('<td>Winapi.GDIPAPI</td><td>GDIP</td><td>TMS VCL UI Pack</td><td>Embarcadero RTL</td>',
+    LContent) > 0);
 end;
 
 initialization

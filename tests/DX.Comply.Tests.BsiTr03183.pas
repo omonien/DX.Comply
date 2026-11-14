@@ -618,7 +618,7 @@ end;
 procedure TBsiTr03183Tests.Manifest_Library_HasCreatorVersionLicence_NotFileFields;
 const
   cManifest =
-    '{"components":[' +
+    '{"match":{"prefixes":"legacy"},"components":[' +
     '{"name":"MailLib","version":"1.2.3","vendor":"dev@example.com",' +
     '"vendor_url":"https://example.com/maillib","licence":"MIT","type":"library",' +
     '"units_exact":["MailUnit"]},' +

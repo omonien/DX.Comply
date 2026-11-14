@@ -245,7 +245,7 @@ begin
         Continue;
 
       var LMatch := MatchManifestUnit(AManifest, LUnitName,
-        ArtefactFolderPath(LArtefact));
+        ArtefactMatchPath(AManifest, LArtefact));
       var LKey: string;
       case LMatch.Kind of
         mmOwnCode:

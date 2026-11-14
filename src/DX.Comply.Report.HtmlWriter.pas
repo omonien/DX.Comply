@@ -231,7 +231,7 @@ begin
   Lines.Add('</tbody></table></div>');
   if Length(LOverview.Suppliers) > 0 then
   begin
-    Lines.Add('<p>Third-party units by supplier (from the component manifest):</p>');
+    Lines.Add('<p>Units by supplier (from the component manifest):</p>');
     Lines.Add('<div class="table-wrap"><table><thead><tr><th>Supplier</th><th>Units</th></tr></thead><tbody>');
     for var LGroup in LOverview.Suppliers do
     begin
@@ -291,6 +291,24 @@ begin
     begin
       Lines.Add(Format('<tr><td>%s</td><td>%d</td><td>%s</td><td>%s</td></tr>',
         [EscapeHtml(LGroup.Title), LGroup.Count, EscapeHtml(LGroup.Note), EscapeHtml(LGroup.NamesText)]));
+    end;
+    Lines.Add('</tbody></table></div></section>');
+  end;
+
+  // A prefix that matched and was not applied. Omitted when there is none.
+  if Length(LOverview.PrefixRejections) > 0 then
+  begin
+    Lines.Add('<section id="' + cAnchorPrefixRejections + '"><h2>Prefix matches not applied</h2>');
+    Lines.Add('<p>A prefix is not enough to assign these units. ' +
+      'Add units_folder for the package directory, or units_exact for the unit. ' +
+      'The origin below is the one that was kept.</p>');
+    Lines.Add('<div class="table-wrap"><table><thead><tr><th>Unit</th><th>Prefix</th>' +
+      '<th>Row</th><th>Kept origin</th></tr></thead><tbody>');
+    for var LRejection in LOverview.PrefixRejections do
+    begin
+      Lines.Add(Format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>', [
+        EscapeHtml(LRejection.UnitName), EscapeHtml(LRejection.Prefix),
+        EscapeHtml(LRejection.RowName), EscapeHtml(LRejection.KeptOrigin)]));
     end;
     Lines.Add('</tbody></table></div></section>');
   end;

@@ -1285,7 +1285,7 @@ var
 begin
   FMetadata.Licence := 'MIT';
   FMetadata.ComponentManifestJson :=
-    '{"components":[{"name":"Wrapped","version":"1","vendor":"A","licence":"Apache-2.0",' +
+    '{"match":{"prefixes":"legacy"},"components":[{"name":"Wrapped","version":"1","vendor":"A","licence":"Apache-2.0",' +
     '"type":"library","units_exact":["Data.DB"]}],' +
     '"own_code_units":["MainForm"],"own_code_prefixes":["App"],' +
     '"own_code_folders":["' +

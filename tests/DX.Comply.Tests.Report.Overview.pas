@@ -124,6 +124,15 @@ type
     procedure Licences_OwnCodeOrigin_ListsMatchedLibrary;
     [Test]
     procedure WithoutManifestLine_OmittedWhenNoneMissing;
+    /// <summary>
+    /// A vendor is listed when the matched units are Local project.
+    /// A prefix that is not applied is a row of its own and is not that vendor.
+    /// </summary>
+    [Test]
+    procedure Suppliers_ListsVendorsOfLocalProjectUnits;
+    /// <summary>The prefix section is empty when no prefix was refused.</summary>
+    [Test]
+    procedure PrefixRejections_EmptyWhenNoneRefused;
   end;
 
 implementation
@@ -134,7 +143,7 @@ uses
   DX.Comply.Report.Overview;
 
 const
-  cManifest = '{"components":[{"name":"JVCL","version":"3.5","vendor":"Project JEDI",' +
+  cManifest = '{"match":{"prefixes":"legacy"},"components":[{"name":"JVCL","version":"3.5","vendor":"Project JEDI",' +
     '"licence":"MPL-1.1","units_prefix":["Jv"]},{"name":"Other","version":"1.0",' +
     '"vendor":"Acme","licence":"mpl-1.1","units_prefix":["Acm"]}]}';
 
@@ -390,7 +399,7 @@ procedure TReportOverviewTests.Licences_OwnCode_InheritsProductLicence;
 begin
   FData.Metadata.Licence := 'Apache-2.0';
   FData.Metadata.ComponentManifestJson :=
-    '{"components":[],"own_code_units":["MainForm","System.SysUtils"],' +
+    '{"match":{"prefixes":"legacy"},"components":[],"own_code_units":["MainForm","System.SysUtils"],' +
     '"own_code_prefixes":["App"],"own_code_folders":["' +
     StringReplace('C:\DXComplyFolderTest\src', '\', '\\', [rfReplaceAll]) + '"]}';
   AddUnit('MainForm', 'Local project');
@@ -510,7 +519,7 @@ end;
 
 procedure TReportOverviewTests.Licences_OneRowPerComponent_SortedWithVersionAndCopyright;
 const
-  cRows = '{"components":[' +
+  cRows = '{"match":{"prefixes":"legacy"},"components":[' +
     '{"name":"SVG Icon Image List","version":"4.8.1","licence":"Apache-2.0","units_prefix":["Svg"]},' +
     '{"name":"Logger Pro","version":"2.1.2","licence":"Apache-2.0","copyright":"2020 | 2021","units_prefix":["Logger"]},' +
     '{"name":"delphi Event Bus","version":"2.1","licence":"apache-2.0","copyright":"A & B","units_prefix":["Event"]},' +
@@ -578,7 +587,7 @@ end;
 
 procedure TReportOverviewTests.Licences_OwnCodeOrigin_ListsMatchedLibrary;
 const
-  cTms = '{"components":[' +
+  cTms = '{"match":{"prefixes":"legacy"},"components":[' +
     '{"name":"TMS FNC Core","version":"4.2.3.7","vendor":"TMS Software",' +
     '"licence":"LicenseRef-Proprietary","type":"library","units_prefix":["FMX.TMSFNC"]},' +
     '{"name":"TMS FNC UI Pack","version":"7.1.2.2","vendor":"TMS Software",' +
@@ -616,7 +625,7 @@ end;
 
 procedure TReportOverviewTests.Suppliers_OwnCodeOutsideProject_IsNamedWhenUnknown;
 const
-  cJson = '{"components":[{"name":"JVCL","version":"3.5","vendor":"Project JEDI",' +
+  cJson = '{"match":{"prefixes":"legacy"},"components":[{"name":"JVCL","version":"3.5","vendor":"Project JEDI",' +
     '"licence":"MPL-1.1","units_prefix":["Jv"]}],' +
     '"own_code_units":["SharedHelper"],"own_code_prefixes":["Acme"],' +
     '"own_code_folders":["C:\\Libs\\Mine"]}';
@@ -779,6 +788,87 @@ begin
   AddUnit('AcmButton', 'Third party');
   AddUnit('AcmGrid', 'Third party');
   Assert.AreEqual('', ThirdPartyWithoutManifestLine(FArtefacts, cManifest));
+end;
+
+procedure TReportOverviewTests.Suppliers_ListsVendorsOfLocalProjectUnits;
+
+  procedure AddSourced(const AName, AOrigin, APath: string);
+  var
+    LArtefact: TArtefactInfo;
+  begin
+    LArtefact := Default(TArtefactInfo);
+    LArtefact.UnitName := AName;
+    LArtefact.RelativePath := AName + '.pas';
+    LArtefact.SourcePath := APath;
+    LArtefact.ArtefactType := 'unit-evidence';
+    LArtefact.Origin := AOrigin;
+    FArtefacts.Add(LArtefact);
+  end;
+
+var
+  LJson: string;
+  LOverview: TReportOverview;
+  LTms: TReportGroup;
+begin
+  LJson :=
+    '{"components":[' +
+    '{"name":"Delphi Event Bus","version":"1","vendor":"Daniele Spinetti","licence":"MIT","type":"library","units_folder":["C:/DXComplyIssue176/delphi-event-bus"]},' +
+    '{"name":"Logger Pro","version":"1","vendor":"Daniele Teti","licence":"MIT","type":"library","units_folder":["C:/DXComplyIssue176/loggerpro"]},' +
+    '{"name":"SVG Icon Image List","version":"1","vendor":"Ethea S.r.l.","licence":"Apache-2.0","type":"library","units_folder":["C:/DXComplyIssue176/svg"]},' +
+    '{"name":"VSoft Command Line Parser","version":"1","vendor":"Vincent Parrett","licence":"Apache-2.0","type":"library","units_folder":["C:/DXComplyIssue176/vsoft"]},' +
+    '{"name":"Neslib","version":"1","vendor":"Erik van Bilsen","licence":"Apache-2.0","type":"library","units_folder":["C:/DXComplyIssue176/neslib"]},' +
+    '{"name":"Neslib XML","version":"1","vendor":"Erik van Bilsen","licence":"Apache-2.0","type":"library","units_folder":["C:/DXComplyIssue176/neslibxml"]},' +
+    '{"name":"Eurekalog","version":"1","vendor":"Neos Eureka S.r.l","licence":"Commercial","type":"library","units_folder":["C:/DXComplyIssue176/eurekalog"]},' +
+    '{"name":"Delphi Console","version":"1","vendor":"Jens Borrisholt","licence":"MIT","type":"library","units_folder":["C:/DXComplyIssue176/console"]},' +
+    '{"name":"TMS VCL UI Pack","version":"1","vendor":"tmssoftware.com","licence":"Commercial","type":"library",' +
+    '"units_folder":["C:/DXComplyIssue176/TMS"],"units_prefix":["GDIP","HTML"]}]}';
+  FData.Metadata.ComponentManifestJson := LJson;
+  FData.ProjectInfo.Toolchain.RootDir := 'C:\DXProduct';
+  AddSourced('EventBus', 'Local project',
+    'C:\DXComplyIssue176\delphi-event-bus\src\EventBus.pas');
+  AddSourced('LoggerPro', 'Local project',
+    'C:\DXComplyIssue176\loggerpro\LoggerPro.pas');
+  AddSourced('SVGIconImageList', 'Local project',
+    'C:\DXComplyIssue176\svg\SVGIconImageList.pas');
+  AddSourced('VSoft.CommandLineParser', 'Local project',
+    'C:\DXComplyIssue176\vsoft\VSoft.CommandLineParser.pas');
+  AddSourced('Neslib.SysUtils', 'Local project',
+    'C:\DXComplyIssue176\neslib\Neslib.SysUtils.pas');
+  AddSourced('Neslib.Xml', 'Local project',
+    'C:\DXComplyIssue176\neslibxml\Neslib.Xml.pas');
+  AddSourced('EurekaLog', 'Local project',
+    'C:\DXComplyIssue176\eurekalog\EurekaLog.pas');
+  AddSourced('DelphiConsole', 'Local project',
+    'C:\DXComplyIssue176\console\DelphiConsole.pas');
+  AddSourced('AdvGrid', 'Local project',
+    'C:\DXComplyIssue176\TMS\AdvGrid.pas');
+  AddSourced('Winapi.GDIPAPI', 'Embarcadero RTL',
+    'C:\DXProduct\source\rtl\win\Winapi.GDIPAPI.pas');
+
+  LOverview := BuildReportOverview(FData);
+  Assert.AreEqual(1, FindGroup(LOverview.Suppliers, 'Daniele Spinetti').Count);
+  Assert.AreEqual(1, FindGroup(LOverview.Suppliers, 'Daniele Teti').Count);
+  Assert.AreEqual(1, FindGroup(LOverview.Suppliers, 'Ethea S.r.l.').Count);
+  Assert.AreEqual(1, FindGroup(LOverview.Suppliers, 'Vincent Parrett').Count);
+  Assert.AreEqual(2, FindGroup(LOverview.Suppliers, 'Erik van Bilsen').Count);
+  Assert.AreEqual(1, FindGroup(LOverview.Suppliers, 'Neos Eureka S.r.l').Count);
+  Assert.AreEqual(1, FindGroup(LOverview.Suppliers, 'Jens Borrisholt').Count);
+  LTms := FindGroup(LOverview.Suppliers, 'tmssoftware.com');
+  Assert.AreEqual(1, LTms.Count);
+  Assert.AreEqual('AdvGrid', LTms.NamesText);
+  Assert.AreEqual(0, LOverview.ThirdPartyUnitCount,
+    'Local project units are not counted as third party');
+  Assert.AreEqual(1, Length(LOverview.PrefixRejections));
+  Assert.AreEqual('Winapi.GDIPAPI', LOverview.PrefixRejections[0].UnitName);
+  Assert.AreEqual('GDIP', LOverview.PrefixRejections[0].Prefix);
+  Assert.AreEqual('TMS VCL UI Pack', LOverview.PrefixRejections[0].RowName);
+  Assert.AreEqual('Embarcadero RTL', LOverview.PrefixRejections[0].KeptOrigin);
+end;
+
+procedure TReportOverviewTests.PrefixRejections_EmptyWhenNoneRefused;
+begin
+  AddUnit('System.Classes', 'Embarcadero RTL');
+  Assert.AreEqual(0, Length(BuildReportOverview(FData).PrefixRejections));
 end;
 
 initialization

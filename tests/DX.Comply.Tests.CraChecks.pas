@@ -536,7 +536,7 @@ end;
 
 procedure TCraChecksTests.ThirdParty_ManifestCovers_NoWarning;
 begin
-  var LManifest := ParseTestManifest('{"components":[{"name":"JVCL","version":"3.5",' +
+  var LManifest := ParseTestManifest('{"match":{"prefixes":"legacy"},"components":[{"name":"JVCL","version":"3.5",' +
     '"vendor":"Project JEDI","licence":"MPL-1.1","units_prefix":["Jv"]}]}');
   var LArtefacts := TArtefactList.Create;
   try
@@ -549,7 +549,7 @@ end;
 
 procedure TCraChecksTests.ThirdParty_RowWithoutLicence_Warns;
 begin
-  var LManifest := ParseTestManifest('{"components":[{"name":"JVCL","version":"3.5",' +
+  var LManifest := ParseTestManifest('{"match":{"prefixes":"legacy"},"components":[{"name":"JVCL","version":"3.5",' +
     '"vendor":"Project JEDI","units_prefix":["Jv"]}]}');
   var LArtefacts := TArtefactList.Create;
   try
@@ -598,7 +598,7 @@ end;
 
 procedure TCraChecksTests.ThirdParty_OwnCode_IsNotWarned_UnmatchedIsNamed;
 begin
-  var LManifest := ParseTestManifest('{"components":[{"name":"JVCL","version":"3.5",' +
+  var LManifest := ParseTestManifest('{"match":{"prefixes":"legacy"},"components":[{"name":"JVCL","version":"3.5",' +
     '"vendor":"Project JEDI","licence":"MPL-1.1","units_prefix":["Jv"]}],' +
     '"own_code_units":["SharedHelper"],"own_code_prefixes":["Acme"],' +
     '"own_code_folders":["' +
