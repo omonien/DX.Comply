@@ -1009,7 +1009,7 @@ var
 begin
   FMetadata.Licence := 'MIT';
   FMetadata.ComponentManifestJson :=
-    '{"components":[{"name":"Wrapped","version":"1","vendor":"A","licence":"Apache-2.0",' +
+    '{"match":{"prefixes":"legacy"},"components":[{"name":"Wrapped","version":"1","vendor":"A","licence":"Apache-2.0",' +
     '"type":"library","units_exact":["Data.DB"]}],' +
     '"own_code_units":["MainForm"],"own_code_prefixes":["App"],' +
     '"own_code_folders":["' +
@@ -1109,7 +1109,7 @@ begin
   FProjectInfo.ProjectName := 'TestProject';
   FMetadata.Licence := 'LicenseRef-Proprietary';
   FMetadata.ComponentManifestJson :=
-    '{"components":[' +
+    '{"match":{"prefixes":"legacy"},"components":[' +
     '{"name":"FreeLib","version":"1","vendor":"A","licence":"LicenseRef-Freeware-with-source",' +
     '"type":"library","units_exact":["FreeUnit"]},' +
     '{"name":"Spaced","version":"1","vendor":"A","licence":"LicenseRef-My Terms",' +

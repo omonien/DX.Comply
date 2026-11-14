@@ -222,7 +222,7 @@ begin
   Lines.Add('');
   if Length(LOverview.Suppliers) > 0 then
   begin
-    Lines.Add('Third-party units by supplier (from the component manifest):');
+    Lines.Add('Units by supplier (from the component manifest):');
     Lines.Add('');
     Lines.Add('| Supplier | Units |');
     Lines.Add('| --- | ---: |');
@@ -280,6 +280,23 @@ begin
       Lines.Add(Format('| %s | %d | %s | %s |', [EscapeMarkdown(LGroup.Title), LGroup.Count,
         LGroup.Note, EscapeMarkdown(LGroup.NamesText)]));
     end;
+    Lines.Add('');
+  end;
+
+  // A prefix that matched and was not applied. Omitted when there is none.
+  if Length(LOverview.PrefixRejections) > 0 then
+  begin
+    Lines.Add('## Prefix matches not applied');
+    Lines.Add('A prefix is not enough to assign these units. ' +
+      'Add units_folder for the package directory, or units_exact for the unit. ' +
+      'The origin below is the one that was kept.');
+    Lines.Add('');
+    Lines.Add('| Unit | Prefix | Row | Kept origin |');
+    Lines.Add('| --- | --- | --- | --- |');
+    for var LRejection in LOverview.PrefixRejections do
+      Lines.Add(Format('| %s | %s | %s | %s |', [
+        EscapeMarkdown(LRejection.UnitName), EscapeMarkdown(LRejection.Prefix),
+        EscapeMarkdown(LRejection.RowName), EscapeMarkdown(LRejection.KeptOrigin)]));
     Lines.Add('');
   end;
 end;

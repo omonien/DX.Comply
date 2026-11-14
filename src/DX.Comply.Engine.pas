@@ -84,7 +84,8 @@ type
     scoStrictMode,
     scoSpdxVersion,
     scoReportContent,
-    scoReportGroupByFolder
+    scoReportGroupByFolder,
+    scoPrefixMatch
   );
   /// <summary>Set of TSbomConfig fields that were set explicitly.</summary>
   TSbomConfigOverrides = set of TSbomConfigOverride;
@@ -255,6 +256,12 @@ type
     /// writer for --format=spdx-json. Empty or 2.3 keeps SPDX 2.3 (issue #108).
     /// </summary>
     SpdxVersion: string;
+    /// <summary>
+    /// --match-prefixes or the matchPrefixes key. corroborated or legacy.
+    /// Empty means the components file decides. A missing match.prefixes
+    /// in that file is corroborated.
+    /// </summary>
+    PrefixMatch: string;
     /// <summary>Creates a new TSbomConfig with default values.</summary>
     class function Default: TSbomConfig; static;
     /// <summary>
@@ -631,6 +638,7 @@ begin
   Result.WarningContext := swcCli;
   Result.StrictMode := False;
   Result.SpdxVersion := '';
+  Result.PrefixMatch := '';
 end;
 
 
@@ -2537,6 +2545,20 @@ begin
             Result.ManifestFile := Trim(LManifestValue.Value);
         end;
 
+        // match.prefixes for this run. The components file is the default.
+        // corroborated or legacy. Anything else is ignored here and the
+        // file's own value is kept. The CLI rejects an unknown flag value.
+        if LJson.GetValue('matchPrefixes') <> nil then
+        begin
+          LText := Trim(LJson.GetValue<string>('matchPrefixes'));
+          if SameText(LText, 'legacy') or SameText(LText, 'corroborated') then
+            Result.PrefixMatch := LowerCase(LText)
+          else if LText <> '' then
+            DoProgress('Warning: matchPrefixes "' + LText + '" in ' +
+              TPath.GetFileName(AConfigPath) +
+              ' is not corroborated or legacy. The components file is used.', 5);
+        end;
+
         // SBOM creator contact. An empty value is ignored. A non-empty value
         // that is neither an email nor an http(s) URL is kept so Generate
         // can reject it instead of dropping it.
@@ -2899,6 +2921,8 @@ var
   LManifestError: string;
   LDormantWarnings: TArray<string>;
   LWarningIndex: Integer;
+  LPrefixMode: string;
+  LRuntimeJson: string;
 begin
   Result := False;
   LManifest := Default(TComponentManifest);
@@ -3030,6 +3054,33 @@ begin
         DoProgress('Error: Invalid component manifest "' + LManifestPath + '": ' +
           LManifestError, -1);
         Exit;
+      end;
+      // The in-memory copy carries the install root, so a later parse in a
+      // writer applies the product-path veto. --match-prefixes and
+      // matchPrefixes override the file for this run. An empty root (no
+      // project, or a scan that found no install) leaves the veto idle.
+      LPrefixMode := '';
+      if Trim(FConfig.PrefixMatch) <> '' then
+      begin
+        if SameText(FConfig.PrefixMatch, 'legacy') or
+          SameText(FConfig.PrefixMatch, 'corroborated') then
+          LPrefixMode := LowerCase(Trim(FConfig.PrefixMatch))
+        else
+          DoProgress('Warning: match.prefixes "' + FConfig.PrefixMatch +
+            '" is not corroborated or legacy. The components file is used.', 13);
+      end;
+      LRuntimeJson := ManifestJsonWithRuntimeContext(LManifestJson,
+        LProjectInfo.Toolchain.RootDir, LPrefixMode);
+      if LRuntimeJson <> LManifestJson then
+      begin
+        LManifestJson := LRuntimeJson;
+        if not TryParseComponentManifest(LManifestJson, LManifestPath, LManifest,
+          LManifestError) then
+        begin
+          DoProgress('Error: Invalid component manifest "' + LManifestPath + '": ' +
+            LManifestError, -1);
+          Exit;
+        end;
       end;
       for LWarningIndex := 0 to High(LManifest.Warnings) do
         DoProgress('Warning: ' + LManifestPath + ': ' +
@@ -3164,6 +3215,10 @@ begin
       for LWarningIndex := 0 to High(LDormantWarnings) do
         DoProgress('Warning: ' + LManifestPath + ': ' +
           LDormantWarnings[LWarningIndex], 68);
+      for var LPrefixLine in RejectedPrefixLogLines(LManifest, LArtefacts) do
+        DoProgress('Warning: ' + LManifestPath + ': ' + LPrefixLine, 68);
+      for var LFolderLine in ProductFolderMatchLogLines(LManifest, LArtefacts) do
+        DoProgress('Warning: ' + LManifestPath + ': ' + LFolderLine, 68);
       ApplyManifestPublisher(LManifest, LMetadata);
       LMetadata.ComponentManifestJson := LManifestJson;
     end;
@@ -3356,6 +3411,32 @@ begin
           LManifestError, -1);
         Exit(False);
       end;
+      // The in-memory copy carries the install root, so a later parse in a
+      // writer applies the product-path veto. --match-prefixes and
+      // matchPrefixes override the file for this run.
+      var LPrefixMode := '';
+      if Trim(FConfig.PrefixMatch) <> '' then
+      begin
+        if SameText(FConfig.PrefixMatch, 'legacy') or
+          SameText(FConfig.PrefixMatch, 'corroborated') then
+          LPrefixMode := LowerCase(Trim(FConfig.PrefixMatch))
+        else
+          DoProgress('Warning: match.prefixes "' + FConfig.PrefixMatch +
+            '" is not corroborated or legacy. The components file is used.', 13);
+      end;
+      var LRuntimeJson := ManifestJsonWithRuntimeContext(LManifestJson,
+        LProjectInfo.Toolchain.RootDir, LPrefixMode);
+      if LRuntimeJson <> LManifestJson then
+      begin
+        LManifestJson := LRuntimeJson;
+        if not TryParseComponentManifest(LManifestJson, LManifestPath, LManifest,
+          LManifestError) then
+        begin
+          DoProgress('Error: Invalid component manifest "' + LManifestPath + '": ' +
+            LManifestError, -1);
+          Exit(False);
+        end;
+      end;
       for LWarningIndex := 0 to High(LManifest.Warnings) do
         DoProgress('Warning: ' + LManifestPath + ': ' + LManifest.Warnings[LWarningIndex], 13);
     end;
@@ -3460,8 +3541,10 @@ begin
 
     DoProgress('Resolving composition evidence...', 28);
     LCompositionEvidence := ResolveCompositionEvidence(LProjectInfo, LBuildEvidence);
-    // A manifest row names the library even when the file sits in the
-    // Delphi install. Product units with no row keep the resolver origin.
+    // units_exact and units_folder name the library even when the file sits
+    // in the Delphi install. A units_prefix match does not reassign a unit
+    // in an Embarcadero product path. Product units with no row keep the
+    // resolver origin.
     if LManifest.Loaded then
       ApplyManifestOverInstallOrigin(LManifest, LProjectInfo.Toolchain.RootDir,
         LCompositionEvidence.Units);
@@ -3539,6 +3622,10 @@ begin
           BuildManifestPlan(LManifest, LArtefacts));
         for LWarningIndex := 0 to High(LDormantWarnings) do
           DoProgress('Warning: ' + LManifestPath + ': ' + LDormantWarnings[LWarningIndex], 68);
+        for var LPrefixLine in RejectedPrefixLogLines(LManifest, LArtefacts) do
+          DoProgress('Warning: ' + LManifestPath + ': ' + LPrefixLine, 68);
+        for var LFolderLine in ProductFolderMatchLogLines(LManifest, LArtefacts) do
+          DoProgress('Warning: ' + LManifestPath + ': ' + LFolderLine, 68);
         ApplyManifestPublisher(LManifest, LMetadata);
         LMetadata.ComponentManifestJson := LManifestJson;
       end;
@@ -3696,6 +3783,8 @@ begin
   begin
     Result.SpdxVersion := ACaller.SpdxVersion;
   end;
+  if scoPrefixMatch in ACaller.ExplicitOverrides then
+    Result.PrefixMatch := ACaller.PrefixMatch;
   Result.Format := ApplySpdxVersion(Result.Format, Result.SpdxVersion);
 
   Result.IncludePlatformInOutput := ACaller.IncludePlatformInOutput;

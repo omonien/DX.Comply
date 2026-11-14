@@ -51,6 +51,7 @@ const
   cAnchorOrigins = 'origin-summary';
   cAnchorLicences = 'licences';
   cAnchorWithoutManifest = 'third-party-units-without-manifest';
+  cAnchorPrefixRejections = 'prefix-matches-not-applied';
   cAnchorArtefacts = 'artefacts';
   cAnchorUnitEvidence = 'unit-evidence';
   /// <summary>Names listed per group before the rest is counted.</summary>
@@ -106,6 +107,20 @@ type
   end;
 
   /// <summary>
+  /// One units_prefix that matched a unit and was not applied.
+  /// </summary>
+  TPrefixRejectionRow = record
+    /// <summary>Unit name from the MAP file or the source file.</summary>
+    UnitName: string;
+    /// <summary>The prefix that was not applied.</summary>
+    Prefix: string;
+    /// <summary>Manifest row name.</summary>
+    RowName: string;
+    /// <summary>Origin left on the unit.</summary>
+    KeptOrigin: string;
+  end;
+
+  /// <summary>
   /// Licence, origin and supplier summaries for one report.
   /// </summary>
   TReportOverview = record
@@ -128,6 +143,11 @@ type
     TotalComponents: Integer;
     /// <summary>True when a component manifest was used.</summary>
     ManifestUsed: Boolean;
+    /// <summary>
+    /// Prefixes that matched a unit and were not applied. Empty when every
+    /// prefix match was applied, or when no prefix matched.
+    /// </summary>
+    PrefixRejections: TArray<TPrefixRejectionRow>;
   end;
 
 /// <summary>
@@ -469,7 +489,8 @@ begin
 end;
 
 function LoadManifest(const AManifestJson: string; const AArtefacts: TArtefactList;
-  out AManifest: TComponentManifest; out APlan: TManifestPlan): Boolean;
+  const AInstallRoot: string; out AManifest: TComponentManifest;
+  out APlan: TManifestPlan): Boolean;
 begin
   AManifest := Default(TComponentManifest);
   APlan := Default(TManifestPlan);
@@ -479,6 +500,10 @@ begin
   var LError: string;
   if not TryParseComponentManifest(AManifestJson, '', AManifest, LError) then
     Exit;
+  // The project toolchain root wins over dxInstallRoot in the in-memory
+  // JSON. A report built without a project keeps the value the engine wrote.
+  if Trim(AInstallRoot) <> '' then
+    AManifest.InstallRoot := AInstallRoot;
   APlan := BuildManifestPlan(AManifest, AArtefacts);
   Result := True;
 end;
@@ -565,12 +590,13 @@ begin
   var LManifest: TComponentManifest;
   var LPlan: TManifestPlan;
   Result.ManifestUsed := LoadManifest(AData.Metadata.ComponentManifestJson, AData.Artefacts,
-    LManifest, LPlan);
+    AData.ProjectInfo.Toolchain.RootDir, LManifest, LPlan);
 
   var LLicences := TLicenceGroupBuilder.Create;
   var LOrigins := TGroupBuilder.Create;
   var LSuppliers := TGroupBuilder.Create;
   var LWithout := TGroupBuilder.Create;
+  var LRejections := TList<TPrefixRejectionRow>.Create;
   var LGrouped := TDictionary<Integer, Integer>.Create;
   try
     // Artefact index -> manifest component index, for units in a library.
@@ -655,13 +681,39 @@ begin
         begin
           LLicences.Add(cNoLicenceGroupTitle, LName, LVersion, '');
         end;
+        if Result.ManifestUsed and (ArtefactUnitName(LArtefact) <> '') then
+        begin
+          var LRejectPrefix := '';
+          var LRejectRow := '';
+          if TryRejectedLibraryPrefix(LManifest, ArtefactUnitName(LArtefact),
+            ArtefactMatchPath(LManifest, LArtefact), LRejectPrefix, LRejectRow) then
+          begin
+            var LRejection: TPrefixRejectionRow;
+            LRejection.UnitName := ArtefactUnitName(LArtefact);
+            LRejection.Prefix := LRejectPrefix;
+            LRejection.RowName := LRejectRow;
+            LRejection.KeptOrigin := Trim(LArtefact.Origin);
+            if LRejection.KeptOrigin = '' then
+              LRejection.KeptOrigin := 'Unknown';
+            LRejections.Add(LRejection);
+          end;
+        end;
+        // A library row with a vendor counts here even when the units are
+        // Local project. Those units are in the licence table and were
+        // missing from the supplier list (issue #176).
+        var LSupplierIndex: Integer;
+        var LHasSupplier := Result.ManifestUsed and
+          LGrouped.TryGetValue(i, LSupplierIndex) and
+          (Trim(LManifest.Components[LSupplierIndex].Vendor) <> '');
+        if LHasSupplier then
+          LSuppliers.Add(Trim(LManifest.Components[LSupplierIndex].Vendor), LName);
         if IsThirdPartyUnit(LArtefact) then
         begin
           var LMatchKind := mmNone;
           if Result.ManifestUsed then
           begin
             LMatchKind := MatchManifestUnit(LManifest, ArtefactUnitName(LArtefact),
-              ArtefactFolderPath(LArtefact)).Kind;
+              ArtefactMatchPath(LManifest, LArtefact)).Kind;
           end;
           // own_code_* marks the project's own units, including a file that
           // lives outside the project folder and is therefore recorded as
@@ -672,16 +724,8 @@ begin
           if LMatchKind <> mmOwnCode then
           begin
             Inc(Result.ThirdPartyUnitCount);
-            var LComponentIndex: Integer;
-            if LGrouped.TryGetValue(i, LComponentIndex) and
-              (Trim(LManifest.Components[LComponentIndex].Vendor) <> '') then
-            begin
-              LSuppliers.Add(Trim(LManifest.Components[LComponentIndex].Vendor), LName);
-            end
-            else
-            begin
+            if not LHasSupplier then
               LSuppliers.Add(cUnknownSupplierTitle, LName);
-            end;
             if LMatchKind = mmNone then
             begin
               // Issue #132: optional second level, the source folder, so one
@@ -766,7 +810,9 @@ begin
     begin
       Result.WithoutManifest[i].Note := cMissingAll;
     end;
+    Result.PrefixRejections := LRejections.ToArray;
   finally
+    LRejections.Free;
     LGrouped.Free;
     LWithout.Free;
     LSuppliers.Free;

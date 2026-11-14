@@ -1050,7 +1050,7 @@ begin
   AddExe;
   AddFile('UnitB.dcu', 'unit-evidence');
   FMetadata.ComponentManifestJson :=
-    '{"schema_version":"1.0","components":[{"name":"LibA","version":"1.0.0",' +
+    '{"match":{"prefixes":"legacy"},"schema_version":"1.0","components":[{"name":"LibA","version":"1.0.0",' +
     '"licence":"MIT","type":"library","units_exact":["UnitB"]}]}';
 
   LJson := WriteJson;

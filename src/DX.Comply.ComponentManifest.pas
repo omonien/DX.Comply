@@ -102,6 +102,24 @@ type
   );
 
   /// <summary>
+  /// How units_prefix assigns a library. corroborated is the default.
+  /// legacy is the one-release switch match.prefixes=legacy.
+  /// </summary>
+  TPrefixMatchMode = (
+    /// <summary>
+    /// A prefix assigns a library only when it contains a dot and the
+    /// unit file is not in an Embarcadero product path. A prefix with no
+    /// dot does not assign. units_exact and units_folder are unchanged.
+    /// </summary>
+    pmmCorroborated,
+    /// <summary>
+    /// A prefix assigns a library the way it did before this rule, except
+    /// it never assigns a unit whose file is in an Embarcadero product path.
+    /// </summary>
+    pmmLegacy
+  );
+
+  /// <summary>
   /// One library row from components.json.
   /// </summary>
   TComponentEntry = record
@@ -186,6 +204,17 @@ type
     Warnings: TArray<string>;
     /// <summary>Path or label the text was loaded from.</summary>
     SourcePath: string;
+    /// <summary>
+    /// units_prefix rule. Missing match.prefixes means corroborated.
+    /// </summary>
+    PrefixMode: TPrefixMatchMode;
+    /// <summary>
+    /// Delphi install root for this run. Empty when the caller has no
+    /// toolchain root. A prefix does not assign a unit under a product
+    /// shipped path of this root. The engine writes it onto the in-memory
+    /// manifest. It is not a field of the components file.
+    /// </summary>
+    InstallRoot: string;
   end;
 
   /// <summary>
@@ -361,11 +390,67 @@ function ResolveManifestPath(const AProjectDir, AManifestFile: string): string;
 /// starts with it. A trailing dot is not required. The longest matching
 /// prefix wins, and the same prefix on more than one row assigns the units
 /// to the first row in the file. The name is tried as written and with its
-/// scope prefix removed. ASourcePath is the unit's source file. Folder
-/// rules do not match when it is empty.
+/// scope prefix removed. A prefix assigns a library only when the prefix
+/// mode allows it. corroborated requires a dot in the prefix. legacy allows
+/// a prefix with no dot. Neither mode assigns a unit whose file is in an
+/// Embarcadero product path under InstallRoot. own_code_prefixes are not
+/// that rule. ASourcePath is the unit's source file. Folder rules do not
+/// match when it is empty.
 /// </summary>
 function MatchManifestUnit(const AManifest: TComponentManifest;
   const AUnitName: string; const ASourcePath: string = ''): TManifestMatch;
+
+/// <summary>
+/// True when APath is a product shipped path under AInstallRoot.
+/// Product source trees are source\rtl, source\vcl, source\fmx, source\data,
+/// and the other source trees shipped in that folder. Product lib folders
+/// are lib\&lt;platform&gt;\release, lib\&lt;platform&gt;\debug, and the DCUs
+/// Delphi places in lib\&lt;platform&gt;. An empty root is never a product path.
+/// </summary>
+function IsEmbarcaderoProductPath(const APath, AInstallRoot: string): Boolean;
+
+/// <summary>
+/// True when a units_prefix would have selected a library and the prefix
+/// rule did not assign it. APrefix and ARowName name that prefix and row.
+/// A stronger rule (units_exact, own_code_units, or a folder) leaves this
+/// false, because the prefix was not the assignment.
+/// </summary>
+function TryRejectedLibraryPrefix(const AManifest: TComponentManifest;
+  const AUnitName, ASourcePath: string; out APrefix, ARowName: string): Boolean;
+
+/// <summary>
+/// Log line for a prefix that was not applied. Names the unit, the prefix,
+/// the row, and the origin that was kept.
+/// </summary>
+function RejectedPrefixLogLine(const AUnitName, APrefix, ARowName,
+  AKeptOrigin: string): string;
+
+/// <summary>
+/// One log line per artefact whose winning units_prefix was not applied.
+/// Build mode lists those as unit-evidence. Library mode lists a shipped
+/// .pas, .dpr, or .dpk as a file, and those are included too. The origin
+/// on the artefact is the origin that was kept.
+/// </summary>
+function RejectedPrefixLogLines(const AManifest: TComponentManifest;
+  const AArtefacts: TArtefactList): TArray<string>;
+
+/// <summary>
+/// One log line when a units_folder match is kept for a file that sits in
+/// an Embarcadero product path. The folder is explicit, so the match stays.
+/// Build mode and library mode both contribute, the same files as
+/// RejectedPrefixLogLines.
+/// </summary>
+function ProductFolderMatchLogLines(const AManifest: TComponentManifest;
+  const AArtefacts: TArtefactList): TArray<string>;
+
+/// <summary>
+/// Rewrites the in-memory manifest JSON so a later parse sees the install
+/// root and, when APrefixMode is not empty, match.prefixes. The components
+/// file on disk is not changed. An empty APrefixMode leaves match.prefixes
+/// as the file wrote it.
+/// </summary>
+function ManifestJsonWithRuntimeContext(const AJson, AInstallRoot,
+  APrefixMode: string): string;
 
 /// <summary>
 /// Source path used for folder rules. The resolver's source path when it
@@ -374,6 +459,14 @@ function MatchManifestUnit(const AManifest: TComponentManifest;
 /// folder, is known.
 /// </summary>
 function ArtefactFolderPath(const AArtefact: TArtefactInfo): string;
+
+/// <summary>
+/// Path passed to MatchManifestUnit. The folder path, or FilePath when that
+/// file is in an Embarcadero product path and no source path was recorded.
+/// A DCU in the project output folder stays unmatched by a folder.
+/// </summary>
+function ArtefactMatchPath(const AManifest: TComponentManifest;
+  const AArtefact: TArtefactInfo): string;
 
 /// <summary>
 /// Unit name of a unit-evidence artefact. The stored unit name when it is
@@ -861,6 +954,18 @@ begin
     Result := AArtefact.FilePath;
 end;
 
+function ArtefactMatchPath(const AManifest: TComponentManifest;
+  const AArtefact: TArtefactInfo): string;
+begin
+  Result := ArtefactFolderPath(AArtefact);
+  if Result <> '' then
+    Exit;
+  // A product DCU, such as lib\Win32\release, is the file the prefix veto
+  // has to see. An output DCU is not a product path, so it stays out.
+  if IsEmbarcaderoProductPath(AArtefact.FilePath, AManifest.InstallRoot) then
+    Result := Trim(AArtefact.FilePath);
+end;
+
 function EscapeXml(const AValue: string): string;
 begin
   Result := AValue;
@@ -953,7 +1058,6 @@ var
   LText: string;
   LKind: TLicenceKind;
   LNormalised: string;
-  I: Integer;
 begin
   Result := Default(TComponentEntry);
   Result.ComponentType := 'library';
@@ -1074,12 +1178,6 @@ begin
     (Length(Result.Folders) = 0) then
     AddWarning(AWarnings, LContext +
       ': no units_prefix, units_exact, or units_folder; this row will not match any unit');
-
-  for I := 0 to High(Result.Prefixes) do
-    if Length(Result.Prefixes[I]) < cMinPrefixLength then
-      AddWarning(AWarnings, LContext + ': prefix "' + Result.Prefixes[I] +
-        '" is shorter than 3 characters. It is still applied. Use units_exclude ' +
-        'to leave out units of other libraries that start with it');
 end;
 
 procedure ReadComponents(AArray: TJSONArray; AWarnings: TList<string>;
@@ -1117,7 +1215,11 @@ var
   LStatus: TJsonTextStatus;
   LSupplier: TJSONValue;
   LComponents: TJSONValue;
-  I: Integer;
+  LMatchValue: TJSONValue;
+  LText: string;
+  I, J: Integer;
+  LContext: string;
+  LPrefix: string;
 begin
   Result := True;
   LStatus := ReadJsonText(ARoot, 'schema_version', AManifest.SchemaVersion);
@@ -1164,6 +1266,62 @@ begin
     if Length(AManifest.OwnCodePrefixes[I]) < cMinPrefixLength then
       AddWarning(AWarnings, 'own_code_prefixes: prefix "' + AManifest.OwnCodePrefixes[I] +
         '" is shorter than 3 characters');
+
+  // match.prefixes is optional. A missing value stays corroborated, which
+  // is the zero value of PrefixMode.
+  LMatchValue := ARoot.GetValue('match');
+  if (LMatchValue <> nil) and not (LMatchValue is TJSONNull) then
+  begin
+    if not (LMatchValue is TJSONObject) then
+      AddWarning(AWarnings, 'match should be an object and was ignored')
+    else
+    begin
+      LStatus := ReadJsonText(TJSONObject(LMatchValue), 'prefixes', LText);
+      if LStatus = jtsWrongType then
+        AddWarning(AWarnings, 'match.prefixes should be a string and was ignored')
+      else if LStatus = jtsValue then
+      begin
+        if SameText(LText, 'legacy') then
+          AManifest.PrefixMode := pmmLegacy
+        else if SameText(LText, 'corroborated') then
+          AManifest.PrefixMode := pmmCorroborated
+        else
+          AddWarning(AWarnings, 'match.prefixes "' + LText +
+            '" is not corroborated or legacy. corroborated is used');
+      end;
+    end;
+  end;
+
+  // Written by the engine onto the in-memory copy. Not a components-file field.
+  LStatus := ReadJsonText(ARoot, 'dxInstallRoot', LText);
+  if LStatus = jtsValue then
+    AManifest.InstallRoot := LText;
+
+  for I := 0 to High(AManifest.Components) do
+  begin
+    if AManifest.Components[I].Name <> '' then
+      LContext := 'Component[' + IntToStr(I) + '] "' + AManifest.Components[I].Name + '"'
+    else
+      LContext := 'Component[' + IntToStr(I) + ']';
+    for J := 0 to High(AManifest.Components[I].Prefixes) do
+    begin
+      LPrefix := AManifest.Components[I].Prefixes[J];
+      if Length(LPrefix) < cMinPrefixLength then
+      begin
+        if AManifest.PrefixMode = pmmLegacy then
+          AddWarning(AWarnings, LContext + ': prefix "' + LPrefix +
+            '" is shorter than 3 characters. It is still applied. Use units_exclude ' +
+            'to leave out units of other libraries that start with it')
+        else
+          AddWarning(AWarnings, LContext + ': prefix "' + LPrefix +
+            '" is shorter than 3 characters. It is not applied. Use units_folder or units_exact');
+      end
+      else if (AManifest.PrefixMode = pmmCorroborated) and (Pos('.', LPrefix) = 0) then
+        AddWarning(AWarnings, LContext + ': prefix "' + LPrefix +
+          '" has no dot. It is not applied on its own. Use units_folder or units_exact. ' +
+          'For this release, match.prefixes legacy still applies it outside an Embarcadero product path');
+    end;
+  end;
 end;
 
 function BaseDirFromSourceName(const ASourceName: string): string;
@@ -2083,6 +2241,144 @@ begin
     Result := TPath.Combine(AProjectDir, Result);
 end;
 
+function ProductPathIsUnder(const APath, ABaseDirectory: string): Boolean;
+var
+  LBase: string;
+  LPath: string;
+begin
+  Result := False;
+  if (Trim(APath) = '') or (Trim(ABaseDirectory) = '') then
+    Exit;
+  try
+    LBase := IncludeTrailingPathDelimiter(LowerCase(TPath.GetFullPath(ABaseDirectory)));
+    LPath := LowerCase(TPath.GetFullPath(APath));
+  except
+    Exit;
+  end;
+  Result := LPath.StartsWith(LBase) or
+    SameText(ExcludeTrailingPathDelimiter(LBase), LPath);
+end;
+
+function ProductFirstSegment(const APath, ABaseDirectory: string;
+  out AName: string; out AHasMore: Boolean): Boolean;
+var
+  LBase: string;
+  LPath: string;
+  LRest: string;
+  LSlash: Integer;
+begin
+  AName := '';
+  AHasMore := False;
+  Result := False;
+  if not ProductPathIsUnder(APath, ABaseDirectory) then
+    Exit;
+  try
+    LBase := ExcludeTrailingPathDelimiter(LowerCase(TPath.GetFullPath(ABaseDirectory)));
+    LPath := LowerCase(TPath.GetFullPath(APath));
+  except
+    Exit;
+  end;
+  if Length(LPath) <= Length(LBase) then
+    Exit;
+  LRest := Copy(LPath, Length(LBase) + 1, MaxInt);
+  if LRest.StartsWith('\') or LRest.StartsWith('/') then
+    LRest := Copy(LRest, 2, MaxInt);
+  if LRest = '' then
+    Exit;
+  LSlash := Pos('\', LRest);
+  if LSlash = 0 then
+    LSlash := Pos('/', LRest);
+  if LSlash = 0 then
+    AName := LRest
+  else
+  begin
+    AName := Copy(LRest, 1, LSlash - 1);
+    AHasMore := Length(LRest) > LSlash;
+  end;
+  Result := AName <> '';
+end;
+
+function IsProductSourcePath(const APath, ARootDir: string): Boolean;
+const
+  // First-level folders of the product source tree. A library copied into
+  // source\, or installed under Extras or CatalogRepository, is not here.
+  cSourceFolders: array[0..23] of string = (
+    'rtl', 'vcl', 'fmx', 'data', 'databinding', 'dataexplorer',
+    'dunit', 'dunitx', 'experts', 'flatbox2d', 'ibx',
+    'indy', 'indy10', 'indyimpl', 'internet', 'property editors',
+    'soap', 'tethering', 'toolsapi', 'visualizers', 'xml',
+    'db', 'websnap', 'clx');
+var
+  I: Integer;
+  LName: string;
+  LHasMore: Boolean;
+  LSource: string;
+begin
+  Result := False;
+  LSource := TPath.Combine(ARootDir, 'source');
+  if not ProductFirstSegment(APath, LSource, LName, LHasMore) then
+    Exit;
+  for I := Low(cSourceFolders) to High(cSourceFolders) do
+    if SameText(LName, cSourceFolders[I]) then
+      Exit(True);
+end;
+
+function IsProductLibPlatform(const AName: string): Boolean;
+const
+  cPlatforms: array[0..21] of string = (
+    'win32', 'win64', 'win64x', 'winarm64',
+    'linux32', 'linux64', 'linuxarm64',
+    'osx32', 'osx64', 'osxarm64', 'macos64', 'macosarm64',
+    'android', 'android32', 'android64',
+    'iosdevice', 'iosdevice32', 'iosdevice64',
+    'iossim32', 'iossim64', 'iossimarm64', 'iossimulator');
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := Low(cPlatforms) to High(cPlatforms) do
+    if SameText(AName, cPlatforms[I]) then
+      Exit(True);
+end;
+
+function IsProductLibPath(const APath, ARootDir: string): Boolean;
+var
+  LFirst: string;
+  LFirstMore: Boolean;
+  LSecond: string;
+  LSecondMore: Boolean;
+  LLib: string;
+begin
+  // Product DCUs live in lib\<platform>\release, lib\<platform>\debug,
+  // directly in lib\<platform>, or (older installs) directly in lib.
+  // lib\<package>\... is a library added under the install.
+  Result := False;
+  LLib := TPath.Combine(ARootDir, 'lib');
+  if not ProductFirstSegment(APath, LLib, LFirst, LFirstMore) then
+    Exit;
+  if not LFirstMore then
+    Exit(True);
+  if SameText(LFirst, 'release') or SameText(LFirst, 'debug') then
+    Exit(True);
+  if not IsProductLibPlatform(LFirst) then
+    Exit;
+  if not ProductFirstSegment(APath, TPath.Combine(LLib, LFirst), LSecond, LSecondMore) then
+    Exit;
+  if SameText(LSecond, 'release') or SameText(LSecond, 'debug') then
+    Exit(True);
+  if not LSecondMore then
+    Exit(True);
+end;
+
+function IsEmbarcaderoProductPath(const APath, AInstallRoot: string): Boolean;
+begin
+  Result := False;
+  if (Trim(APath) = '') or (Trim(AInstallRoot) = '') then
+    Exit;
+  Result := IsProductSourcePath(APath, AInstallRoot) or
+    IsProductLibPath(APath, AInstallRoot);
+end;
+
 function FindExact(const AManifest: TComponentManifest; const AUnitName: string): Integer;
 var
   I, J: Integer;
@@ -2104,17 +2400,19 @@ begin
       Exit(True);
 end;
 
-function FindPrefix(const AManifest: TComponentManifest; const AUnitName: string;
-  const AFullUnitName: string = ''): Integer;
+procedure FindPrefix(const AManifest: TComponentManifest; const AUnitName: string;
+  const AFullUnitName: string; out AIndex: Integer; out APrefix: string);
 var
   I, J: Integer;
   LLower: string;
   LBestLength: Integer;
+  LPrefix: string;
 begin
   // The longest matching prefix wins, whatever the row order, so "Neslib.Xml"
   // beats "Neslib" (issue #129). A prefix matches the start of the unit name.
   // A trailing dot is not required. On equal length the first row wins.
-  Result := -1;
+  AIndex := -1;
+  APrefix := '';
   LBestLength := 0;
   LLower := LowerCase(AUnitName);
   for I := 0 to High(AManifest.Components) do
@@ -2126,13 +2424,50 @@ begin
       ((AFullUnitName <> '') and IsExcludedUnit(AManifest.Components[I], AFullUnitName)) then
       Continue;
     for J := 0 to High(AManifest.Components[I].Prefixes) do
-      if (AManifest.Components[I].Prefixes[J] <> '') and
-        (Length(AManifest.Components[I].Prefixes[J]) > LBestLength) and
-        LLower.StartsWith(LowerCase(AManifest.Components[I].Prefixes[J])) then
+    begin
+      LPrefix := AManifest.Components[I].Prefixes[J];
+      if (LPrefix <> '') and (Length(LPrefix) > LBestLength) and
+        LLower.StartsWith(LowerCase(LPrefix)) then
       begin
-        Result := I;
-        LBestLength := Length(AManifest.Components[I].Prefixes[J]);
+        AIndex := I;
+        APrefix := LPrefix;
+        LBestLength := Length(LPrefix);
       end;
+    end;
+  end;
+end;
+
+function PrefixContainsDot(const APrefix: string): Boolean;
+begin
+  Result := Pos('.', APrefix) > 0;
+end;
+
+function PrefixMayAssign(const AManifest: TComponentManifest;
+  const APrefix, ASourcePath: string): Boolean;
+begin
+  // A product shipped path contradicts a third-party prefix. The file wins
+  // over the name in both modes. A stronger rule is decided before this.
+  if IsEmbarcaderoProductPath(ASourcePath, AManifest.InstallRoot) then
+    Exit(False);
+  if AManifest.PrefixMode = pmmLegacy then
+    Exit(True);
+  Result := PrefixContainsDot(APrefix);
+end;
+
+procedure SelectPrefix(const AManifest: TComponentManifest; const AUnitName,
+  AStripped: string; out AIndex: Integer; out APrefix: string);
+var
+  LIndex: Integer;
+  LPrefix: string;
+begin
+  // The name as written wins over the scope-stripped name when both match,
+  // which is the order MatchManifestUnit already used.
+  FindPrefix(AManifest, AUnitName, '', AIndex, APrefix);
+  if (AIndex < 0) and not SameText(AStripped, AUnitName) then
+  begin
+    FindPrefix(AManifest, AStripped, AUnitName, LIndex, LPrefix);
+    AIndex := LIndex;
+    APrefix := LPrefix;
   end;
 end;
 
@@ -2227,6 +2562,7 @@ var
   LStripped: string;
   LIndex: Integer;
   LOwnCode: Boolean;
+  LPrefix: string;
 begin
   Result.Kind := mmNone;
   Result.ComponentIndex := -1;
@@ -2270,10 +2606,8 @@ begin
     end;
   end;
 
-  LIndex := FindPrefix(AManifest, AUnitName);
-  if (LIndex < 0) and not SameText(LStripped, AUnitName) then
-    LIndex := FindPrefix(AManifest, LStripped, AUnitName);
-  if LIndex >= 0 then
+  SelectPrefix(AManifest, AUnitName, LStripped, LIndex, LPrefix);
+  if (LIndex >= 0) and PrefixMayAssign(AManifest, LPrefix, ASourcePath) then
   begin
     Result.Kind := mmLibrary;
     Result.ComponentIndex := LIndex;
@@ -2283,6 +2617,195 @@ begin
   if IsOwnCodePrefix(AManifest, AUnitName) or
     ((not SameText(LStripped, AUnitName)) and IsOwnCodePrefix(AManifest, LStripped)) then
     Result.Kind := mmOwnCode;
+end;
+
+function ComponentRowName(const AManifest: TComponentManifest; AIndex: Integer): string;
+begin
+  if (AIndex >= 0) and (AIndex <= High(AManifest.Components)) and
+    (Trim(AManifest.Components[AIndex].Name) <> '') then
+    Result := AManifest.Components[AIndex].Name
+  else
+    Result := 'component[' + IntToStr(AIndex) + ']';
+end;
+
+function TryRejectedLibraryPrefix(const AManifest: TComponentManifest;
+  const AUnitName, ASourcePath: string; out APrefix, ARowName: string): Boolean;
+var
+  LStripped: string;
+  LIndex: Integer;
+  LOwnCode: Boolean;
+  LPrefix: string;
+begin
+  Result := False;
+  APrefix := '';
+  ARowName := '';
+  if not AManifest.Loaded or (Trim(AUnitName) = '') then
+    Exit;
+
+  LStripped := StripDelphiScopePrefix(AUnitName);
+  LIndex := FindExact(AManifest, AUnitName);
+  if (LIndex < 0) and not SameText(LStripped, AUnitName) then
+    LIndex := FindExact(AManifest, LStripped);
+  if LIndex >= 0 then
+    Exit;
+  if IsListedOwnCode(AManifest, AUnitName) or
+    ((not SameText(LStripped, AUnitName)) and IsListedOwnCode(AManifest, LStripped)) then
+    Exit;
+  if Trim(ASourcePath) <> '' then
+  begin
+    LIndex := FindFolder(AManifest, AUnitName, LStripped, ASourcePath, LOwnCode);
+    if LOwnCode or (LIndex >= 0) then
+      Exit;
+  end;
+
+  SelectPrefix(AManifest, AUnitName, LStripped, LIndex, LPrefix);
+  if (LIndex < 0) or PrefixMayAssign(AManifest, LPrefix, ASourcePath) then
+    Exit;
+  APrefix := LPrefix;
+  ARowName := ComponentRowName(AManifest, LIndex);
+  Result := True;
+end;
+
+function RejectedPrefixLogLine(const AUnitName, APrefix, ARowName,
+  AKeptOrigin: string): string;
+var
+  LOrigin: string;
+begin
+  LOrigin := Trim(AKeptOrigin);
+  if LOrigin = '' then
+    LOrigin := 'Unknown';
+  Result := 'Prefix match not applied: unit ' + Trim(AUnitName) +
+    ', prefix ' + APrefix + ', row ' + ARowName + ', kept origin ' + LOrigin;
+end;
+
+function RejectedPrefixLogLines(const AManifest: TComponentManifest;
+  const AArtefacts: TArtefactList): TArray<string>;
+var
+  LLines: TList<string>;
+  I: Integer;
+  LPrefix: string;
+  LRow: string;
+  LName: string;
+begin
+  Result := nil;
+  if not AManifest.Loaded or not Assigned(AArtefacts) then
+    Exit;
+  LLines := TList<string>.Create;
+  try
+    for I := 0 to AArtefacts.Count - 1 do
+    begin
+      // ArtefactUnitName is empty unless this is unit-evidence or a shipped
+      // .pas, .dpr, or .dpk. Library mode uses the file type, so a type
+      // check for unit-evidence would drop the product-path veto log.
+      LName := ArtefactUnitName(AArtefacts[I]);
+      if LName = '' then
+        Continue;
+      if TryRejectedLibraryPrefix(AManifest, LName, ArtefactMatchPath(AManifest, AArtefacts[I]),
+        LPrefix, LRow) then
+        LLines.Add(RejectedPrefixLogLine(LName, LPrefix, LRow, AArtefacts[I].Origin));
+    end;
+    Result := LLines.ToArray;
+  finally
+    LLines.Free;
+  end;
+end;
+
+function ProductFolderMatchLogLines(const AManifest: TComponentManifest;
+  const AArtefacts: TArtefactList): TArray<string>;
+var
+  LLines: TList<string>;
+  I: Integer;
+  LName: string;
+  LPath: string;
+  LStripped: string;
+  LIndex: Integer;
+  LOwnCode: Boolean;
+  LOrigin: string;
+begin
+  Result := nil;
+  if not AManifest.Loaded or not Assigned(AArtefacts) then
+    Exit;
+  if Trim(AManifest.InstallRoot) = '' then
+    Exit;
+  LLines := TList<string>.Create;
+  try
+    for I := 0 to AArtefacts.Count - 1 do
+    begin
+      LName := ArtefactUnitName(AArtefacts[I]);
+      if LName = '' then
+        Continue;
+      LPath := ArtefactMatchPath(AManifest, AArtefacts[I]);
+      if (LName = '') or (LPath = '') then
+        Continue;
+      if not IsEmbarcaderoProductPath(LPath, AManifest.InstallRoot) then
+        Continue;
+      LStripped := StripDelphiScopePrefix(LName);
+      if FindExact(AManifest, LName) >= 0 then
+        Continue;
+      if (not SameText(LStripped, LName)) and (FindExact(AManifest, LStripped) >= 0) then
+        Continue;
+      LIndex := FindFolder(AManifest, LName, LStripped, LPath, LOwnCode);
+      if LOwnCode or (LIndex < 0) then
+        Continue;
+      LOrigin := Trim(AArtefacts[I].Origin);
+      if LOrigin = '' then
+        LOrigin := 'Unknown';
+      LLines.Add('Folder match kept on an Embarcadero product path: unit ' +
+        LName + ', row ' + ComponentRowName(AManifest, LIndex) +
+        ', kept origin ' + LOrigin);
+    end;
+    Result := LLines.ToArray;
+  finally
+    LLines.Free;
+  end;
+end;
+
+function ManifestJsonWithRuntimeContext(const AJson, AInstallRoot,
+  APrefixMode: string): string;
+var
+  LValue: TJSONValue;
+  LRoot: TJSONObject;
+  LMatch: TJSONObject;
+  LPair: TJSONPair;
+begin
+  Result := AJson;
+  if (Trim(AInstallRoot) = '') and (Trim(APrefixMode) = '') then
+    Exit;
+  if Trim(AJson) = '' then
+    Exit;
+  LValue := TJSONObject.ParseJSONValue(AJson);
+  if not (LValue is TJSONObject) then
+  begin
+    LValue.Free;
+    Exit;
+  end;
+  LRoot := TJSONObject(LValue);
+  try
+    if Trim(AInstallRoot) <> '' then
+    begin
+      LPair := LRoot.RemovePair('dxInstallRoot');
+      LPair.Free;
+      LRoot.AddPair('dxInstallRoot', AInstallRoot);
+    end;
+    if Trim(APrefixMode) <> '' then
+    begin
+      if LRoot.GetValue('match') is TJSONObject then
+        LMatch := TJSONObject(LRoot.GetValue('match'))
+      else
+      begin
+        LPair := LRoot.RemovePair('match');
+        LPair.Free;
+        LMatch := TJSONObject.Create;
+        LRoot.AddPair('match', LMatch);
+      end;
+      LPair := LMatch.RemovePair('prefixes');
+      LPair.Free;
+      LMatch.AddPair('prefixes', APrefixMode);
+    end;
+    Result := LRoot.ToJSON;
+  finally
+    LRoot.Free;
+  end;
 end;
 
 function ArtefactListHasUnit(const AArtefacts: TArtefactList;
@@ -2354,7 +2877,7 @@ begin
         Continue;
 
       LMatch := MatchManifestUnit(AManifest, LUnitName,
-        ArtefactFolderPath(AArtefacts[I]));
+        ArtefactMatchPath(AManifest, AArtefacts[I]));
       if LMatch.Kind <> mmLibrary then
         Continue;
 
@@ -3047,7 +3570,7 @@ begin
   if AManifest.Loaded then
   begin
     LMatch := MatchManifestUnit(AManifest, ArtefactUnitName(AArtefact),
-      ArtefactFolderPath(AArtefact));
+      ArtefactMatchPath(AManifest, AArtefact));
     if (LMatch.Kind = mmOwnCode) and (LProduct <> '') then
       Exit(LProduct);
     if LMatch.Kind = mmLibrary then

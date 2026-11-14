@@ -15,10 +15,9 @@
       "licence": "BSD-3-Clause",
       "licence_url": "https://opensource.org/licenses/BSD-3-Clause",
       "type": "library",
-      "units_prefix": ["Otl"],
       "units_exact": ["GpLists", "GpStuff"],
       "units_folder": ["third-party/OmniThreadLibrary"],
-      "notes": "High-performance threading library for Delphi. units_folder is optional and includes subfolders. Replace the path or remove it. A missing folder is a warning."
+      "notes": "Prefer units_folder for the package directory, including subfolders, or units_exact for unit names. A units_prefix with no dot is not applied. Replace the path or remove it. A missing folder is a warning."
     },
     {
       "name": "Spring4D",
@@ -28,8 +27,9 @@
       "licence": "Apache-2.0",
       "licence_url": "https://www.apache.org/licenses/LICENSE-2.0",
       "type": "framework",
-      "units_prefix": ["Spring"],
-      "notes": "Dependency injection and collections framework"
+      "units_folder": ["third-party/Spring4D"],
+      "units_exact": ["Spring", "Spring.Container"],
+      "notes": "Dependency injection and collections framework. The folder covers the package. units_exact covers units known only by name."
     },
     {
       "name": "SynEdit",
@@ -38,8 +38,8 @@
       "vendor_url": "https://github.com/SynEdit/SynEdit",
       "licence": "MPL-1.1 OR LGPL-2.1-or-later",
       "type": "library",
-      "units_prefix": ["SynEdit", "SynHighlighter"],
-      "notes": "An SPDX expression is emitted as licenses[].expression"
+      "units_folder": ["third-party/SynEdit"],
+      "notes": "An SPDX expression is emitted as licenses[].expression. The folder replaces a short prefix."
     },
     {
       "name": "TMS VCL UI Pack",
@@ -48,9 +48,10 @@
       "vendor_url": "https://www.tmssoftware.com",
       "licence": "Commercial",
       "type": "library",
-      "units_prefix": ["AdvGrid", "AdvEdit"],
+      "units_folder": ["third-party/TMS"],
+      "units_prefix": ["FMX.TMSFNC"],
       "purl": "pkg:generic/tms-vcl-ui-pack@13.0",
-      "notes": "Optional purl overrides the generated pkg:delphi locator. Commercial is emitted as license.name"
+"notes": "Optional purl overrides the generated pkg:delphi locator. Commercial is emitted as license.name. A prefix that contains a dot still matches the start of the unit name, except on an Embarcadero product path. Prefer the folder for the VCL package."
     },
     {
       "name": "OpenSSL",
@@ -59,8 +60,8 @@
       "licence": "Apache-2.0",
       "type": "library",
       "cpe": "cpe:2.3:a:openssl:openssl:3.0.2:*:*:*:*:*:*:*",
-      "units_prefix": ["OpenSSL"],
-      "notes": "Optional cpe. DX.Comply writes this value and does not look one up or build one from the name. A CPE 2.2 URI such as cpe:/a:openssl:openssl:3.0.2 is also accepted. Anything else is a warning and is left out."
+      "units_exact": ["OpenSSL"],
+      "notes": "Optional cpe. DX.Comply writes this value and does not look one up or build one from the name. A CPE 2.2 URI such as cpe:/a:openssl:openssl:3.0.2 is also accepted. Anything else is a warning and is left out. units_exact names the unit. A units_prefix with no dot is not applied."
     }
   ],
   "own_code_units": ["MainForm", "AppSettings"],
