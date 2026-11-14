@@ -426,8 +426,10 @@ function RejectedPrefixLogLine(const AUnitName, APrefix, ARowName,
   AKeptOrigin: string): string;
 
 /// <summary>
-/// One log line per unit-evidence artefact whose winning units_prefix was
-/// not applied. The origin on the artefact is the origin that was kept.
+/// One log line per artefact whose winning units_prefix was not applied.
+/// Build mode lists those as unit-evidence. Library mode lists a shipped
+/// .pas, .dpr, or .dpk as a file, and those are included too. The origin
+/// on the artefact is the origin that was kept.
 /// </summary>
 function RejectedPrefixLogLines(const AManifest: TComponentManifest;
   const AArtefacts: TArtefactList): TArray<string>;
@@ -435,6 +437,8 @@ function RejectedPrefixLogLines(const AManifest: TComponentManifest;
 /// <summary>
 /// One log line when a units_folder match is kept for a file that sits in
 /// an Embarcadero product path. The folder is explicit, so the match stays.
+/// Build mode and library mode both contribute, the same files as
+/// RejectedPrefixLogLines.
 /// </summary>
 function ProductFolderMatchLogLines(const AManifest: TComponentManifest;
   const AArtefacts: TArtefactList): TArray<string>;
@@ -2690,9 +2694,12 @@ begin
   try
     for I := 0 to AArtefacts.Count - 1 do
     begin
-      if not SameText(AArtefacts[I].ArtefactType, 'unit-evidence') then
-        Continue;
+      // ArtefactUnitName is empty unless this is unit-evidence or a shipped
+      // .pas, .dpr, or .dpk. Library mode uses the file type, so a type
+      // check for unit-evidence would drop the product-path veto log.
       LName := ArtefactUnitName(AArtefacts[I]);
+      if LName = '' then
+        Continue;
       if TryRejectedLibraryPrefix(AManifest, LName, ArtefactMatchPath(AManifest, AArtefacts[I]),
         LPrefix, LRow) then
         LLines.Add(RejectedPrefixLogLine(LName, LPrefix, LRow, AArtefacts[I].Origin));
@@ -2724,9 +2731,9 @@ begin
   try
     for I := 0 to AArtefacts.Count - 1 do
     begin
-      if not SameText(AArtefacts[I].ArtefactType, 'unit-evidence') then
-        Continue;
       LName := ArtefactUnitName(AArtefacts[I]);
+      if LName = '' then
+        Continue;
       LPath := ArtefactMatchPath(AManifest, AArtefacts[I]);
       if (LName = '') or (LPath = '') then
         Continue;

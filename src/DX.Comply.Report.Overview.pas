@@ -681,7 +681,7 @@ begin
         begin
           LLicences.Add(cNoLicenceGroupTitle, LName, LVersion, '');
         end;
-        if Result.ManifestUsed and SameText(LArtefact.ArtefactType, 'unit-evidence') then
+        if Result.ManifestUsed and (ArtefactUnitName(LArtefact) <> '') then
         begin
           var LRejectPrefix := '';
           var LRejectRow := '';
