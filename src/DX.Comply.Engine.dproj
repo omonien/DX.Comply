@@ -115,6 +115,7 @@
         <DCCReference Include="DX.Comply.Spdx3.Writer.pas"/>
         <DCCReference Include="DX.Comply.Schema.Validator.pas"/>
         <DCCReference Include="DX.Comply.ComponentManifest.pas"/>
+        <DCCReference Include="DX.Comply.ManifestDefines.pas"/>
         <DCCReference Include="DX.Comply.CraChecks.pas"/>
         <DCCReference Include="DX.Comply.LibrarySource.pas"/>
         <DCCReference Include="DX.Comply.Engine.pas"/>

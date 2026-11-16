@@ -51,7 +51,9 @@ uses
   DX.Comply.Report.HtmlWriter,
   DX.Comply.Spdx.Writer,
   DX.Comply.Spdx3.Writer,
-  DX.Comply.Schema.Validator;
+  DX.Comply.Schema.Validator,
+  DX.Comply.ComponentManifest,
+  DX.Comply.ManifestDefines;
 
 type
   /// <summary>
@@ -85,7 +87,8 @@ type
     scoSpdxVersion,
     scoReportContent,
     scoReportGroupByFolder,
-    scoPrefixMatch
+    scoPrefixMatch,
+    scoDefines
   );
   /// <summary>Set of TSbomConfig fields that were set explicitly.</summary>
   TSbomConfigOverrides = set of TSbomConfigOverride;
@@ -262,6 +265,13 @@ type
     /// in that file is corroborated.
     /// </summary>
     PrefixMatch: string;
+    /// <summary>
+    /// Path variables for $(name) in units_folder and own_code_folders.
+    /// --define wins over the same name in .dxcomply.json. The IDE options
+    /// are the base when the IDE runs, and the project file wins over them
+    /// for the same name. Issue #185.
+    /// </summary>
+    Defines: TArray<TManifestDefine>;
     /// <summary>Creates a new TSbomConfig with default values.</summary>
     class function Default: TSbomConfig; static;
     /// <summary>
@@ -424,6 +434,13 @@ type
     /// Copies include/exclude warnings from the most recent file scan.
     /// </summary>
     procedure RememberPatternWarnings(const AWarnings: TList<string>);
+    /// <summary>
+    /// Loads the component manifest for this run, expands path variables,
+    /// and logs each variable that was used. An empty manifest path succeeds
+    /// with an unloaded manifest. Build mode and library mode both use this.
+    /// </summary>
+    function TryLoadAppliedManifest(const AProjectDir, AInstallRoot: string;
+      out AManifest: TComponentManifest; out AJson, APath: string): Boolean;
     /// <summary>
     /// Writes an SBOM for a library source release. Build mode is not used.
     /// </summary>
@@ -588,7 +605,6 @@ implementation
 uses
   System.Types,
   Winapi.Windows,
-  DX.Comply.ComponentManifest,
   DX.Comply.CraChecks,
   DX.Comply.LegacyProject,
   DX.Comply.LibrarySource,
@@ -639,6 +655,7 @@ begin
   Result.StrictMode := False;
   Result.SpdxVersion := '';
   Result.PrefixMatch := '';
+  SetLength(Result.Defines, 0);
 end;
 
 
@@ -2291,6 +2308,7 @@ var
   LSupplierValue: TJSONValue;
   LText: string;
   I: Integer;
+  LDefineWarnings: TList<string>;
 begin
   Result := TSbomConfig.Default;
 
@@ -2557,6 +2575,21 @@ begin
             DoProgress('Warning: matchPrefixes "' + LText + '" in ' +
               TPath.GetFileName(AConfigPath) +
               ' is not corroborated or legacy. The components file is used.', 5);
+        end;
+
+        // Path variables for $(name) in the component manifest. A name on
+        // the command line wins over the same name here. Other names stay.
+        if LJson.GetValue('defines') <> nil then
+        begin
+          LDefineWarnings := TList<string>.Create;
+          try
+            Result.Defines := ReadManifestDefines(LJson.GetValue('defines'),
+              TPath.GetFileName(AConfigPath), LDefineWarnings);
+            for I := 0 to LDefineWarnings.Count - 1 do
+              DoProgress('Warning: ' + LDefineWarnings[I], 5);
+          finally
+            LDefineWarnings.Free;
+          end;
         end;
 
         // SBOM creator contact. An empty value is ignored. A non-empty value
@@ -2878,6 +2911,58 @@ begin
   end;
 end;
 
+function TDxComplyGenerator.TryLoadAppliedManifest(const AProjectDir, AInstallRoot: string;
+  out AManifest: TComponentManifest; out AJson, APath: string): Boolean;
+var
+  LError, LPrefixMode, LRuntimeJson: string;
+  LUses: TArray<TManifestVariableUse>;
+  I: Integer;
+begin
+  Result := True;
+  AManifest := Default(TComponentManifest);
+  AJson := '';
+  APath := '';
+  if Trim(FConfig.ManifestFile) = '' then
+    Exit;
+
+  APath := ResolveManifestPath(AProjectDir, FConfig.ManifestFile);
+  if not TryLoadComponentManifest(APath, FConfig.Defines, AManifest, AJson, LError) then
+  begin
+    DoProgress('Error: Invalid component manifest "' + APath + '": ' + LError, -1);
+    Exit(False);
+  end;
+
+  // The runtime parse replaces the record. Keep the substitutions from the
+  // first parse, which is the one that expanded the placeholders.
+  LUses := AManifest.UsedVariables;
+  LPrefixMode := '';
+  if Trim(FConfig.PrefixMatch) <> '' then
+  begin
+    if SameText(FConfig.PrefixMatch, 'legacy') or
+      SameText(FConfig.PrefixMatch, 'corroborated') then
+      LPrefixMode := LowerCase(Trim(FConfig.PrefixMatch))
+    else
+      DoProgress('Warning: match.prefixes "' + FConfig.PrefixMatch +
+        '" is not corroborated or legacy. The components file is used.', 13);
+  end;
+  LRuntimeJson := ManifestJsonWithRuntimeContext(AJson, AInstallRoot, LPrefixMode);
+  if LRuntimeJson <> AJson then
+  begin
+    AJson := LRuntimeJson;
+    if not TryParseComponentManifest(AJson, APath, AManifest, LError) then
+    begin
+      DoProgress('Error: Invalid component manifest "' + APath + '": ' + LError, -1);
+      Exit(False);
+    end;
+    AManifest.UsedVariables := LUses;
+  end;
+
+  for I := 0 to High(AManifest.UsedVariables) do
+    DoProgress(ManifestVariableLogLine(AManifest.UsedVariables[I]), 13);
+  for I := 0 to High(AManifest.Warnings) do
+    DoProgress('Warning: ' + APath + ': ' + AManifest.Warnings[I], 13);
+end;
+
 function TDxComplyGenerator.GenerateLibrary(const AProjectPath, AOutputPath: string;
   AFormat: TSbomFormat): Boolean;
 var
@@ -2918,11 +3003,8 @@ var
   LManifest: TComponentManifest;
   LManifestJson: string;
   LManifestPath: string;
-  LManifestError: string;
   LDormantWarnings: TArray<string>;
   LWarningIndex: Integer;
-  LPrefixMode: string;
-  LRuntimeJson: string;
 begin
   Result := False;
   LManifest := Default(TComponentManifest);
@@ -3043,49 +3125,11 @@ begin
         LProjectInfo.ProjectName := 'library';
     end;
 
-    // The same manifest build mode reads. A bad file stops the run. A bad
-    // cpe is a warning on the manifest and does not stop it.
-    if Trim(FConfig.ManifestFile) <> '' then
-    begin
-      LManifestPath := ResolveManifestPath(LProjectInfo.ProjectDir, FConfig.ManifestFile);
-      if not TryLoadComponentManifest(LManifestPath, LManifest, LManifestJson,
-        LManifestError) then
-      begin
-        DoProgress('Error: Invalid component manifest "' + LManifestPath + '": ' +
-          LManifestError, -1);
-        Exit;
-      end;
-      // The in-memory copy carries the install root, so a later parse in a
-      // writer applies the product-path veto. --match-prefixes and
-      // matchPrefixes override the file for this run. An empty root (no
-      // project, or a scan that found no install) leaves the veto idle.
-      LPrefixMode := '';
-      if Trim(FConfig.PrefixMatch) <> '' then
-      begin
-        if SameText(FConfig.PrefixMatch, 'legacy') or
-          SameText(FConfig.PrefixMatch, 'corroborated') then
-          LPrefixMode := LowerCase(Trim(FConfig.PrefixMatch))
-        else
-          DoProgress('Warning: match.prefixes "' + FConfig.PrefixMatch +
-            '" is not corroborated or legacy. The components file is used.', 13);
-      end;
-      LRuntimeJson := ManifestJsonWithRuntimeContext(LManifestJson,
-        LProjectInfo.Toolchain.RootDir, LPrefixMode);
-      if LRuntimeJson <> LManifestJson then
-      begin
-        LManifestJson := LRuntimeJson;
-        if not TryParseComponentManifest(LManifestJson, LManifestPath, LManifest,
-          LManifestError) then
-        begin
-          DoProgress('Error: Invalid component manifest "' + LManifestPath + '": ' +
-            LManifestError, -1);
-          Exit;
-        end;
-      end;
-      for LWarningIndex := 0 to High(LManifest.Warnings) do
-        DoProgress('Warning: ' + LManifestPath + ': ' +
-          LManifest.Warnings[LWarningIndex], 13);
-    end;
+    // The same manifest build mode reads. A bad file or an undefined path
+    // variable stops the run. A bad cpe is a warning and does not stop it.
+    if not TryLoadAppliedManifest(LProjectInfo.ProjectDir,
+      LProjectInfo.Toolchain.RootDir, LManifest, LManifestJson, LManifestPath) then
+      Exit;
 
     LMainSource := '';
     if LHasProject then
@@ -3298,7 +3342,6 @@ var
   LManifest: TComponentManifest;
   LManifestJson: string;
   LManifestPath: string;
-  LManifestError: string;
   LDormantWarnings: TArray<string>;
   LWarningIndex: Integer;
   LNote: string;
@@ -3402,44 +3445,9 @@ begin
       Exit(False);
     end;
 
-    if Trim(FConfig.ManifestFile) <> '' then
-    begin
-      LManifestPath := ResolveManifestPath(LProjectInfo.ProjectDir, FConfig.ManifestFile);
-      if not TryLoadComponentManifest(LManifestPath, LManifest, LManifestJson, LManifestError) then
-      begin
-        DoProgress('Error: Invalid component manifest "' + LManifestPath + '": ' +
-          LManifestError, -1);
-        Exit(False);
-      end;
-      // The in-memory copy carries the install root, so a later parse in a
-      // writer applies the product-path veto. --match-prefixes and
-      // matchPrefixes override the file for this run.
-      var LPrefixMode := '';
-      if Trim(FConfig.PrefixMatch) <> '' then
-      begin
-        if SameText(FConfig.PrefixMatch, 'legacy') or
-          SameText(FConfig.PrefixMatch, 'corroborated') then
-          LPrefixMode := LowerCase(Trim(FConfig.PrefixMatch))
-        else
-          DoProgress('Warning: match.prefixes "' + FConfig.PrefixMatch +
-            '" is not corroborated or legacy. The components file is used.', 13);
-      end;
-      var LRuntimeJson := ManifestJsonWithRuntimeContext(LManifestJson,
-        LProjectInfo.Toolchain.RootDir, LPrefixMode);
-      if LRuntimeJson <> LManifestJson then
-      begin
-        LManifestJson := LRuntimeJson;
-        if not TryParseComponentManifest(LManifestJson, LManifestPath, LManifest,
-          LManifestError) then
-        begin
-          DoProgress('Error: Invalid component manifest "' + LManifestPath + '": ' +
-            LManifestError, -1);
-          Exit(False);
-        end;
-      end;
-      for LWarningIndex := 0 to High(LManifest.Warnings) do
-        DoProgress('Warning: ' + LManifestPath + ': ' + LManifest.Warnings[LWarningIndex], 13);
-    end;
+    if not TryLoadAppliedManifest(LProjectInfo.ProjectDir,
+      LProjectInfo.Toolchain.RootDir, LManifest, LManifestJson, LManifestPath) then
+      Exit(False);
 
     DoProgress('Ensuring MAP file...', 15);
     if LProjectInfo.IsLegacyProject then
@@ -3785,6 +3793,8 @@ begin
   end;
   if scoPrefixMatch in ACaller.ExplicitOverrides then
     Result.PrefixMatch := ACaller.PrefixMatch;
+  if scoDefines in ACaller.ExplicitOverrides then
+    Result.Defines := MergeManifestDefines(Result.Defines, ACaller.Defines);
   Result.Format := ApplySpdxVersion(Result.Format, Result.SpdxVersion);
 
   Result.IncludePlatformInOutput := ACaller.IncludePlatformInOutput;

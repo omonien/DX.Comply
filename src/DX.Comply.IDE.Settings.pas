@@ -19,6 +19,7 @@ interface
 
 uses
   System.SysUtils,
+  DX.Comply.ManifestDefines,
   DX.Comply.Report.Intf;
 
 type
@@ -46,6 +47,12 @@ type
     /// A .dxcomply.json outputDir wins when that key is set.
     /// </summary>
     OutputDir: string;
+    /// <summary>
+    /// Path variables for $(name) in a component manifest. A defines entry
+    /// in the project .dxcomply.json wins for the same name. --define wins
+    /// over both when the CLI runs. Issue #185.
+    /// </summary>
+    Defines: TArray<TManifestDefine>;
     HumanReadableReport: THumanReadableReportConfig;
     class function Default: TDXComplyIDESettings; static;
   end;
@@ -105,6 +112,7 @@ begin
   Result.BuildScriptPath := '';
   Result.DelphiVersionOverride := 0;
   Result.OutputDir := '';
+  SetLength(Result.Defines, 0);
   Result.HumanReadableReport := THumanReadableReportConfig.Default;
   Result.HumanReadableReport.Enabled := True;
   Result.HumanReadableReport.Format := hrfBoth;
@@ -171,6 +179,10 @@ class function TDXComplyIDESettingsStore.LoadFromFile(
   const AFilePath: string): TDXComplyIDESettings;
 var
   LIniFile: TMemIniFile;
+  LCount, I: Integer;
+  LLine, LError: string;
+  LDefine: TManifestDefine;
+  LList: TArray<TManifestDefine>;
 begin
   Result := TDXComplyIDESettings.Default;
   if not TFile.Exists(AFilePath) then
@@ -188,6 +200,19 @@ begin
     Result.BuildScriptPath := Trim(LIniFile.ReadString(cSettingsSection, 'BuildScriptPath', Result.BuildScriptPath));
     Result.DelphiVersionOverride := LIniFile.ReadInteger(cSettingsSection, 'DelphiVersionOverride', Result.DelphiVersionOverride);
     Result.OutputDir := Trim(LIniFile.ReadString(cSettingsSection, 'OutputDir', Result.OutputDir));
+    LCount := LIniFile.ReadInteger(cSettingsSection, 'DefineCount', 0);
+    if LCount < 0 then
+      LCount := 0;
+    SetLength(LList, 0);
+    for I := 0 to LCount - 1 do
+    begin
+      LLine := LIniFile.ReadString(cSettingsSection, 'Define' + IntToStr(I), '');
+      if not TryParseDefineAssignment(LLine, LDefine, LError) then
+        Continue;
+      SetLength(LList, Length(LList) + 1);
+      LList[High(LList)] := LDefine;
+    end;
+    Result.Defines := LList;
     Result.HumanReadableReport.Enabled := LIniFile.ReadBool(cSettingsSection, 'ReportEnabled', Result.HumanReadableReport.Enabled);
     Result.HumanReadableReport.Format := StringToReportFormat(LIniFile.ReadString(cSettingsSection, 'ReportFormat', 'markdown'));
     Result.HumanReadableReport.OutputBasePath := Trim(LIniFile.ReadString(cSettingsSection, 'ReportOutputBasePath', Result.HumanReadableReport.OutputBasePath));
@@ -212,6 +237,7 @@ class procedure TDXComplyIDESettingsStore.SaveToFile(const AFilePath: string;
   const ASettings: TDXComplyIDESettings);
 var
   LIniFile: TMemIniFile;
+  LCount, I: Integer;
 begin
   ForceDirectories(TPath.GetDirectoryName(AFilePath));
   LIniFile := TMemIniFile.Create(AFilePath, TEncoding.UTF8);
@@ -226,6 +252,13 @@ begin
     LIniFile.WriteString(cSettingsSection, 'BuildScriptPath', Trim(ASettings.BuildScriptPath));
     LIniFile.WriteInteger(cSettingsSection, 'DelphiVersionOverride', ASettings.DelphiVersionOverride);
     LIniFile.WriteString(cSettingsSection, 'OutputDir', Trim(ASettings.OutputDir));
+    LCount := LIniFile.ReadInteger(cSettingsSection, 'DefineCount', 0);
+    LIniFile.WriteInteger(cSettingsSection, 'DefineCount', Length(ASettings.Defines));
+    for I := 0 to High(ASettings.Defines) do
+      LIniFile.WriteString(cSettingsSection, 'Define' + IntToStr(I),
+        ASettings.Defines[I].Name + '=' + ASettings.Defines[I].Value);
+    for I := Length(ASettings.Defines) to LCount - 1 do
+      LIniFile.DeleteKey(cSettingsSection, 'Define' + IntToStr(I));
     LIniFile.WriteBool(cSettingsSection, 'ReportEnabled', ASettings.HumanReadableReport.Enabled);
     LIniFile.WriteString(cSettingsSection, 'ReportFormat', ReportFormatToString(ASettings.HumanReadableReport.Format));
     LIniFile.WriteString(cSettingsSection, 'ReportOutputBasePath', Trim(ASettings.HumanReadableReport.OutputBasePath));

@@ -53,7 +53,8 @@ uses
   System.Classes,
   System.JSON,
   DX.Comply.DependencyGraph,
-  DX.Comply.Engine.Intf;
+  DX.Comply.Engine.Intf,
+  DX.Comply.ManifestDefines;
 
 type
   /// <summary>
@@ -215,6 +216,12 @@ type
     /// manifest. It is not a field of the components file.
     /// </summary>
     InstallRoot: string;
+    /// <summary>
+    /// Placeholders replaced in units_folder and own_code_folders.
+    /// Empty when the text had none. A later parse of the absolute JSON
+    /// does not repeat them. Issue #185.
+    /// </summary>
+    UsedVariables: TArray<TManifestVariableUse>;
   end;
 
   /// <summary>
@@ -357,16 +364,34 @@ function BuildDelphiPurl(const AName, AVersion, AOverride: string): string;
 /// Invalid JSON names the source file, the line and the position.
 /// Schema gaps are warnings on a successfully loaded manifest.
 /// A prefix used by more than one row is a warning. The units go to the
-/// first row in the file.
+/// first row in the file. $(name) in units_folder and own_code_folders is
+/// expanded before the path is normalized. An unknown name fails the parse.
 /// </summary>
 function TryParseComponentManifest(const AJson, ASourceName: string;
-  out AManifest: TComponentManifest; out AError: string): Boolean;
+  out AManifest: TComponentManifest; out AError: string): Boolean; overload;
+
+/// <summary>
+/// Same parse, with path variables. ADefines may be empty. $(env.NAME)
+/// still reads the environment when that full name is not defined.
+/// </summary>
+function TryParseComponentManifest(const AJson, ASourceName: string;
+  const ADefines: TArray<TManifestDefine>;
+  out AManifest: TComponentManifest; out AError: string): Boolean; overload;
 
 /// <summary>
 /// Loads a manifest file. AJson receives the file text on success.
+/// Folder placeholders are already expanded in AJson. A literal dollar
+/// is written as $$ so a later parse keeps that character.
 /// </summary>
 function TryLoadComponentManifest(const AFilePath: string;
-  out AManifest: TComponentManifest; out AJson, AError: string): Boolean;
+  out AManifest: TComponentManifest; out AJson, AError: string): Boolean; overload;
+
+/// <summary>
+/// Same load, with path variables applied before folder paths are normalized.
+/// </summary>
+function TryLoadComponentManifest(const AFilePath: string;
+  const ADefines: TArray<TManifestDefine>;
+  out AManifest: TComponentManifest; out AJson, AError: string): Boolean; overload;
 
 /// <summary>
 /// Reads the manifest key from a .dxcomply.json file.
@@ -1427,18 +1452,29 @@ begin
   Result := True;
 end;
 
-procedure ResolveFolderList(const ARaw: TArray<string>; const ABaseDir, AContext,
-  AField: string; AWarnings: TList<string>; out AResolved: TArray<string>);
+function ResolveFolderList(const ARaw: TArray<string>; const ABaseDir, AContext,
+  AField: string; AWarnings: TList<string>;
+  const ADefines: TArray<TManifestDefine>;
+  AUses: TList<TManifestVariableUse>;
+  out AResolved: TArray<string>; out AError: string): Boolean;
 var
   LList: TList<string>;
-  LFull, LWarning: string;
+  LExpanded, LFull, LWarning: string;
   I: Integer;
 begin
+  AError := '';
+  Result := True;
   LList := TList<string>.Create;
   try
     for I := 0 to High(ARaw) do
     begin
-      if TryAcceptFolder(ARaw[I], ABaseDir, LFull, LWarning) then
+      // Placeholders are replaced before the path is combined with the
+      // manifest directory. A relative result then follows the same rule
+      // as a path that was written out in full.
+      if not TryExpandManifestPath(ARaw[I], AContext, AField, ADefines,
+        LExpanded, AError, AUses) then
+        Exit(False);
+      if TryAcceptFolder(LExpanded, ABaseDir, LFull, LWarning) then
         LList.Add(LFull);
       if LWarning <> '' then
         AddWarning(AWarnings, AContext + ': ' + AField + ': ' + LWarning);
@@ -1457,50 +1493,80 @@ begin
     Result := Format('Component[%d]', [AIndex]);
 end;
 
-procedure ResolveManifestFolders(var AManifest: TComponentManifest;
-  AWarnings: TList<string>; const ABaseDir: string);
+function ResolveManifestFolders(var AManifest: TComponentManifest;
+  AWarnings: TList<string>; const ABaseDir: string;
+  const ADefines: TArray<TManifestDefine>;
+  AUses: TList<TManifestVariableUse>; out AError: string): Boolean;
 var
   I: Integer;
   LEntry: TComponentEntry;
   LResolved: TArray<string>;
 begin
+  AError := '';
+  Result := True;
   for I := 0 to High(AManifest.Components) do
   begin
     // Copy the record out and back. Assigning a field of a dynamic-array
     // element is easy to get wrong, and this stays correct either way.
     LEntry := AManifest.Components[I];
-    ResolveFolderList(LEntry.Folders, ABaseDir, ComponentFolderContext(LEntry, I),
-      'units_folder', AWarnings, LResolved);
+    if not ResolveFolderList(LEntry.Folders, ABaseDir, ComponentFolderContext(LEntry, I),
+      'units_folder', AWarnings, ADefines, AUses, LResolved, AError) then
+      Exit(False);
     LEntry.Folders := LResolved;
     AManifest.Components[I] := LEntry;
   end;
-  ResolveFolderList(AManifest.OwnCodeFolders, ABaseDir, 'Manifest',
-    'own_code_folders', AWarnings, LResolved);
+  if not ResolveFolderList(AManifest.OwnCodeFolders, ABaseDir, 'Manifest',
+    'own_code_folders', AWarnings, ADefines, AUses, LResolved, AError) then
+    Exit(False);
   AManifest.OwnCodeFolders := LResolved;
 end;
 
+function EscapeDollarsForRewrite(const AText: string): string;
+begin
+  // Writers parse this JSON again. $$ expands back to one dollar, so a
+  // literal $(name) from the source escape is not treated as a variable.
+  Result := StringReplace(AText, '$', '$$', [rfReplaceAll]);
+end;
+
 function RewriteFolderArray(AArray: TJSONArray; const ABaseDir: string;
-  out AChanged: Boolean): TJSONArray;
+  const ADefines: TArray<TManifestDefine>; const AContext, AField: string;
+  out AChanged: Boolean; out AError: string): TJSONArray;
 var
   I: Integer;
-  LText, LFull, LWarning: string;
+  LText, LExpanded, LFull, LWarning: string;
   LCopy: TJSONValue;
 begin
   AChanged := False;
+  AError := '';
   Result := TJSONArray.Create;
   for I := 0 to AArray.Count - 1 do
   begin
     if AArray.Items[I] is TJSONString then
     begin
       LText := AArray.Items[I].Value;
-      if TryAcceptFolder(LText, ABaseDir, LFull, LWarning) then
+      // The in-memory JSON is what writers parse again. It must carry the
+      // expanded path, not the placeholder. Uses are recorded on the parse.
+      if not TryExpandManifestPath(LText, AContext, AField, ADefines,
+        LExpanded, AError, nil) then
       begin
+        Result.Free;
+        Result := nil;
+        Exit;
+      end;
+      if TryAcceptFolder(LExpanded, ABaseDir, LFull, LWarning) then
+      begin
+        LFull := EscapeDollarsForRewrite(LFull);
         if not SameText(LText, LFull) then
           AChanged := True;
         Result.Add(LFull);
       end
       else
-        Result.Add(LText);
+      begin
+        LExpanded := EscapeDollarsForRewrite(LExpanded);
+        if not SameText(LText, LExpanded) then
+          AChanged := True;
+        Result.Add(LExpanded);
+      end;
     end
     else
     begin
@@ -1513,18 +1579,24 @@ begin
   end;
 end;
 
-procedure RewriteFolderField(AObject: TJSONObject; const AName, ABaseDir: string;
-  var AChanged: Boolean);
+procedure RewriteFolderField(AObject: TJSONObject; const AName, ABaseDir,
+  AContext: string; const ADefines: TArray<TManifestDefine>;
+  var AChanged: Boolean; var AError: string);
 var
   LValue: TJSONValue;
   LNew: TJSONArray;
   LFieldChanged: Boolean;
   LPair: TJSONPair;
 begin
+  if AError <> '' then
+    Exit;
   LValue := AObject.GetValue(AName);
   if not (LValue is TJSONArray) then
     Exit;
-  LNew := RewriteFolderArray(TJSONArray(LValue), ABaseDir, LFieldChanged);
+  LNew := RewriteFolderArray(TJSONArray(LValue), ABaseDir, ADefines, AContext,
+    AName, LFieldChanged, AError);
+  if LNew = nil then
+    Exit;
   if not LFieldChanged then
   begin
     LNew.Free;
@@ -1537,40 +1609,58 @@ begin
 end;
 
 procedure RewriteFolderFields(AValue: TJSONValue; const ABaseDir: string;
-  var AChanged: Boolean);
+  const ADefines: TArray<TManifestDefine>; var AChanged: Boolean;
+  var AError: string);
 var
   I: Integer;
   LArray: TJSONArray;
   LComponents: TJSONValue;
+  LContext: string;
+  LName: string;
 begin
+  if AError <> '' then
+    Exit;
   if AValue is TJSONArray then
   begin
     // A bare array is the component list.
     LArray := TJSONArray(AValue);
     for I := 0 to LArray.Count - 1 do
       if LArray.Items[I] is TJSONObject then
+      begin
+        LName := '';
+        if TJSONObject(LArray.Items[I]).GetValue('name') is TJSONString then
+          LName := TJSONObject(LArray.Items[I]).GetValue('name').Value;
+        if Trim(LName) <> '' then
+          LContext := Format('Component[%d] "%s"', [I, LName])
+        else
+          LContext := Format('Component[%d]', [I]);
         RewriteFolderField(TJSONObject(LArray.Items[I]), 'units_folder',
-          ABaseDir, AChanged);
+          ABaseDir, LContext, ADefines, AChanged, AError);
+      end;
   end
   else if AValue is TJSONObject then
   begin
-    RewriteFolderField(TJSONObject(AValue), 'own_code_folders', ABaseDir, AChanged);
+    RewriteFolderField(TJSONObject(AValue), 'own_code_folders', ABaseDir,
+      'Manifest', ADefines, AChanged, AError);
     LComponents := TJSONObject(AValue).GetValue('components');
     if LComponents <> nil then
-      RewriteFolderFields(LComponents, ABaseDir, AChanged);
+      RewriteFolderFields(LComponents, ABaseDir, ADefines, AChanged, AError);
   end;
 end;
 
-function ManifestJsonWithAbsoluteFolders(const AJson, ABaseDir: string): string;
+function ManifestJsonWithAbsoluteFolders(const AJson, ABaseDir: string;
+  const ADefines: TArray<TManifestDefine>; out AError: string): string;
 var
   LValue: TJSONValue;
   LChanged: Boolean;
 begin
   Result := AJson;
+  AError := '';
   if Trim(ABaseDir) = '' then
     Exit;
   if (Pos('units_folder', LowerCase(AJson)) = 0) and
-    (Pos('own_code_folders', LowerCase(AJson)) = 0) then
+    (Pos('own_code_folders', LowerCase(AJson)) = 0) and
+    (Pos('$(', AJson) = 0) then
     Exit;
 
   LValue := TJSONObject.ParseJSONValue(AJson);
@@ -1578,8 +1668,8 @@ begin
     Exit;
   try
     LChanged := False;
-    RewriteFolderFields(LValue, ABaseDir, LChanged);
-    if LChanged then
+    RewriteFolderFields(LValue, ABaseDir, ADefines, LChanged, AError);
+    if (AError = '') and LChanged then
       Result := LValue.Format(0);
   finally
     LValue.Free;
@@ -2056,10 +2146,13 @@ begin
 end;
 
 function ParseComponentManifest(const AJson, ASourceName: string;
+  const ADefines: TArray<TManifestDefine>;
   out AManifest: TComponentManifest; out AError: string): Boolean;
 var
   LValue: TJSONValue;
   LWarnings: TList<string>;
+  LUses: TList<TManifestVariableUse>;
+  LFolderError: string;
 begin
   AManifest := Default(TComponentManifest);
   AError := '';
@@ -2078,6 +2171,7 @@ begin
   end;
 
   LWarnings := TList<string>.Create;
+  LUses := TList<TManifestVariableUse>.Create;
   try
     try
       if LValue is TJSONArray then
@@ -2096,29 +2190,40 @@ begin
 
     if Result then
     begin
-      AManifest.Loaded := True;
-      AManifest.SourcePath := ASourceName;
       WarnSharedPrefixes(AManifest, LWarnings);
       // Relative folders are resolved from the components file. A label such
       // as "test" has no directory, so only absolute folders apply then.
-      ResolveManifestFolders(AManifest, LWarnings, BaseDirFromSourceName(ASourceName));
+      // Placeholders are expanded first, so a relative result still uses
+      // that directory.
+      if not ResolveManifestFolders(AManifest, LWarnings,
+        BaseDirFromSourceName(ASourceName), ADefines, LUses, LFolderError) then
+      begin
+        AError := LFolderError;
+        AManifest := Default(TComponentManifest);
+        Exit(False);
+      end;
+      AManifest.Loaded := True;
+      AManifest.SourcePath := ASourceName;
       AManifest.Warnings := LWarnings.ToArray;
+      AManifest.UsedVariables := LUses.ToArray;
     end
     else if AError = '' then
       AError := 'The manifest could not be read';
   finally
+    LUses.Free;
     LWarnings.Free;
   end;
 end;
 
 function TryParseComponentManifest(const AJson, ASourceName: string;
-  out AManifest: TComponentManifest; out AError: string): Boolean;
+  const ADefines: TArray<TManifestDefine>;
+  out AManifest: TComponentManifest; out AError: string): Boolean; overload;
 begin
   AManifest := Default(TComponentManifest);
   AError := '';
   Result := False;
   try
-    Result := ParseComponentManifest(AJson, ASourceName, AManifest, AError);
+    Result := ParseComponentManifest(AJson, ASourceName, ADefines, AManifest, AError);
   except
     on E: Exception do
     begin
@@ -2129,10 +2234,18 @@ begin
   end;
 end;
 
+function TryParseComponentManifest(const AJson, ASourceName: string;
+  out AManifest: TComponentManifest; out AError: string): Boolean; overload;
+begin
+  Result := TryParseComponentManifest(AJson, ASourceName, nil, AManifest, AError);
+end;
+
 function TryLoadComponentManifest(const AFilePath: string;
-  out AManifest: TComponentManifest; out AJson, AError: string): Boolean;
+  const ADefines: TArray<TManifestDefine>;
+  out AManifest: TComponentManifest; out AJson, AError: string): Boolean; overload;
 var
   LContent: TStringList;
+  LRewriteError: string;
 begin
   AManifest := Default(TComponentManifest);
   AJson := '';
@@ -2166,12 +2279,27 @@ begin
     LContent.Free;
   end;
 
-  Result := TryParseComponentManifest(AJson, AFilePath, AManifest, AError);
-  // Writers parse this text again, without the file path. Absolute folders
-  // still match. The file on disk is left as the caller wrote it.
+  Result := TryParseComponentManifest(AJson, AFilePath, ADefines, AManifest, AError);
+  // Writers parse this text again, without the file path and without the
+  // definitions. The copy they see has absolute folders and no placeholder.
+  // The file on disk is left as the caller wrote it.
   if Result then
+  begin
     AJson := ManifestJsonWithAbsoluteFolders(AJson,
-      BaseDirFromSourceName(AFilePath));
+      BaseDirFromSourceName(AFilePath), ADefines, LRewriteError);
+    if LRewriteError <> '' then
+    begin
+      AError := LRewriteError;
+      AManifest := Default(TComponentManifest);
+      Result := False;
+    end;
+  end;
+end;
+
+function TryLoadComponentManifest(const AFilePath: string;
+  out AManifest: TComponentManifest; out AJson, AError: string): Boolean; overload;
+begin
+  Result := TryLoadComponentManifest(AFilePath, nil, AManifest, AJson, AError);
 end;
 
 function TryReadConfigManifest(const AConfigPath: string;

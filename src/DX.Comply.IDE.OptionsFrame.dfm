@@ -395,6 +395,41 @@
             TabOrder = 1
           end
         end
+        object FDefinesRowPanel: TPanel
+          Left = 12
+          Top = 452
+          Width = 620
+          Height = 120
+          Align = alTop
+          AlignWithMargins = True
+          BevelOuter = bvNone
+          Caption = ''
+          ParentBackground = True
+          TabOrder = 12
+          Margins.Left = 12
+          Margins.Top = 4
+          Margins.Right = 12
+          Margins.Bottom = 0
+          object DefinesLabel: TLabel
+            Left = 0
+            Top = 0
+            Width = 620
+            Height = 32
+            Align = alTop
+            Caption = 'Manifest path variables (name=value, one per line). A project defines entry wins for the same name.'
+            WordWrap = True
+          end
+          object FDefinesMemo: TMemo
+            Left = 0
+            Top = 32
+            Width = 620
+            Height = 88
+            Align = alClient
+            ScrollBars = ssVertical
+            TabOrder = 0
+            WantReturns = True
+          end
+        end
         object FReportOutputRowPanel: TPanel
           Left = 12
           Top = 452
@@ -405,7 +440,7 @@
           BevelOuter = bvNone
           Caption = ''
           ParentBackground = True
-          TabOrder = 12
+          TabOrder = 13
           Margins.Left = 12
           Margins.Top = 4
           Margins.Right = 12
@@ -452,7 +487,7 @@
           Margins.Top = 4
           Margins.Right = 12
           Margins.Bottom = 0
-          TabOrder = 13
+          TabOrder = 14
           WordWrap = True
         end
         object FReportIncludeCompositionCheckBox: TCheckBox
@@ -467,7 +502,7 @@
           Margins.Top = 4
           Margins.Right = 12
           Margins.Bottom = 0
-          TabOrder = 14
+          TabOrder = 15
           WordWrap = True
         end
         object FReportIncludeBuildEvidenceCheckBox: TCheckBox
@@ -482,7 +517,7 @@
           Margins.Top = 4
           Margins.Right = 12
           Margins.Bottom = 0
-          TabOrder = 15
+          TabOrder = 16
           WordWrap = True
         end
         object FReportGroupByFolderCheckBox: TCheckBox
@@ -497,7 +532,7 @@
           Margins.Top = 4
           Margins.Right = 12
           Margins.Bottom = 0
-          TabOrder = 16
+          TabOrder = 17
           WordWrap = True
         end
         object FAboutRowPanel: TPanel
@@ -510,7 +545,7 @@
           BevelOuter = bvNone
           Caption = ''
           ParentBackground = True
-          TabOrder = 17
+          TabOrder = 18
           Margins.Left = 12
           Margins.Top = 8
           Margins.Right = 12

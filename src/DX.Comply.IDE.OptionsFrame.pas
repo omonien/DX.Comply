@@ -64,6 +64,9 @@ type
     OutputDirLabel: TLabel;
     FOutputDirEdit: TEdit;
     FBrowseOutputDirButton: TButton;
+    FDefinesRowPanel: TPanel;
+    DefinesLabel: TLabel;
+    FDefinesMemo: TMemo;
     FReportOutputRowPanel: TPanel;
     ReportOutputBasePathLabel: TLabel;
     FReportOutputBasePathEdit: TEdit;
@@ -111,6 +114,7 @@ implementation
 uses
   DX.Comply.IDE.AboutDialog,
   DX.Comply.IDE.ReadmeSupport,
+  DX.Comply.ManifestDefines,
   System.IOUtils,
   System.SysUtils,
   Vcl.Dialogs;
@@ -222,6 +226,9 @@ begin
 end;
 
 procedure TFrameDXComplyOptions.LoadSettings(const ASettings: TDXComplyIDESettings);
+var
+  LDefineLines: TArray<string>;
+  I: Integer;
 begin
   FPromptBeforeBuildCheckBox.Checked := ASettings.PromptBeforeBuild;
   FSaveAllModifiedFilesCheckBox.Checked := ASettings.SaveAllModifiedFilesBeforeBuild;
@@ -244,6 +251,10 @@ begin
   // Issue #126: the combo box items follow THumanReadableReportContent.
   FReportContentComboBox.ItemIndex := Ord(ASettings.HumanReadableReport.Content);
   FOutputDirEdit.Text := ASettings.OutputDir;
+  FDefinesMemo.Lines.Clear;
+  LDefineLines := ManifestDefinesToLines(ASettings.Defines);
+  for I := 0 to High(LDefineLines) do
+    FDefinesMemo.Lines.Add(LDefineLines[I]);
   FReportOutputBasePathEdit.Text := ASettings.HumanReadableReport.OutputBasePath;
   FReportIncludeWarningsCheckBox.Checked := ASettings.HumanReadableReport.IncludeWarnings;
   FReportIncludeCompositionCheckBox.Checked := ASettings.HumanReadableReport.IncludeCompositionEvidence;
@@ -254,6 +265,7 @@ end;
 function TFrameDXComplyOptions.SaveSettings: TDXComplyIDESettings;
 var
   LVersionText: string;
+  LDefineError: string;
 begin
   Result := TDXComplyIDESettings.Default;
   Result.AutoBuildMode := abmAlways;
@@ -270,6 +282,8 @@ begin
   Result.OpenHtmlReportAfterGenerate := FOpenHtmlReportAfterGenerateCheckBox.Checked;
   Result.WarnWhenCompositionEvidenceIsEmpty := FWarnWhenCompositionEmptyCheckBox.Checked;
   Result.OutputDir := Trim(FOutputDirEdit.Text);
+  if not TryManifestDefinesFromLines(FDefinesMemo.Lines, Result.Defines, LDefineError) then
+    SetLength(Result.Defines, 0);
   Result.HumanReadableReport.Enabled := FReportEnabledCheckBox.Checked;
   case FReportFormatComboBox.ItemIndex of
     1: Result.HumanReadableReport.Format := hrfHtml;
@@ -293,6 +307,7 @@ var
   LScriptPath: string;
   LVersion: Integer;
   LVersionText: string;
+  LDefines: TArray<TManifestDefine>;
 begin
   AMessage := '';
   Result := True;
@@ -312,6 +327,12 @@ begin
   if (LScriptPath <> '') and not TFile.Exists(LScriptPath) then
   begin
     AMessage := 'The configured build script path does not exist: ' + LScriptPath;
+    Exit(False);
+  end;
+
+  if not TryManifestDefinesFromLines(FDefinesMemo.Lines, LDefines, AMessage) then
+  begin
+    AMessage := 'Manifest path variables: ' + AMessage;
     Exit(False);
   end;
 end;

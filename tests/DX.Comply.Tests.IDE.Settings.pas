@@ -41,6 +41,10 @@ type
 
     [Test]
     procedure SaveToFile_ThenLoadFromFile_RoundTripsAllFields;
+
+    /// <summary>DefineCount and DefineN round-trip, including a value that contains '='.</summary>
+    [Test]
+    procedure SaveToFile_ThenLoadFromFile_RoundTripsDefines;
   end;
 
 implementation
@@ -49,6 +53,7 @@ uses
   System.SysUtils,
   System.IOUtils,
   DX.Comply.IDE.Settings,
+  DX.Comply.ManifestDefines,
   DX.Comply.Report.Intf;
 
 procedure TIDESettingsTests.Default_HasSafeAutomationDefaults;
@@ -146,6 +151,33 @@ begin
     Assert.IsFalse(LLoadedSettings.HumanReadableReport.IncludeBuildEvidence);
     Assert.IsTrue(LLoadedSettings.HumanReadableReport.GroupByFolder);
     Assert.AreEqual(NativeInt(Ord(hrcUnits)), NativeInt(Ord(LLoadedSettings.HumanReadableReport.Content)));
+  finally
+    if TFile.Exists(LFilePath) then
+      TFile.Delete(LFilePath);
+  end;
+end;
+
+procedure TIDESettingsTests.SaveToFile_ThenLoadFromFile_RoundTripsDefines;
+var
+  LFilePath: string;
+  LLoaded: TDXComplyIDESettings;
+  LSettings: TDXComplyIDESettings;
+begin
+  LFilePath := TPath.Combine(TPath.GetTempPath, TPath.GetRandomFileName + '.ini');
+  try
+    LSettings := TDXComplyIDESettings.Default;
+    SetLength(LSettings.Defines, 2);
+    LSettings.Defines[0].Name := 'path.libs';
+    LSettings.Defines[0].Value := 'D:\libs\vendor';
+    LSettings.Defines[1].Name := 'path.note';
+    LSettings.Defines[1].Value := 'C:\a=b with space';
+    TDXComplyIDESettingsStore.SaveToFile(LFilePath, LSettings);
+    LLoaded := TDXComplyIDESettingsStore.LoadFromFile(LFilePath);
+    Assert.AreEqual(NativeInt(2), NativeInt(Length(LLoaded.Defines)));
+    Assert.AreEqual('path.libs', LLoaded.Defines[0].Name);
+    Assert.AreEqual('D:\libs\vendor', LLoaded.Defines[0].Value);
+    Assert.AreEqual('path.note', LLoaded.Defines[1].Name);
+    Assert.AreEqual('C:\a=b with space', LLoaded.Defines[1].Value);
   finally
     if TFile.Exists(LFilePath) then
       TFile.Delete(LFilePath);

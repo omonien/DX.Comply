@@ -25,6 +25,7 @@ uses
   DUnitX.TestFramework,
   DX.Comply.Engine,
   DX.Comply.Engine.Intf,
+  DX.Comply.ManifestDefines,
   DX.Comply.Report.Intf,
   DX.Comply.CLI.Options,
   DX.Comply.VersionInfo;
@@ -275,6 +276,38 @@ type
     /// </summary>
     [Test]
     procedure Parse_MatchPrefixes_SetsMode;
+
+    /// <summary>--define:name=value sets one path variable.</summary>
+    [Test]
+    procedure Parse_DefineColon_SetsNameAndValue;
+
+    /// <summary>--define=name=value keeps an equals sign in the value.</summary>
+    [Test]
+    procedure Parse_DefineEquals_KeepsExtraEquals;
+
+    /// <summary>--define name=value reads the next argument.</summary>
+    [Test]
+    procedure Parse_DefineNextArgument_SetsNameAndValue;
+
+    /// <summary>A quoted value keeps spaces and backslashes.</summary>
+    [Test]
+    procedure Parse_DefineQuoted_KeepsSpacesAndBackslashes;
+
+    /// <summary>The last --define of a name wins. Other names stay.</summary>
+    [Test]
+    procedure Parse_DefineRepeatable_LastNameWins;
+
+    /// <summary>A name that is not a variable is a parse error.</summary>
+    [Test]
+    procedure Parse_DefineInvalidName_IsParseError;
+
+    /// <summary>--define without name=value is a parse error.</summary>
+    [Test]
+    procedure Parse_DefineMissingValue_IsParseError;
+
+    /// <summary>Help text documents the three --define forms.</summary>
+    [Test]
+    procedure HelpText_DocumentsDefine;
   end;
 
 implementation
@@ -1438,6 +1471,141 @@ begin
     if TFile.Exists(LPath) then
       TFile.Delete(LPath);
   end;
+end;
+
+procedure TCliOptionsTests.Parse_DefineColon_SetsNameAndValue;
+var
+  LOptions: TCliOptions;
+  LConfig: TSbomConfig;
+  LValue: string;
+begin
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsTrue(LOptions.Parse([
+      '--project=App.dproj',
+      '--define:path.libs=D:\libs']));
+    LConfig := LOptions.ToSbomConfig;
+    Assert.IsTrue(scoDefines in LConfig.ExplicitOverrides);
+    Assert.AreEqual(NativeInt(1), NativeInt(Length(LConfig.Defines)));
+    Assert.AreEqual('path.libs', LConfig.Defines[0].Name);
+    Assert.AreEqual('D:\libs', LConfig.Defines[0].Value);
+    Assert.IsTrue(FindManifestDefine(LConfig.Defines, 'PATH.LIBS', LValue));
+    Assert.AreEqual('D:\libs', LValue);
+  finally
+    LOptions.Free;
+  end;
+end;
+
+procedure TCliOptionsTests.Parse_DefineEquals_KeepsExtraEquals;
+var
+  LOptions: TCliOptions;
+begin
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsTrue(LOptions.Parse([
+      '--project=App.dproj',
+      '--define=path.libs=D:\libs\a=b']));
+    Assert.AreEqual('D:\libs\a=b', LOptions.Defines[0].Value);
+  finally
+    LOptions.Free;
+  end;
+end;
+
+procedure TCliOptionsTests.Parse_DefineNextArgument_SetsNameAndValue;
+var
+  LOptions: TCliOptions;
+begin
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsTrue(LOptions.Parse([
+      '--project=App.dproj',
+      '--define',
+      'path.libs=D:\libs']));
+    Assert.AreEqual('path.libs', LOptions.Defines[0].Name);
+    Assert.AreEqual('D:\libs', LOptions.Defines[0].Value);
+  finally
+    LOptions.Free;
+  end;
+end;
+
+procedure TCliOptionsTests.Parse_DefineQuoted_KeepsSpacesAndBackslashes;
+var
+  LOptions: TCliOptions;
+begin
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsTrue(LOptions.Parse([
+      '--project=App.dproj',
+      '--define:path.libs="D:\libs with space\vendor"']));
+    Assert.AreEqual('D:\libs with space\vendor', LOptions.Defines[0].Value);
+  finally
+    LOptions.Free;
+  end;
+end;
+
+procedure TCliOptionsTests.Parse_DefineRepeatable_LastNameWins;
+var
+  LOptions: TCliOptions;
+  LValue: string;
+begin
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsTrue(LOptions.Parse([
+      '--project=App.dproj',
+      '--define:path.libs=D:\first',
+      '--define:path.other=D:\other',
+      '--define:path.libs=D:\second']));
+    Assert.AreEqual(NativeInt(3), NativeInt(Length(LOptions.Defines)));
+    Assert.IsTrue(FindManifestDefine(LOptions.Defines, 'path.libs', LValue));
+    Assert.AreEqual('D:\second', LValue);
+    Assert.IsTrue(FindManifestDefine(LOptions.Defines, 'path.other', LValue));
+    Assert.AreEqual('D:\other', LValue);
+  finally
+    LOptions.Free;
+  end;
+end;
+
+procedure TCliOptionsTests.Parse_DefineInvalidName_IsParseError;
+var
+  LOptions: TCliOptions;
+begin
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsFalse(LOptions.Parse(['--project=App.dproj', '--define:1bad=D:\libs']));
+    Assert.IsTrue(Pos('Invalid value for --define:', LOptions.ParseError) > 0,
+      LOptions.ParseError);
+    Assert.IsTrue(Pos('1bad', LOptions.ParseError) > 0, LOptions.ParseError);
+  finally
+    LOptions.Free;
+  end;
+end;
+
+procedure TCliOptionsTests.Parse_DefineMissingValue_IsParseError;
+var
+  LOptions: TCliOptions;
+begin
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsFalse(LOptions.Parse(['--project=App.dproj', '--define']));
+    Assert.IsTrue(Pos('expected name=value', LOptions.ParseError) > 0,
+      LOptions.ParseError);
+  finally
+    LOptions.Free;
+  end;
+end;
+
+procedure TCliOptionsTests.HelpText_DocumentsDefine;
+var
+  LHelp: string;
+begin
+  LHelp := TCliOptions.HelpText;
+  Assert.Contains(LHelp, '--define:name=value');
+  Assert.Contains(LHelp, '--define=name=value');
+  Assert.Contains(LHelp, '--define name=value');
+  Assert.Contains(LHelp, '$(env.NAME)');
+  Assert.Contains(LHelp, '$$(name)');
+  Assert.Contains(LHelp, 'exit code 1');
+  Assert.Contains(LHelp, 'exit code 2');
 end;
 
 initialization
