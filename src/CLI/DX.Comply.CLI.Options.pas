@@ -383,6 +383,7 @@ var
   LArg, LKey, LValue, LAssignment: string;
   LEqualsPos: Integer;
   LDefine: TManifestDefine;
+  LSkipDefineValue: Boolean;
 
   function AcceptDefine(const AAssignment: string): Boolean;
   begin
@@ -403,9 +404,18 @@ begin
   FExplicitOverrides := [];
   FOutputExplicit := False;
   FSpdxVersion := '';
+  LSkipDefineValue := False;
 
   for I := 0 to High(AArgs) do
   begin
+    // The value of "--define name=value" is the next argument. A for-loop
+    // index cannot be advanced, so that argument is skipped on the next pass.
+    if LSkipDefineValue then
+    begin
+      LSkipDefineValue := False;
+      Continue;
+    end;
+
     LArg := AArgs[I];
 
     if (LArg = '--help') or (LArg = '-h') then
@@ -488,8 +498,8 @@ begin
         FParseError := 'Invalid value for --define: expected name=value.';
         Exit(False);
       end;
-      Inc(I);
-      if not AcceptDefine(AArgs[I]) then
+      LSkipDefineValue := True;
+      if not AcceptDefine(AArgs[I + 1]) then
         Exit(False);
       Continue;
     end;

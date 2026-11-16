@@ -111,6 +111,7 @@ uses
   DX.Comply.CLI.Options,
   DX.Comply.ComponentManifest,
   DX.Comply.Engine,
+  DX.Comply.Engine.Intf,
   DX.Comply.ManifestDefines,
   DX.Comply.Report.Intf;
 
