@@ -70,7 +70,7 @@ Each of those files is parsed once, and the SBOM write reuses that list. Cyclone
 
 ### Component manifest
 
-`--manifest=<file>` is read in library mode the same way as in build mode. A shipped `.pas`, `.dpr`, or `.dpk` that matches a row (`units_exact`, `units_prefix`, or `units_folder`) is linked from that library component. The row's supplier, licence, version, package URL, `copyright`, and `cpe` are written on that component. A file that matches no row stays as it is. An invalid `cpe` is a warning and is left out. The SBOM is still written.
+`--manifest=<file>` is read in library mode the same way as in build mode. `$(name)` in `units_folder` and `own_code_folders` is expanded before matching, including `$(env.NAME)` and `--define`. A shipped `.pas`, `.dpr`, or `.dpk` that matches a row (`units_exact`, `units_prefix`, or `units_folder`) is linked from that library component. The row's supplier, licence, version, package URL, `copyright`, and `cpe` are written on that component. A file that matches no row stays as it is. An invalid `cpe` is a warning and is left out. The SBOM is still written.
 
 ### What library mode does not do
 

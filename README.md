@@ -352,6 +352,7 @@ dxcomply --library --project=Source\MyLib.dproj --source-dir=Source --version=2.
 - The `.dpk` requires clause becomes one component per package. `rtl`, `vcl`, and `fmx` are `framework` components with the Delphi version. Other packages are listed by name.
 - CycloneDX compositions say which sets are complete. A `.dpr` has no requires clause, so the required packages are marked `unknown`.
 - The CRA and BSI header warnings run as in build mode, except the warning about a built file that was not found.
+- `$(name)` in `units_folder` and `own_code_folders` is expanded the same way as in build mode. See [Component manifest](#component-manifest).
 
 `--project` is optional when at least one `--source-dir` is given. The config file keys are `library`, `sourceDirs`, `product.purl`, and `product.repoUrl`. See [Library SBOM](docs/Library-SBOM.md) for the difference between build mode and library mode.
 
@@ -370,6 +371,9 @@ Add a `.dxcomply.json` to your project folder and pass `--ci` so `dxcomply.exe` 
   "scanDirs": ["redist"],
   "manifest": "components.json",
   "matchPrefixes": "corroborated",
+  "defines": {
+    "path.libs": "D:/libs"
+  },
   "sbomCreator": "sbom@example.com",
   "strict": false,
   "product": {
@@ -414,7 +418,7 @@ When `--ci` is set and the file exists, values are merged in this order:
 2. Keys present in `.dxcomply.json`.
 3. Command-line options you actually pass. Those win over the file.
 
-An option you leave off the command line does not override the file, even though that option has a default. `dxcomply --ci --config-name=Debug` uses Debug even when the file says `"configName": "Release"`. `dxcomply --ci` with no `--config-name` uses the file's `configName`, or `Release` when the key is absent. The same rule applies to `--platform`, `--format`, `--output`, `--product`, `--version`, `--supplier`, `--supplier-url`, `--licence`, `--sbom-creator`, `--report`, `--report-content`, `--report-group-by-folder`, `--include`, `--exclude`, `--map-dir`, `--manifest`, `--match-prefixes`, `--strict`, `--spdx-version`, and `--no-composition-evidence`.
+An option you leave off the command line does not override the file, even though that option has a default. `dxcomply --ci --config-name=Debug` uses Debug even when the file says `"configName": "Release"`. `dxcomply --ci` with no `--config-name` uses the file's `configName`, or `Release` when the key is absent. The same rule applies to `--platform`, `--format`, `--output`, `--product`, `--version`, `--supplier`, `--supplier-url`, `--licence`, `--sbom-creator`, `--report`, `--report-content`, `--report-group-by-folder`, `--include`, `--exclude`, `--map-dir`, `--manifest`, `--match-prefixes`, `--define`, `--strict`, `--spdx-version`, and `--no-composition-evidence`. `--define` is merged by name: a name you pass wins over the same name in `defines`, and every other name in the file stays.
 
 If you pass `--include` or `--exclude`, that list replaces the file's list. `--report` overrides the file's enabled flag and format, and leaves the file's report output path as it is. `--report-content` overrides `report.content` only.
 
@@ -438,6 +442,8 @@ The same path can live in `.dxcomply.json` as `"manifest"`. A relative path is r
 The units come from the MAP file, including a Delphi 7 `.dpr` with its `.dof` and `.cfg`. Each row matches those units by `units_exact`, `units_prefix`, and/or `units_folder` (names are case-insensitive). The unit name is tried as written and again with one known scope prefix removed (`System.`, `Vcl.`, `Winapi.`, and the other Delphi scopes).
 
 `units_folder` is an array, the same shape as `units_exact`, `units_prefix`, and `units_exclude`. One row can name more than one package folder. `own_code_folders` is the same kind of list for your own units, next to `own_code_units` and `own_code_prefixes`. A folder stands for every unit whose source file is in that folder or in a folder under it. There is no switch to turn that off. A neighboring folder is not included: `C:\Libs\JVCL` does not match `C:\Libs\JVCL2\Unit.pas`. Comparison ignores case, and `/` and `\` are the same. A relative path is resolved from the directory of the components file, not from the project directory, and `..` is applied. A folder that is not on disk produces a warning, and the rule is still applied. A path that is a file is not applied.
+
+`$(name)` in `units_folder` and `own_code_folders` is replaced before that resolution. A relative result still starts from the components file directory. Set the name with `--define:name=value`, `--define=name=value`, or `--define name=value`. The flag is repeatable. A value may contain spaces and backslashes. Quote it when the shell needs that. Names ignore case, and the last value of a name wins. The same names are the `defines` object in `.dxcomply.json` (each value is a string) and **Manifest path variables** in the IDE options, one `name=value` per line. With `--ci`, a name on the command line wins over the same name in the file, and other names in the file stay. In the IDE, the options are the base and a `defines` name in the project file wins for that name. `$(env.NAME)` reads environment variable `NAME` only when no definition of the full name `env.NAME` exists. A definition wins. `$(NAME)` does not read the environment. `$$` is one dollar sign, so `$$(name)` is the characters `$(name)` and does not require a definition. An unknown name fails the run (exit code 1). The message names the variable, the row (`Component[0] "Vendor Pack"`, or `Manifest` for `own_code_folders`), and the field. A bad `--define` is an invalid argument (exit code 2). The log line starts with `Info:` and names each variable that was used, its value, whether it came from a definition or the environment, the field, and the row. The SBOM and the HTML and Markdown reports contain the expanded path.
 
 Folder rules need the unit's source path. The MAP file names the unit. DX.Comply uses the `.pas` it finds, including when the linked file is a DCU in the output directory and the `.pas` is on the search path. A DCU that lives in the package folder itself (not in the project output directory) is matched by that path when no `.pas` was found. A unit that stays a name with no file, and a DCU in the output directory whose `.pas` was not found, are not matched by a folder. `units_exact` and `own_code_units` still match those units by name. A `units_prefix` matches a name-only unit only when the prefix rule below allows that prefix.
 
@@ -528,6 +534,10 @@ The CRA requires (Annex I, Part II):
 ### Why does Generate SBOM in the IDE compile my project every time?
 
 The IDE always runs a Deep-Evidence build so the MAP file matches the sources you have open now. A stale MAP would describe an older link set. The CLI does not compile. You build with a detailed MAP yourself, then run `dxcomply`.
+
+### How do I point a manifest folder at a path that differs per machine?
+
+Put `$(path.libs)` in `units_folder` or `own_code_folders`. Pass `--define:path.libs=D:\libs`, or set `"defines": {"path.libs": "D:/libs"}` in `.dxcomply.json` and run with `--ci`. The IDE options page has the same list. A name on the command line wins over the file, and the file wins over the IDE options for that name. Other names stay. `$(env.LIBS)` reads the environment variable `LIBS` when `env.LIBS` is not itself defined. `$(LIBS)` does not. `$$(path.libs)` stays as the characters `$(path.libs)`. An unknown name stops the run and names the variable, the row, and the field. Library mode expands the same fields. See [Component manifest](#component-manifest).
 
 ### When should I use `--library` instead of a normal product SBOM?
 

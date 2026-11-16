@@ -230,6 +230,7 @@ implementation
 uses
   System.JSON,
   DX.Comply.ComponentManifest,
+  DX.Comply.ManifestDefines,
   DX.Comply.IDE.AboutDialog,
   DX.Comply.IDE.BuildConfirmationDialog,
   DX.Comply.IDE.ExpectedMapFile,
@@ -240,6 +241,32 @@ uses
   DX.Comply.IDE.Resources,
   DX.Comply.IDE.SbomHeaderDialog,
   DX.Comply.SbomHeaderConfig;
+
+/// <summary>
+/// Reads defines from a .dxcomply.json. Returns an empty list when the file
+/// or the key is missing, or the file cannot be read. The caller then keeps
+/// the variables from Tools > Options.
+/// </summary>
+function ReadProjectDefines(const AConfigPath: string): TArray<TManifestDefine>;
+var
+  LReader: TDxComplyGenerator;
+begin
+  SetLength(Result, 0);
+  if (AConfigPath = '') or not TFile.Exists(AConfigPath) then
+    Exit;
+  LReader := TDxComplyGenerator.Create;
+  try
+    try
+      Result := LReader.LoadConfig(AConfigPath).Defines;
+    except
+      on E: Exception do
+        TIDELogger.Warning('DX.Comply: Could not read defines from .dxcomply.json: ' +
+          E.Message + '. The variables from Tools > Options are used.');
+    end;
+  finally
+    LReader.Free;
+  end;
+end;
 
 /// <summary>
 /// Reads outputDir from a .dxcomply.json (issue #146). Returns an empty
@@ -760,6 +787,10 @@ begin
 
     LSettings := TDXComplyIDESettingsStore.Load;
     LConfig := BuildConfig(LProject, LSettings, AForceDeepEvidence);
+    // IDE options are the base. A defines name in .dxcomply.json wins.
+    // --define is the CLI and is not applied here.
+    LConfig.Defines := MergeManifestDefines(LSettings.Defines,
+      ReadProjectDefines(TPath.Combine(TPath.GetDirectoryName(LProjectPath), '.dxcomply.json')));
 
     // Same key the CLI reads from .dxcomply.json. No options-page field:
     // the project file is the source.

@@ -51,7 +51,7 @@
       "units_folder": ["third-party/TMS"],
       "units_prefix": ["FMX.TMSFNC"],
       "purl": "pkg:generic/tms-vcl-ui-pack@13.0",
-"notes": "Optional purl overrides the generated pkg:delphi locator. Commercial is emitted as license.name. A prefix that contains a dot still matches the start of the unit name, except on an Embarcadero product path. Prefer the folder for the VCL package."
+"notes": "Optional purl overrides the generated pkg:delphi locator. Commercial is emitted as license.name. A prefix that contains a dot still matches the start of the unit name, except on an Embarcadero product path. Prefer the folder for the VCL package. A machine-specific folder can be $(path.libs) when --define, the defines object, or the IDE options set that name. This sample keeps a relative path that works without a definition. $$(path.libs) stays as the characters $(path.libs)."
     },
     {
       "name": "OpenSSL",

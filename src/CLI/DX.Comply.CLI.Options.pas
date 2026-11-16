@@ -24,6 +24,7 @@ uses
   System.Classes,
   DX.Comply.Engine,
   DX.Comply.Engine.Intf,
+  DX.Comply.ManifestDefines,
   DX.Comply.Report.Intf;
 
 const
@@ -101,6 +102,7 @@ type
     FManifestExplicit: Boolean;
     FSbomCreator: string;
     FPrefixMatch: string;
+    FDefines: TArray<TManifestDefine>;
     FVersionFromGitTag: Boolean;
     FParseError: string;
     /// <summary>
@@ -206,6 +208,10 @@ type
     property ProductVersion: string read FProductVersion;
     /// <summary>True when --version-from-git-tag was passed.</summary>
     property VersionFromGitTag: Boolean read FVersionFromGitTag;
+    /// <summary>
+    /// Path variables from --define. The last value of a name wins.
+    /// </summary>
+    property Defines: TArray<TManifestDefine> read FDefines;
     property Supplier: string read FSupplier;
     /// <summary>Supplier contact URL from --supplier-url.</summary>
     property SupplierUrl: string read FSupplierUrl;
@@ -374,17 +380,42 @@ end;
 function TCliOptions.Parse(const AArgs: TArray<string>): Boolean;
 var
   I: Integer;
-  LArg, LKey, LValue: string;
+  LArg, LKey, LValue, LAssignment: string;
   LEqualsPos: Integer;
+  LDefine: TManifestDefine;
+  LSkipDefineValue: Boolean;
+
+  function AcceptDefine(const AAssignment: string): Boolean;
+  begin
+    if not TryParseDefineAssignment(AAssignment, LDefine, FParseError) then
+    begin
+      FParseError := 'Invalid value for --define: ' + FParseError;
+      Exit(False);
+    end;
+    SetLength(FDefines, Length(FDefines) + 1);
+    FDefines[High(FDefines)] := LDefine;
+    Include(FExplicitOverrides, scoDefines);
+    Result := True;
+  end;
+
 begin
   Result := True;
   FParseError := '';
   FExplicitOverrides := [];
   FOutputExplicit := False;
   FSpdxVersion := '';
+  LSkipDefineValue := False;
 
   for I := 0 to High(AArgs) do
   begin
+    // The value of "--define name=value" is the next argument. A for-loop
+    // index cannot be advanced, so that argument is skipped on the next pass.
+    if LSkipDefineValue then
+    begin
+      LSkipDefineValue := False;
+      Continue;
+    end;
+
     LArg := AArgs[I];
 
     if (LArg = '--help') or (LArg = '-h') then
@@ -459,6 +490,20 @@ begin
       Continue;
     end;
 
+    // --define name=value. The equals forms are handled with the other flags.
+    if SameText(LArg, '--define') then
+    begin
+      if I >= High(AArgs) then
+      begin
+        FParseError := 'Invalid value for --define: expected name=value.';
+        Exit(False);
+      end;
+      LSkipDefineValue := True;
+      if not AcceptDefine(AArgs[I + 1]) then
+        Exit(False);
+      Continue;
+    end;
+
     // Bare --report (no value) enables both markdown and html.
     if LArg = '--report' then
     begin
@@ -469,6 +514,19 @@ begin
 
     if LArg.StartsWith('--') then
     begin
+      // --define:name=value and --define=name=value. The value keeps spaces
+      // and backslashes. A surrounding pair of quotes is removed.
+      if LArg.StartsWith('--define:', True) or LArg.StartsWith('--define=', True) then
+      begin
+        if LArg.StartsWith('--define:', True) then
+          LAssignment := LArg.Substring(Length('--define:'))
+        else
+          LAssignment := LArg.Substring(Length('--define='));
+        if not AcceptDefine(LAssignment) then
+          Exit(False);
+        Continue;
+      end;
+
       // Split into key and value at the first '='
       LEqualsPos := LArg.IndexOf('=');
       if LEqualsPos < 0 then
@@ -970,6 +1028,29 @@ begin
     Line('                                for this release. A prefix never');
     Line('                                reassigns a product shipped path.');
     Line('                                File key: matchPrefixes');
+    Line('  --define:name=value           Manifest path variable (repeatable).');
+    Line('  --define=name=value           Same as --define:name=value.');
+    Line('  --define name=value           Same, with the assignment as the');
+    Line('                                next argument. A value may contain');
+    Line('                                spaces and backslashes. Quote it');
+    Line('                                when the shell needs that.');
+    Line('                                Names ignore case. A later --define');
+    Line('                                for the same name wins.');
+    Line('                                File key: defines, an object of');
+    Line('                                name to path. With --ci, a name on');
+    Line('                                the command line wins over the same');
+    Line('                                name in the file. Other names stay.');
+    Line('                                The IDE options are the base, and');
+    Line('                                the project file wins over them.');
+    Line('                                $(name) in units_folder and');
+    Line('                                own_code_folders uses the value.');
+    Line('                                $(env.NAME) reads environment');
+    Line('                                variable NAME when env.NAME is not');
+    Line('                                defined. A definition wins.');
+    Line('                                $$(name) is the characters $(name).');
+    Line('                                An unknown variable fails the run');
+    Line('                                (exit code 1). A bad --define is an');
+    Line('                                invalid argument (exit code 2).');
     Line('  --manifest=<file>             Component manifest (components.json)');
     Line('                                Groups matched units into libraries');
     Line('                                with supplier, licence, version, type,');
@@ -1036,6 +1117,7 @@ begin
     Line('Examples:');
     Line('  ' + LExe + ' --project=src\MyApp.dproj --format=cyclonedx-json --output=bom.json');
     Line('  ' + LExe + ' --project=src\MyApp.dproj --manifest=components.json --no-pause');
+    Line('  ' + LExe + ' --project=src\MyApp.dproj --define:path.libs=D:\libs --no-pause');
     Line('  ' + LExe + ' --project=src\MyApp.dproj --sbom-creator=sbom@example.com --no-pause');
     Line('  ' + LExe + ' --project=src\MyApp.dpr --delphi7-root=C:\Delphi7 --no-pause');
     Line('  ' + LExe + ' --project=src\MyApp.dproj --ci --config=.dxcomply.json --no-pause');
@@ -1115,6 +1197,7 @@ begin
   Result.ManifestFile                := FManifestFile;
   Result.ManifestFileExplicit        := FManifestExplicit;
   Result.PrefixMatch                 := FPrefixMatch;
+  Result.Defines                     := FDefines;
   Result.ExplicitOverrides           := FExplicitOverrides;
   Result.IncludePlatformInOutput     := FIncludePlatformInOutput;
 

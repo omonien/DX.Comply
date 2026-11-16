@@ -109,6 +109,7 @@
         <DCCReference Include="DX.Comply.Tests.Engine.pas"/>
         <DCCReference Include="DX.Comply.Tests.CLI.Options.pas"/>
         <DCCReference Include="DX.Comply.Tests.ComponentManifest.pas"/>
+        <DCCReference Include="DX.Comply.Tests.ManifestDefines.pas"/>
         <DCCReference Include="DX.Comply.Tests.BsiTr03183.pas"/>
         <DCCReference Include="DX.Comply.Tests.UsesClauseParser.pas"/>
         <DCCReference Include="DX.Comply.Tests.DependencyGraph.pas"/>
