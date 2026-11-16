@@ -129,6 +129,7 @@ implementation
 
 uses
   System.SysUtils,
+  System.StrUtils,
   Winapi.Windows;
 
 function IsValidManifestDefineName(const AName: string): Boolean;
