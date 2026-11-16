@@ -506,7 +506,9 @@ begin
     LConfig.SbomCreator := 'sbom@acme.example';
     LConfig.HumanReadableReport.Enabled := True;
     LConfig.HumanReadableReport.Format := hrfHtml;
-    LConfig.HumanReadableReport.OutputBasePath := TPath.Combine(LDir, 'report.html');
+    // The base path has no extension. The writer appends .html, the same
+    // way Generate_WithHumanReadableMarkdownReport expects .md.
+    LConfig.HumanReadableReport.OutputBasePath := TPath.Combine(LDir, 'compliance.report');
 
     LOutput := TPath.Combine(LDir, 'lib.cdx.json');
     LGenerator := TDxComplyGenerator.Create(LConfig);
@@ -526,8 +528,8 @@ begin
     Assert.IsTrue(Pos('Vendor Pack', LText) > 0, LText);
     Assert.IsTrue(Pos('$(path.libs)', LText) = 0, LText);
     Assert.IsTrue(Pos('$(', LText) = 0, LText);
-    LHtml := TPath.Combine(LDir, 'report.html');
-    Assert.IsTrue(TFile.Exists(LHtml), LHtml);
+    LHtml := LConfig.HumanReadableReport.OutputBasePath + '.html';
+    Assert.IsTrue(TFile.Exists(LHtml), LHtml + sLineBreak + LJoined);
     LText := TFile.ReadAllText(LHtml, TEncoding.UTF8);
     Assert.IsTrue(Pos('Vendor Pack', LText) > 0, LText);
     Assert.IsTrue(Pos('$(path.libs)', LText) = 0, LText);
