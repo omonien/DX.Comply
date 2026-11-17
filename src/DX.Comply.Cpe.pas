@@ -156,6 +156,7 @@ implementation
 uses
   System.Classes,
   System.IOUtils,
+  DX.Comply.Engine.Intf,
   DX.Comply.ProjectScanner;
 
 const

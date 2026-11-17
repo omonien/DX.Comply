@@ -291,6 +291,12 @@ function ClassifyCpe(const AValue: string): TCpeKind;
 function AcceptedCpe(const AValue: string): string;
 
 /// <summary>
+/// SPDX 2.3 referenceType for a CPE external reference. A formatted string
+/// is cpe23Type. A URI is cpe22Type. ckNone returns an empty string.
+/// </summary>
+function SpdxCpeReferenceType(AKind: TCpeKind): string;
+
+/// <summary>
 /// Appends CycloneDX 1.6 licenses to a component. An empty value writes
 /// nothing. An SPDX id or a name is written twice, concluded then declared.
 /// An expression is one concluded entry. A URL is omitted for an expression.
