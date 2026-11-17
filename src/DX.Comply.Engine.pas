@@ -88,7 +88,8 @@ type
     scoReportContent,
     scoReportGroupByFolder,
     scoPrefixMatch,
-    scoDefines
+    scoDefines,
+    scoNoBuild
   );
   /// <summary>Set of TSbomConfig fields that were set explicitly.</summary>
   TSbomConfigOverrides = set of TSbomConfigOverride;
@@ -178,6 +179,12 @@ type
     DeepEvidenceBuildScriptPath: string;
     /// <summary>Continue SBOM generation when the Deep-Evidence build fails.</summary>
     ContinueOnDeepEvidenceBuildFailure: Boolean;
+    /// <summary>
+    /// When True, do not compile the project. If a Deep-Evidence build would
+    /// run, generation stops. Set by --no-build or by noBuild in
+    /// .dxcomply.json. Default is False.
+    /// </summary>
+    NoBuild: Boolean;
     /// <summary>Emit a warning when no composition units could be resolved.</summary>
     WarnOnEmptyCompositionEvidence: Boolean;
     /// <summary>Optional human-readable companion report settings.</summary>
@@ -579,12 +586,33 @@ type
     /// </summary>
     property Config: TSbomConfig read FConfig write FConfig;
     /// <summary>
+    /// Replaces the build orchestrator. Tests pass a stub whose ExecutePlan
+    /// does not start a build process.
+    /// </summary>
+    procedure SetBuildOrchestrator(const AOrchestrator: IBuildOrchestrator);
+    /// <summary>
     /// CRA/BSI warnings of the last Generate or GenerateLibrary call: header
     /// gaps, a missing deployable, and third-party components without
     /// supplier or licence. --strict fails the CLI when this is not empty.
     /// </summary>
     property CraWarnings: TArray<string> read FCraWarnings;
   end;
+
+/// <summary>
+/// Text of the warning printed when DX.Comply is about to build the project.
+/// Names the MAP file, the configuration, and the platform. AMapMissing
+/// selects the wording used when that MAP file is not on disk.
+/// </summary>
+function SelfBuildWarningText(const AMapFilePath, AConfiguration, APlatform: string;
+  AMapMissing: Boolean): string;
+
+/// <summary>
+/// Text of the error used when noBuild is set and a build would otherwise
+/// run. Names the MAP file, the configuration, and the platform. The CLI
+/// reports this as a failed generation (exit code 1).
+/// </summary>
+function NoBuildRefusalText(const AMapFilePath, AConfiguration, APlatform: string;
+  AMapMissing: Boolean): string;
 
 /// <summary>
 /// Build mode versions for files that have no version yet.
@@ -635,6 +663,7 @@ begin
   Result.DeepEvidenceDelphiVersion := 0;
   Result.DeepEvidenceBuildScriptPath := '';
   Result.ContinueOnDeepEvidenceBuildFailure := True;
+  Result.NoBuild := False;
   Result.WarnOnEmptyCompositionEvidence := False;
   Result.HumanReadableReport := THumanReadableReportConfig.Default;
   Result.ProductName := '';
@@ -762,6 +791,39 @@ constructor TDxComplyGenerator.Create(const AConfig: TSbomConfig);
 begin
   Create;
   FConfig := AConfig;
+end;
+
+procedure TDxComplyGenerator.SetBuildOrchestrator(const AOrchestrator: IBuildOrchestrator);
+begin
+  FBuildOrchestrator := AOrchestrator;
+end;
+
+function MapBuildFacts(const AMapFilePath, AConfiguration, APlatform: string;
+  AMapMissing: Boolean): string;
+begin
+  if AMapMissing then
+    Result := 'Missing MAP: ' + AMapFilePath
+  else
+    Result := 'MAP: ' + AMapFilePath;
+  Result := Result + '. Configuration: ' + AConfiguration +
+    '. Platform: ' + APlatform + '.';
+end;
+
+function SelfBuildWarningText(const AMapFilePath, AConfiguration, APlatform: string;
+  AMapMissing: Boolean): string;
+begin
+  if AMapMissing then
+    Result := 'MAP file not found, so DX.Comply will build the project. '
+  else
+    Result := 'DX.Comply will build the project. ';
+  Result := Result + MapBuildFacts(AMapFilePath, AConfiguration, APlatform, AMapMissing);
+end;
+
+function NoBuildRefusalText(const AMapFilePath, AConfiguration, APlatform: string;
+  AMapMissing: Boolean): string;
+begin
+  Result := '--no-build is set, so DX.Comply will not build the project. ' +
+    MapBuildFacts(AMapFilePath, AConfiguration, APlatform, AMapMissing);
 end;
 
 destructor TDxComplyGenerator.Destroy;
@@ -943,6 +1005,7 @@ function TDxComplyGenerator.EnsureDeepEvidenceBuild(
   const AProjectInfo: TProjectInfo): TDeepEvidenceBuildResult;
 var
   LPlan: TDeepEvidenceBuildPlan;
+  LMapMissing: Boolean;
 begin
   LPlan := Default(TDeepEvidenceBuildPlan);
   Result := Default(TDeepEvidenceBuildResult);
@@ -966,6 +1029,27 @@ begin
     Result.CommandLine := LPlan.CommandLine;
     Result.MapFilePath := LPlan.ExpectedMapFilePath;
     Result.WorkingDirectory := LPlan.WorkingDirectory;
+    if LPlan.ShouldExecute then
+    begin
+      // The planner already decided a build will run. Say so before the
+      // process starts, and refuse it when noBuild is set. A missing MAP
+      // is the default reason. deepEvidence.mode always builds even when
+      // the file is present, so that case names the MAP without calling it
+      // missing.
+      LMapMissing := (LPlan.ExpectedMapFilePath = '') or
+        not TFile.Exists(LPlan.ExpectedMapFilePath);
+      if FConfig.NoBuild then
+      begin
+        Result.Success := False;
+        Result.Executed := False;
+        Result.BlockedByNoBuild := True;
+        Result.Message := NoBuildRefusalText(LPlan.ExpectedMapFilePath,
+          AProjectInfo.Configuration, AProjectInfo.Platform, LMapMissing);
+        Exit;
+      end;
+      DoProgress('Warning: ' + SelfBuildWarningText(LPlan.ExpectedMapFilePath,
+        AProjectInfo.Configuration, AProjectInfo.Platform, LMapMissing), 16);
+    end;
     Result := FBuildOrchestrator.ExecutePlan(LPlan);
   except
     on E: Exception do
@@ -2447,10 +2531,13 @@ begin
             else
               Result.DeepEvidenceMode := debWhenMapMissing;
           end;
-          // deepEvidence.build used to be read here, but both branches stored
-          // debWhenMapMissing, so the flag could not turn the build off and
-          // it overwrote an explicit mode. The CLI does not compile the
-          // project. Use deepEvidence.mode (always | when-missing) instead.
+          // deepEvidence.build is ignored. Both of its old branches stored
+          // debWhenMapMissing, so it could not turn the build off and it
+          // overwrote an explicit mode. Use deepEvidence.mode
+          // (always | when-missing). noBuild, or --no-build, refuses the
+          // build when the MAP file is missing or when mode is always.
+          // The CLI does build a .dproj, .dpk, or .groupproj in those cases.
+          // A Delphi 7 project is not compiled.
           if LDeepEvidence.GetValue('delphiVersion') <> nil then
             Result.DeepEvidenceDelphiVersion := LDeepEvidence.GetValue<Integer>('delphiVersion');
           if LDeepEvidence.GetValue('buildScriptPath') <> nil then
@@ -2539,6 +2626,11 @@ begin
         begin
           Result.StrictMode := LJson.GetValue<Boolean>('strict');
         end;
+
+        // Refuse a Deep-Evidence build. The CLI flag --no-build wins when
+        // it was actually passed (scoNoBuild).
+        if LJson.GetValue('noBuild') <> nil then
+          Result.NoBuild := LJson.GetValue<Boolean>('noBuild');
 
         // Issue #108: "spdxVersion": "3.0.1" selects SPDX 3.0.1 for spdx-json.
         if LJson.GetValue('spdxVersion') <> nil then
@@ -3530,6 +3622,13 @@ begin
           LProjectInfo.ProjectDir, '');
       end;
     end;
+    // noBuild is not a best-effort build failure. ContinueOnDeepEvidenceBuildFailure
+    // must not turn it into a warning and carry on.
+    if LDeepEvidenceBuildResult.BlockedByNoBuild then
+    begin
+      DoProgress('Error: ' + LDeepEvidenceBuildResult.Message, -1);
+      Exit(False);
+    end;
     if not LDeepEvidenceBuildResult.Success then
     begin
       var LDiagLog := WriteDeepEvidenceDiagnosticLog(LProjectInfo.ProjectDir,
@@ -3851,6 +3950,8 @@ begin
     Result.PrefixMatch := ACaller.PrefixMatch;
   if scoDefines in ACaller.ExplicitOverrides then
     Result.Defines := MergeManifestDefines(Result.Defines, ACaller.Defines);
+  if scoNoBuild in ACaller.ExplicitOverrides then
+    Result.NoBuild := ACaller.NoBuild;
   Result.Format := ApplySpdxVersion(Result.Format, Result.SpdxVersion);
 
   Result.IncludePlatformInOutput := ACaller.IncludePlatformInOutput;

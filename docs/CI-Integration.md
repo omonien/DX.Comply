@@ -10,10 +10,16 @@ directory, hashes the files it can open, and writes a
 CycloneDX or SPDX SBOM. Subfolders such as `setup\` or `tools\` are not
 walked.
 
-The CLI tool expects an existing detailed MAP file. It does **not** compile your
-project. Your pipeline must build the project with `DCC_MapFile=3` before
-running `dxcomply`. This keeps the CLI lightweight and avoids any dependency on
-build scripts or Delphi installations beyond what your pipeline already provides.
+The CLI reads a detailed MAP file for the configuration and platform you pass
+(`Release` and `Win32` when you pass neither). When that file is missing, the
+default deep evidence mode `when-missing` builds the project with MSBuild
+(`build/DelphiBuildDPROJ.ps1`, property `DCC_MapFile=3`) and prints a warning
+that names the missing MAP file, the configuration, and the platform.
+`--no-build`, or `"noBuild": true` in `.dxcomply.json`, stops that run with
+exit code 1 instead of compiling. A pipeline that already built the project
+should pass `--no-build` together with the same `--config-name` and
+`--platform`. With `--ci`, the flag wins over `noBuild` in the file. A Delphi
+7 project is not compiled.
 
 `dxcomply.exe` is not installed by GetIt. Copy it from the release ZIP or the
 installer `bin` folder, or build `src/CLI/dxcomply.dproj`, and call that
@@ -170,6 +176,7 @@ store the configuration in `.dxcomply.json` at the repository root.
   "scanDirs": ["redist"],
   "manifest": "components.json",
   "matchPrefixes": "corroborated",
+  "noBuild": true,
   "product": {
     "name": "My Application",
     "version": "2.1.0",
@@ -177,6 +184,8 @@ store the configuration in `.dxcomply.json` at the repository root.
   }
 }
 ```
+
+`"noBuild": true` is the same as `--no-build`. With `--ci`, `--no-build=false` wins over the file.
 
 `scanDirs` entries are extra directories of binaries you stage on purpose.
 Each one is scanned non-recursively unless the value contains `**`.
@@ -213,7 +222,7 @@ When `--ci` is given and the config file exists, DX.Comply loads that file and t
 2. Values from `.dxcomply.json`.
 3. Command-line options that appear in the invocation. These win.
 
-A default you did not pass does not override the file. `dxcomply --ci --config-name=Debug` keeps Debug even if the file says `"configName": "Release"`. `dxcomply --ci --platform=Win64` keeps the file's `configName` and replaces only the platform. Without `--ci`, the file is not read. `--config` only changes the path used together with `--ci`, using the lookup order above.
+A default you did not pass does not override the file. `dxcomply --ci --config-name=Debug` keeps Debug even if the file says `"configName": "Release"`. `dxcomply --ci --platform=Win64` keeps the file's `configName` and replaces only the platform. The same rule applies to `--no-build`: `dxcomply --ci --no-build=false` keeps the build enabled even when the file says `"noBuild": true`. Without `--ci`, the file is not read. `--config` only changes the path used together with `--ci`, using the lookup order above.
 
 The line printed after a successful run is the output path after that merge, including a `configName` or `platform` taken from the file.
 
@@ -253,17 +262,43 @@ to append `<Platform>.<Config>` to the default base filename. Explicit
 
 ### Deep Evidence in CI
 
-The CLI tool does not compile your project. It relies on the MAP file that your
-build step produces. To get full unit-level evidence, ensure your build step
-includes the `DCC_MapFile=3` MSBuild property:
+When the MAP file for the selected configuration and platform is missing, the
+CLI builds the project itself. The default `deepEvidence.mode` is
+`when-missing`. `always` builds even when that MAP file is already on disk.
+The build is a nested MSBuild. The CLI prints a warning first. The warning
+names the missing MAP file, the configuration, and the platform. Without
+`--config-name` the CLI looks for the Release MAP file.
+
+To get full unit-level evidence from your own build step, include the
+`DCC_MapFile=3` MSBuild property, then tell the CLI not to build again:
 
 ```cmd
 msbuild src\MyApp.dproj /p:Config=Release /p:Platform=Win32 /p:DCC_MapFile=3
+dxcomply --project=src\MyApp.dproj --config-name=Release --platform=Win32 --no-build --no-pause
 ```
 
+A post-build event should pass the configuration and platform of the build
+that is running:
+
+```cmd
+call sbom.bat "$(PROJECTPATH)" $(Config) $(Platform)
+```
+
+`sbom.bat`:
+
+```bat
+@echo off
+dxcomply --project=%1 --config-name=%2 --platform=%3 --no-build --no-pause
+```
+
+Add `--map-dir` when the MAP file is not in the output directory the project
+records.
+
 If you use `.dxcomply.json`, `deepEvidence.build` is ignored. Set
-`deepEvidence.mode` to `always` or `when-missing` instead. The CLI still does
-not compile the project: the MAP file must already exist before `dxcomply` runs.
+`deepEvidence.mode` to `always` or `when-missing`. `"noBuild": true` is the
+file form of `--no-build`. With `--ci`, the flag wins. When `--no-build` stops
+a build that would otherwise run, the exit code is 1. A Delphi 7 project is
+not compiled. The MAP file from that build must already exist.
 
 ---
 
@@ -272,7 +307,7 @@ not compile the project: the MAP file must already exist before `dxcomply` runs.
 | Code | Meaning |
 |------|---------|
 | 0    | SBOM generated successfully |
-| 1    | Generation failed (see console output for details) |
+| 1    | Generation failed (see console output for details). `--no-build`, or `"noBuild": true`, uses this code when a build would otherwise run. The message names the MAP file, the configuration, and the platform. |
 | 2    | Invalid or missing arguments |
 | 3    | SBOM generated, but `--strict` (or `"strict": true`) is set and at least one CRA/BSI warning was raised |
 

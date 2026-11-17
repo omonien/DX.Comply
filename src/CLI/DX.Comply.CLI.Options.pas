@@ -104,6 +104,7 @@ type
     FPrefixMatch: string;
     FDefines: TArray<TManifestDefine>;
     FVersionFromGitTag: Boolean;
+    FNoBuild: Boolean;
     FParseError: string;
     /// <summary>
     /// Parses the --report value (markdown | html | both | none) and updates
@@ -248,6 +249,11 @@ type
     property LibraryMode: Boolean read FLibraryMode;
     /// <summary>True when --strict was requested (issue #111).</summary>
     property StrictMode: Boolean read FStrictMode;
+    /// <summary>
+    /// True when --no-build was requested. A build that would otherwise run
+    /// fails the process with exit code 1.
+    /// </summary>
+    property NoBuild: Boolean read FNoBuild;
     /// <summary>SPDX version from --spdx-version (issue #108).</summary>
     property SpdxVersion: string read FSpdxVersion;
     /// <summary>Source directories from repeatable --source-dir.</summary>
@@ -483,6 +489,13 @@ begin
       Continue;
     end;
 
+    if LArg = '--no-build' then
+    begin
+      FNoBuild := True;
+      Include(FExplicitOverrides, scoNoBuild);
+      Continue;
+    end;
+
     if LArg = '--library' then
     begin
       FLibraryMode := True;
@@ -663,6 +676,16 @@ begin
           Exit(False);
         end;
         Include(FExplicitOverrides, scoStrictMode);
+      end
+      else if LKey = 'no-build' then
+      begin
+        if not TryParseBool(LValue, FNoBuild) then
+        begin
+          FParseError := 'Invalid value for --no-build: ' + LValue +
+            ' (expected true or false)';
+          Exit(False);
+        end;
+        Include(FExplicitOverrides, scoNoBuild);
       end
       else if LKey = 'spdx-version' then
       begin
@@ -1059,6 +1082,15 @@ begin
     Line('                                directory.');
     Line('                                Overrides the manifest key in .dxcomply.json');
     Line('  --map-dir=<path>              Directory containing the pre-built MAP file');
+    Line('  --no-build[=true|false]       Do not compile the project. If the MAP');
+    Line('                                file for this configuration and platform');
+    Line('                                is missing, or deep evidence mode is');
+    Line('                                always, the run stops with exit code 1');
+    Line('                                and names that MAP file, the configuration,');
+    Line('                                and the platform. Without this flag, a');
+    Line('                                missing MAP file is built and a warning');
+    Line('                                is printed. File key: noBuild.');
+    Line('                                With --ci, this flag wins over the file.');
     Line('  --delphi7-root=<path>         Delphi 7 install directory (RootDir).');
     Line('  --bds-version=<ver>           Delphi install to use, for example 23.0');
     Line('                                or 23. Default: the BDS environment');
@@ -1110,7 +1142,8 @@ begin
     Line('');
     Line('Exit codes:');
     Line('  0  SBOM generated');
-    Line('  1  Generation failed');
+    Line('  1  Generation failed. --no-build uses this code when a build');
+    Line('     would otherwise run.');
     Line('  2  Invalid arguments');
     Line('  3  SBOM generated, but --strict and at least one CRA/BSI warning');
     Line('');
@@ -1187,6 +1220,7 @@ begin
   Result.ScanTree                    := FScanTree;
   Result.LibraryMode                 := FLibraryMode;
   Result.StrictMode                  := FStrictMode;
+  Result.NoBuild                     := FNoBuild;
   Result.SourceDirs                  := FSourceDirs;
   Result.Purl                        := FPurl;
   Result.RepoUrl                     := FRepoUrl;

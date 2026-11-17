@@ -68,6 +68,15 @@ type
       AReferencedName: string; APlaceVersionedDll: Boolean;
       out ADllPath: string): string;
     function GenerateVendorProject(const AProject: string): TJSONObject;
+    /// <summary>
+    /// Minimal .dproj. AWriteMap plants MyApp.map in the project directory,
+    /// which is the expected MAP when no output directory is set.
+    /// </summary>
+    function CreateSelfBuildProject(const AFolder: string; AWriteMap: Boolean;
+      out AMapPath: string): string;
+    function SelfBuildConfig: TSbomConfig;
+    function FindProgress(const AFragment: string): string;
+    function HasNegativeProgress: Boolean;
   public
     [Setup]
     procedure Setup;
@@ -162,6 +171,41 @@ type
     /// <summary>Deep-Evidence builds must be disabled by default.</summary>
     [Test]
     procedure Config_Default_DeepEvidenceBuildWhenMapMissing;
+
+    /// <summary>
+    /// A missing MAP file warns, names the MAP, configuration and platform,
+    /// and the stub orchestrator is asked to build. No MSBuild is started.
+    /// </summary>
+    [Test]
+    procedure Generate_MissingMap_WarnsAndBuilds;
+
+    /// <summary>
+    /// --no-build aborts when the MAP file is missing. The stub is not asked
+    /// to build. The error names the MAP, configuration and platform.
+    /// </summary>
+    [Test]
+    procedure Generate_NoBuild_MissingMap_Aborts;
+
+    /// <summary>
+    /// A MAP file that is already present is not a self-build, so --no-build
+    /// does not abort.
+    /// </summary>
+    [Test]
+    procedure Generate_NoBuild_MapPresent_DoesNotAbort;
+
+    /// <summary>
+    /// deepEvidence.mode always would build even when the MAP file exists.
+    /// --no-build aborts and names that MAP file.
+    /// </summary>
+    [Test]
+    procedure Generate_NoBuild_AlwaysMode_AbortsWhenMapPresent;
+
+    /// <summary>
+    /// noBuild in .dxcomply.json aborts. --no-build=false on the caller wins
+    /// and the warning path runs instead.
+    /// </summary>
+    [Test]
+    procedure GenerateFromConfig_NoBuild_CliWins;
 
     /// <summary>MapFileDir must be empty by default.</summary>
     [Test]
@@ -628,6 +672,83 @@ uses
   System.RegularExpressions,
   DX.Comply.BuildEvidence.Intf,
   DX.Comply.Tests.Paths;
+
+type
+  /// <summary>
+  /// CreatePlan uses the real planner, which only checks the MAP file.
+  /// ExecutePlan records the call and does not start a build process.
+  /// </summary>
+  TRecordingBuildOrchestrator = class(TInterfacedObject, IBuildOrchestrator)
+  private
+    FPlanner: IBuildOrchestrator;
+    FExecuteCalls: Integer;
+    FLastShouldExecute: Boolean;
+  public
+    constructor Create;
+    function CreatePlan(const AProjectInfo: TProjectInfo;
+      const AOptions: TDeepEvidenceBuildOptions): TDeepEvidenceBuildPlan;
+    function ExecutePlan(const APlan: TDeepEvidenceBuildPlan): TDeepEvidenceBuildResult;
+    function EnsureDeepEvidenceBuild(const AProjectInfo: TProjectInfo;
+      const AOptions: TDeepEvidenceBuildOptions): TDeepEvidenceBuildResult;
+    property ExecuteCalls: Integer read FExecuteCalls;
+    property LastShouldExecute: Boolean read FLastShouldExecute;
+  end;
+
+constructor TRecordingBuildOrchestrator.Create;
+begin
+  inherited Create;
+  FPlanner := TBuildOrchestrator.Create;
+end;
+
+function TRecordingBuildOrchestrator.CreatePlan(const AProjectInfo: TProjectInfo;
+  const AOptions: TDeepEvidenceBuildOptions): TDeepEvidenceBuildPlan;
+begin
+  Result := FPlanner.CreatePlan(AProjectInfo, AOptions);
+end;
+
+function TRecordingBuildOrchestrator.ExecutePlan(
+  const APlan: TDeepEvidenceBuildPlan): TDeepEvidenceBuildResult;
+begin
+  Inc(FExecuteCalls);
+  FLastShouldExecute := APlan.ShouldExecute;
+  Result := Default(TDeepEvidenceBuildResult);
+  Result.Success := True;
+  Result.Executed := APlan.ShouldExecute;
+  Result.CommandLine := APlan.CommandLine;
+  Result.MapFilePath := APlan.ExpectedMapFilePath;
+  Result.WorkingDirectory := APlan.WorkingDirectory;
+  if APlan.ShouldExecute then
+    Result.Message := 'Recording orchestrator accepted the build.'
+  else
+    Result.Message :=
+      'Deep-Evidence build skipped because the expected map file already exists.';
+end;
+
+function TRecordingBuildOrchestrator.EnsureDeepEvidenceBuild(
+  const AProjectInfo: TProjectInfo;
+  const AOptions: TDeepEvidenceBuildOptions): TDeepEvidenceBuildResult;
+var
+  LPlan: TDeepEvidenceBuildPlan;
+begin
+  LPlan := CreatePlan(AProjectInfo, AOptions);
+  Result := ExecutePlan(LPlan);
+end;
+
+function TextBetween(const AText, AStart, AEndMark: string): string;
+var
+  LStart: Integer;
+  LEndPos: Integer;
+begin
+  Result := '';
+  LStart := Pos(AStart, AText);
+  if LStart = 0 then
+    Exit;
+  LStart := LStart + Length(AStart);
+  LEndPos := Pos(AEndMark, Copy(AText, LStart, MaxInt));
+  if LEndPos = 0 then
+    Exit;
+  Result := Copy(AText, LStart, LEndPos - 1);
+end;
 
 { TEngineTests }
 
@@ -1175,6 +1296,276 @@ begin
   Assert.AreEqual(NativeInt(Ord(hrfMarkdown)),
     NativeInt(Ord(LConfig.HumanReadableReport.Format)),
     'TSbomConfig.Default.HumanReadableReport.Format must be hrfMarkdown');
+  Assert.IsFalse(LConfig.NoBuild, 'TSbomConfig.Default.NoBuild must be False');
+end;
+
+function TEngineTests.CreateSelfBuildProject(const AFolder: string;
+  AWriteMap: Boolean; out AMapPath: string): string;
+var
+  LRoot: string;
+begin
+  LRoot := TPath.Combine(FTempDir, AFolder);
+  TDirectory.CreateDirectory(LRoot);
+  TFile.WriteAllText(TPath.Combine(LRoot, 'MyApp.dpr'),
+    'program MyApp;' + sLineBreak + 'begin' + sLineBreak + 'end.' + sLineBreak,
+    TEncoding.UTF8);
+  TFile.WriteAllText(TPath.Combine(LRoot, 'MyApp.dproj'),
+    '<?xml version="1.0" encoding="utf-8"?>' + sLineBreak +
+    '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">' + sLineBreak +
+    '  <PropertyGroup>' + sLineBreak +
+    '    <MainSource>MyApp.dpr</MainSource>' + sLineBreak +
+    '    <AppType>Application</AppType>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '</Project>', TEncoding.UTF8);
+  Result := TPath.Combine(LRoot, 'MyApp.dproj');
+  AMapPath := TPath.Combine(LRoot, 'MyApp.map');
+  if AWriteMap then
+    TFile.WriteAllText(AMapPath, 'map', TEncoding.UTF8);
+end;
+
+function TEngineTests.SelfBuildConfig: TSbomConfig;
+begin
+  Result := TSbomConfig.Default;
+  Result.OutputPath := FOutputFile;
+  Result.IncludeCompositionEvidence := False;
+  Result.Platform := 'Win64';
+  Result.PlatformExplicit := True;
+  Result.Configuration := 'Debug';
+  Result.ConfigurationExplicit := True;
+end;
+
+function TEngineTests.FindProgress(const AFragment: string): string;
+var
+  I: Integer;
+begin
+  Result := '';
+  for I := 0 to FProgressMessages.Count - 1 do
+    if Pos(AFragment, FProgressMessages[I]) > 0 then
+      Exit(FProgressMessages[I]);
+end;
+
+function TEngineTests.HasNegativeProgress: Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 0 to FProgressValues.Count - 1 do
+    if FProgressValues[I] < 0 then
+      Exit(True);
+end;
+
+procedure TEngineTests.Generate_MissingMap_WarnsAndBuilds;
+var
+  LProject: string;
+  LMapPath: string;
+  LConfig: TSbomConfig;
+  LRecording: TRecordingBuildOrchestrator;
+  LKeep: IBuildOrchestrator;
+  LGen: TDxComplyGenerator;
+  LSuccess: Boolean;
+  LLine: string;
+begin
+  LProject := CreateSelfBuildProject('missing-map', False, LMapPath);
+  LConfig := SelfBuildConfig;
+  LRecording := TRecordingBuildOrchestrator.Create;
+  LKeep := LRecording;
+  LGen := TDxComplyGenerator.Create(LConfig);
+  try
+    LGen.OnProgress := OnProgress;
+    LGen.SetBuildOrchestrator(LKeep);
+    LSuccess := LGen.Generate(LProject, FOutputFile, sfCycloneDxJson);
+  finally
+    LGen.Free;
+  end;
+
+  Assert.IsTrue(LSuccess, 'A missing MAP file is built and generation continues');
+  Assert.AreEqual(1, LRecording.ExecuteCalls, 'The stub must be asked to build once');
+  Assert.IsTrue(LRecording.LastShouldExecute, 'The missing MAP file must be built');
+  Assert.IsFalse(TFile.Exists(LMapPath), LMapPath);
+  LLine := FindProgress('will build the project');
+  LMapPath := TextBetween(LLine, 'Missing MAP: ', '. Configuration:');
+  Assert.IsTrue(LMapPath.EndsWith('MyApp.map'), LLine);
+  Assert.IsFalse(TFile.Exists(LMapPath), LMapPath);
+  Assert.AreEqual('Warning: ' + SelfBuildWarningText(LMapPath, 'Debug', 'Win64', True),
+    LLine, FProgressMessages.Text);
+  Assert.IsTrue(LLine.StartsWith('Warning:'), LLine);
+  Assert.IsFalse(LLine.StartsWith('Info:', True), LLine);
+end;
+
+procedure TEngineTests.Generate_NoBuild_MissingMap_Aborts;
+var
+  LProject: string;
+  LMapPath: string;
+  LConfig: TSbomConfig;
+  LRecording: TRecordingBuildOrchestrator;
+  LKeep: IBuildOrchestrator;
+  LGen: TDxComplyGenerator;
+  LSuccess: Boolean;
+  LLine: string;
+begin
+  LProject := CreateSelfBuildProject('nobuild-missing', False, LMapPath);
+  LConfig := SelfBuildConfig;
+  LConfig.NoBuild := True;
+  LRecording := TRecordingBuildOrchestrator.Create;
+  LKeep := LRecording;
+  LGen := TDxComplyGenerator.Create(LConfig);
+  try
+    LGen.OnProgress := OnProgress;
+    LGen.SetBuildOrchestrator(LKeep);
+    LSuccess := LGen.Generate(LProject, FOutputFile, sfCycloneDxJson);
+  finally
+    LGen.Free;
+  end;
+
+  Assert.IsFalse(LSuccess, '--no-build must fail the run when a build would run');
+  Assert.AreEqual(0, LRecording.ExecuteCalls, 'The stub must not be asked to build');
+  Assert.IsTrue(HasNegativeProgress, 'The failure must be reported as an error');
+  Assert.IsFalse(TFile.Exists(LMapPath), LMapPath);
+  LLine := FindProgress('--no-build is set');
+  LMapPath := TextBetween(LLine, 'Missing MAP: ', '. Configuration:');
+  Assert.IsTrue(LMapPath.EndsWith('MyApp.map'), LLine);
+  Assert.AreEqual('Error: ' + NoBuildRefusalText(LMapPath, 'Debug', 'Win64', True),
+    LLine, FProgressMessages.Text);
+  Assert.IsTrue(Pos('Configuration: Debug', LLine) > 0, LLine);
+  Assert.IsTrue(Pos('Platform: Win64', LLine) > 0, LLine);
+end;
+
+procedure TEngineTests.Generate_NoBuild_MapPresent_DoesNotAbort;
+var
+  LProject: string;
+  LMapPath: string;
+  LConfig: TSbomConfig;
+  LRecording: TRecordingBuildOrchestrator;
+  LKeep: IBuildOrchestrator;
+  LGen: TDxComplyGenerator;
+  LSuccess: Boolean;
+begin
+  LProject := CreateSelfBuildProject('nobuild-present', True, LMapPath);
+  LConfig := SelfBuildConfig;
+  LConfig.NoBuild := True;
+  LRecording := TRecordingBuildOrchestrator.Create;
+  LKeep := LRecording;
+  LGen := TDxComplyGenerator.Create(LConfig);
+  try
+    LGen.OnProgress := OnProgress;
+    LGen.SetBuildOrchestrator(LKeep);
+    LSuccess := LGen.Generate(LProject, FOutputFile, sfCycloneDxJson);
+  finally
+    LGen.Free;
+  end;
+
+  Assert.IsTrue(LSuccess, '--no-build must not abort when the MAP file exists');
+  Assert.AreEqual(1, LRecording.ExecuteCalls);
+  Assert.IsFalse(LRecording.LastShouldExecute, 'An existing MAP file is not built');
+  Assert.AreEqual('', FindProgress('will build the project'), FProgressMessages.Text);
+  Assert.AreEqual('', FindProgress('--no-build is set'), FProgressMessages.Text);
+end;
+
+procedure TEngineTests.Generate_NoBuild_AlwaysMode_AbortsWhenMapPresent;
+var
+  LProject: string;
+  LMapPath: string;
+  LConfig: TSbomConfig;
+  LRecording: TRecordingBuildOrchestrator;
+  LKeep: IBuildOrchestrator;
+  LGen: TDxComplyGenerator;
+  LSuccess: Boolean;
+  LLine: string;
+begin
+  LProject := CreateSelfBuildProject('nobuild-always', True, LMapPath);
+  LConfig := SelfBuildConfig;
+  LConfig.NoBuild := True;
+  LConfig.DeepEvidenceMode := debAlways;
+  LRecording := TRecordingBuildOrchestrator.Create;
+  LKeep := LRecording;
+  LGen := TDxComplyGenerator.Create(LConfig);
+  try
+    LGen.OnProgress := OnProgress;
+    LGen.SetBuildOrchestrator(LKeep);
+    LSuccess := LGen.Generate(LProject, FOutputFile, sfCycloneDxJson);
+  finally
+    LGen.Free;
+  end;
+
+  Assert.IsFalse(LSuccess, 'mode always would build, so --no-build must abort');
+  Assert.AreEqual(0, LRecording.ExecuteCalls);
+  Assert.IsTrue(TFile.Exists(LMapPath), LMapPath);
+  LLine := FindProgress('--no-build is set');
+  LMapPath := TextBetween(LLine, 'MAP: ', '. Configuration:');
+  Assert.IsTrue(LMapPath.EndsWith('MyApp.map'), LLine);
+  Assert.IsTrue(TFile.Exists(LMapPath), LMapPath);
+  Assert.AreEqual('Error: ' + NoBuildRefusalText(LMapPath, 'Debug', 'Win64', False),
+    LLine, FProgressMessages.Text);
+  Assert.IsFalse(Pos('Missing MAP:', LLine) > 0, LLine);
+end;
+
+procedure TEngineTests.GenerateFromConfig_NoBuild_CliWins;
+var
+  LProject: string;
+  LMapPath: string;
+  LPath: string;
+  LCaller: TSbomConfig;
+  LRecording: TRecordingBuildOrchestrator;
+  LKeep: IBuildOrchestrator;
+  LGen: TDxComplyGenerator;
+  LSuccess: Boolean;
+  LLine: string;
+begin
+  LProject := CreateSelfBuildProject('nobuild-file', False, LMapPath);
+  LPath := TPath.Combine(FTempDir, 'nobuild.json');
+  TFile.WriteAllText(LPath, '{"noBuild":true,"platform":"Win64","configName":"Debug"}',
+    TEncoding.UTF8);
+
+  LRecording := TRecordingBuildOrchestrator.Create;
+  LKeep := LRecording;
+  LCaller := TSbomConfig.Default;
+  LCaller.OutputPath := FOutputFile;
+  LCaller.IncludeCompositionEvidence := False;
+  LGen := TDxComplyGenerator.Create(LCaller);
+  try
+    LGen.OnProgress := OnProgress;
+    LGen.SetBuildOrchestrator(LKeep);
+    LSuccess := LGen.GenerateFromConfig(LProject, LPath);
+  finally
+    LGen.Free;
+  end;
+
+  Assert.IsFalse(LSuccess, 'noBuild in the file must abort when the MAP file is missing');
+  Assert.AreEqual(0, LRecording.ExecuteCalls);
+  Assert.IsFalse(TFile.Exists(LMapPath), LMapPath);
+  LLine := FindProgress('--no-build is set');
+  LMapPath := TextBetween(LLine, 'Missing MAP: ', '. Configuration:');
+  Assert.IsTrue(LMapPath.EndsWith('MyApp.map'), FProgressMessages.Text);
+  Assert.AreEqual('Error: ' + NoBuildRefusalText(LMapPath, 'Debug', 'Win64', True),
+    LLine, FProgressMessages.Text);
+
+  FProgressMessages.Clear;
+  FProgressValues.Clear;
+  LRecording := TRecordingBuildOrchestrator.Create;
+  LKeep := LRecording;
+  LCaller := TSbomConfig.Default;
+  LCaller.OutputPath := FOutputFile;
+  LCaller.IncludeCompositionEvidence := False;
+  LCaller.NoBuild := False;
+  LCaller.ExplicitOverrides := [scoNoBuild, scoIncludeCompositionEvidence];
+  LGen := TDxComplyGenerator.Create(LCaller);
+  try
+    LGen.OnProgress := OnProgress;
+    LGen.SetBuildOrchestrator(LKeep);
+    LSuccess := LGen.GenerateFromConfig(LProject, LPath);
+    Assert.IsFalse(LGen.Config.NoBuild);
+  finally
+    LGen.Free;
+  end;
+
+  Assert.IsTrue(LSuccess, '--no-build=false must win over noBuild in the file');
+  Assert.AreEqual(1, LRecording.ExecuteCalls);
+  Assert.IsTrue(LRecording.LastShouldExecute);
+  LLine := FindProgress('will build the project');
+  LMapPath := TextBetween(LLine, 'Missing MAP: ', '. Configuration:');
+  Assert.IsTrue(LMapPath.EndsWith('MyApp.map'), LLine);
+  Assert.AreEqual('Warning: ' + SelfBuildWarningText(LMapPath, 'Debug', 'Win64', True),
+    LLine, FProgressMessages.Text);
 end;
 
 procedure TEngineTests.Config_Default_MapFileDirEmpty;

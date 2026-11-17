@@ -124,6 +124,15 @@ type
     /// <summary>The strict key loads from .dxcomply.json, and --strict=false wins. Issue #111.</summary>
     [Test]
     procedure Config_Strict_LoadsAndMerges;
+    /// <summary>--no-build and --no-build=false set NoBuild and mark it explicit.</summary>
+    [Test]
+    procedure Parse_NoBuild_SetsNoBuild;
+    /// <summary>The noBuild key loads from .dxcomply.json, and --no-build=false wins.</summary>
+    [Test]
+    procedure Config_NoBuild_LoadsAndMerges;
+    /// <summary>Help names --no-build, the noBuild key, and exit code 1.</summary>
+    [Test]
+    procedure HelpText_DocumentsNoBuild;
     /// <summary>--spdx-version=3.0.1 selects SPDX 3.0.1 for spdx-json. Issue #108.</summary>
     [Test]
     procedure Parse_SpdxVersion_SelectsSpdx3;
@@ -1017,6 +1026,99 @@ begin
       TFile.Delete(LPath);
     end;
   end;
+end;
+
+procedure TCliOptionsTests.Parse_NoBuild_SetsNoBuild;
+var
+  LOptions: TCliOptions;
+  LConfig: TSbomConfig;
+begin
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsTrue(LOptions.Parse(['--project=App.dproj']));
+    LConfig := LOptions.ToSbomConfig;
+    Assert.IsFalse(LConfig.NoBuild);
+    Assert.IsFalse(scoNoBuild in LConfig.ExplicitOverrides);
+  finally
+    LOptions.Free;
+  end;
+
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsTrue(LOptions.Parse(['--project=App.dproj', '--no-build']));
+    LConfig := LOptions.ToSbomConfig;
+    Assert.IsTrue(LConfig.NoBuild);
+    Assert.IsTrue(scoNoBuild in LConfig.ExplicitOverrides);
+  finally
+    LOptions.Free;
+  end;
+
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsTrue(LOptions.Parse(['--project=App.dproj', '--no-build=true']));
+    LConfig := LOptions.ToSbomConfig;
+    Assert.IsTrue(LConfig.NoBuild);
+    Assert.IsTrue(scoNoBuild in LConfig.ExplicitOverrides);
+  finally
+    LOptions.Free;
+  end;
+
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsTrue(LOptions.Parse(['--project=App.dproj', '--no-build=false']));
+    LConfig := LOptions.ToSbomConfig;
+    Assert.IsFalse(LConfig.NoBuild);
+    Assert.IsTrue(scoNoBuild in LConfig.ExplicitOverrides,
+      '--no-build=false must still win over noBuild in the config file');
+  finally
+    LOptions.Free;
+  end;
+
+  LOptions := TCliOptions.Create;
+  try
+    Assert.IsFalse(LOptions.Parse(['--project=App.dproj', '--no-build=maybe']));
+    Assert.IsTrue(Pos('--no-build', LOptions.ParseError) > 0, LOptions.ParseError);
+  finally
+    LOptions.Free;
+  end;
+end;
+
+procedure TCliOptionsTests.Config_NoBuild_LoadsAndMerges;
+var
+  LPath: string;
+  LGen: TDxComplyGenerator;
+  LOptions: TCliOptions;
+begin
+  LPath := TPath.Combine(TPath.GetTempPath, 'dxcomply-nobuild-test.json');
+  TFile.WriteAllText(LPath, '{"noBuild":true}', TEncoding.UTF8);
+  LGen := nil;
+  LOptions := TCliOptions.Create;
+  try
+    LGen := TDxComplyGenerator.Create;
+    Assert.IsTrue(LGen.LoadConfig(LPath).NoBuild);
+    FreeAndNil(LGen);
+
+    Assert.IsTrue(LOptions.Parse(['--project=App.dproj', '--no-build=false']));
+    LGen := TDxComplyGenerator.Create(LOptions.ToSbomConfig);
+    LGen.GenerateFromConfig('missing.dproj', LPath);
+    Assert.IsFalse(LGen.Config.NoBuild, '--no-build=false overrides the file');
+    Assert.IsTrue(scoNoBuild in LGen.Config.ExplicitOverrides);
+  finally
+    LGen.Free;
+    LOptions.Free;
+    if TFile.Exists(LPath) then
+      TFile.Delete(LPath);
+  end;
+end;
+
+procedure TCliOptionsTests.HelpText_DocumentsNoBuild;
+var
+  LHelp: string;
+begin
+  LHelp := TCliOptions.HelpText;
+  Assert.Contains(LHelp, '--no-build[=true|false]');
+  Assert.Contains(LHelp, 'noBuild');
+  Assert.Contains(LHelp, 'exit code 1');
 end;
 
 procedure TCliOptionsTests.Config_Strict_LoadsAndMerges;

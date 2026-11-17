@@ -10,7 +10,7 @@
 ///
 /// Exit codes:
 ///   0 - SBOM generated successfully
-///   1 - Generation failed
+///   1 - Generation failed. --no-build uses this code when a build would run.
 ///   2 - Invalid arguments
 ///   3 - SBOM generated, but --strict is set and a CRA/BSI warning was raised
 /// </remarks>
