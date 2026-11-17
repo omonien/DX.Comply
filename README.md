@@ -334,6 +334,36 @@ Each listed file gets a version. The binary the project builds gets the product 
 
 `include` and `exclude` still filter what was scanned. Patterns match the path relative to the directory being scanned. `*.dll` matches a DLL next to the exe. Patterns such as `build/**` matter when the scanned directory itself contains a `build` folder, which is the case for `--scan-tree` when the project has no output directory, and for a `--scan-dir` value that contains `**`.
 
+A folder that several projects share is described in [Output folders](#output-folders).
+
+## Output folders
+
+A clean setup gives every project its own output folder and assembles the install folder in the installer, so this situation does not arise. Each project then has one output directory of its own, and the SBOM lists that project's executable and the DLLs that belong next to it.
+
+An existing setup may still build several projects into one folder, for example an install folder. DX.Comply scans that folder flat. Every `.exe`, `.dll`, `.bpl`, and `.dcp` in the folder is listed, so the SBOM of one tool also contains the executables and DLLs of the others. Subfolders are not walked. When that folder contains more than one `.exe`, DX.Comply writes one info line that names those executables and points at this section. The line is information. It does not change which files are listed. An include list does not hide the line, because the line names the executables in the folder.
+
+For that existing setup, limit the scan with an include list. An include list replaces the default extensions. Add each DLL you still need with another `--include`:
+
+```cmd
+dxcomply --project=MyTool.dproj --include=MyTool.exe --include=MyTool.dll --no-pause
+```
+
+`--include=MyTool.exe` keeps that executable and drops the other default extensions, including other executables in the same folder. Do not use `--exclude=*.exe`. An exclude list only removes matches. It does not replace the default extensions, so other projects' DLLs stay in the SBOM, and `--exclude=*.exe` also drops the executable you wanted to keep.
+
+The same list in `.dxcomply.json` is the `include` array. `dxcomply.exe` reads that file when you pass `--ci`:
+
+```json
+{
+  "include": ["MyTool.exe", "MyTool.dll"]
+}
+```
+
+```cmd
+dxcomply --project=MyTool.dproj --ci --no-pause
+```
+
+The same section is in [CI Integration](docs/CI-Integration.md#output-folders).
+
 ## Library mode
 
 A component vendor or open source project often ships source, not a binary. `--library` writes an SBOM for that source release instead of a build. Nothing is compiled.
@@ -622,7 +652,8 @@ No internet connection is required. All processing is local.
 | Document | Description |
 |---|---|
 | [Architecture](docs/Architecture.md) | Engine pipeline, component overview, unit origin classification |
-| [CI Integration](docs/CI-Integration.md) | Command-line usage, GitHub Actions examples, CI configuration |
+| [Output folders](#output-folders) | One output folder per project, and `--include` for a shared folder |
+| [CI Integration](docs/CI-Integration.md) | Command-line usage, GitHub Actions examples, CI configuration, [output folders](docs/CI-Integration.md#output-folders) |
 | [Legacy Support](docs/LegacySupport.md) | MAP files from older Delphi versions, and which project files the CLI accepts |
 | [Library SBOM](docs/Library-SBOM.md) | Build mode and library mode, and what each SBOM contains |
 | [FAQ](#faq) | Common questions on library mode, old DLLs, Android output and version, generation time, and CRA archive |

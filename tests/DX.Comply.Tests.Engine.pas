@@ -500,6 +500,14 @@ type
     [Test]
     procedure Generate_OutputScope_PackageUsesBplDirectory;
 
+    /// <summary>
+    /// More than one .exe in the output folder logs one info line that names
+    /// them and points at the Output folders section. The SBOM is unchanged.
+    /// Issue #189.
+    /// </summary>
+    [Test]
+    procedure Generate_SharedOutputFolder_LogsSeveralExecutables;
+
     /// <summary>scanDirs in .dxcomply.json adds that directory.</summary>
     [Test]
     procedure GenerateFromConfig_ScanDirs_AddsStagedBinaries;
@@ -3320,6 +3328,86 @@ begin
       'Binaries in DCC_ExeOutput must not be listed when the package output is the BPL directory');
     Assert.AreEqual(NativeInt(0), CountComponents(LJson, 'old.bpl'),
       'A nested BPL must not be listed');
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TEngineTests.Generate_SharedOutputFolder_LogsSeveralExecutables;
+var
+  LConfig: TSbomConfig;
+  LJson: TJSONObject;
+  LProject: string;
+  LRoot: string;
+  LMessage: string;
+  LHits: Integer;
+  I: Integer;
+begin
+  LProject := CreateScopeProject('shared-output', True);
+  LRoot := TPath.GetDirectoryName(LProject);
+  TFile.WriteAllBytes(TPath.Combine(LRoot, 'output', 'Other.exe'),
+    TBytes.Create($4D, $5A, $21));
+  TFile.WriteAllBytes(TPath.Combine(LRoot, 'staging', 'helper.exe'),
+    TBytes.Create($4D, $5A, $22));
+  TFile.WriteAllBytes(TPath.Combine(LRoot, 'output', 'nested', 'nested.exe'),
+    TBytes.Create($4D, $5A, $23));
+
+  LConfig := ScopeConfig;
+  LConfig.ScanDirs := TArray<string>.Create('staging');
+  FProgressMessages.Clear;
+  LJson := GenerateScope(LProject, LConfig);
+  try
+    Assert.AreEqual(NativeInt(1), CountComponents(LJson, 'MyApp.exe'),
+      'The project executable stays in the SBOM');
+    Assert.AreEqual(NativeInt(1), CountComponents(LJson, 'Other.exe'),
+      'Another executable in the output folder stays in the SBOM');
+    Assert.AreEqual(NativeInt(1), CountComponents(LJson, 'helper.exe'),
+      'An executable added with scanDirs stays in the SBOM');
+    Assert.AreEqual(NativeInt(0), CountComponents(LJson, 'nested.exe'),
+      'A nested executable stays out of the flat scan');
+
+    LHits := 0;
+    LMessage := '';
+    for I := 0 to FProgressMessages.Count - 1 do
+      if Pos('more than one executable', FProgressMessages[I]) > 0 then
+      begin
+        Inc(LHits);
+        LMessage := FProgressMessages[I];
+      end;
+    Assert.AreEqual(NativeInt(1), NativeInt(LHits),
+      'One info line names the shared output folder');
+    Assert.IsTrue(LMessage.StartsWith('Info: '),
+      'The line is an info message');
+    Assert.IsFalse(LMessage.StartsWith('Warning:', True),
+      'The line is not a warning');
+    Assert.IsTrue(Pos('MyApp.exe', LMessage) > 0, 'The line names MyApp.exe');
+    Assert.IsTrue(Pos('Other.exe', LMessage) > 0, 'The line names Other.exe');
+    Assert.IsTrue(Pos('helper.exe', LMessage) = 0,
+      'An executable from scanDirs is not part of this hint');
+    Assert.IsTrue(Pos('nested.exe', LMessage) = 0,
+      'An executable in a subfolder is not part of the flat scan hint');
+    Assert.IsTrue(Pos('plugin.dll', LMessage) = 0,
+      'A DLL is not named in the executable hint');
+    Assert.IsTrue(Pos('Output folders', LMessage) > 0,
+      'The line points at the Output folders section');
+    Assert.IsTrue(Pos('docs/CI-Integration.md', LMessage) > 0,
+      'The line points at the CI guide');
+  finally
+    LJson.Free;
+  end;
+
+  TFile.Delete(TPath.Combine(LRoot, 'output', 'Other.exe'));
+  FProgressMessages.Clear;
+  LJson := GenerateScope(LProject, LConfig);
+  try
+    Assert.AreEqual(NativeInt(1), CountComponents(LJson, 'MyApp.exe'),
+      'The remaining project executable stays in the SBOM');
+    Assert.AreEqual(NativeInt(0), CountComponents(LJson, 'Other.exe'),
+      'The removed executable is no longer listed');
+    Assert.AreEqual(NativeInt(1), CountComponents(LJson, 'helper.exe'),
+      'scanDirs still adds its executable when the output folder has one');
+    Assert.IsTrue(Pos('more than one executable', FProgressMessages.Text) = 0,
+      'One executable in the output folder does not log the hint');
   finally
     LJson.Free;
   end;
