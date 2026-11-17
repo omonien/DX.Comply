@@ -342,8 +342,10 @@ begin
   Assert.IsTrue(Pos('## Licences', LContent) > 0);
   Assert.IsTrue(Pos('| Declared licence | Components | Name | Version | Copyright | Note |', LContent) > 0);
   Assert.AreEqual(0, Pos('| Declared licence | Components | Names | Note |', LContent));
-  Assert.IsTrue(Pos('| Proprietary | 2 | Demo (product) |  |  |  |', LContent) > 0);
-  Assert.IsTrue(Pos('| | | Demo.exe | 1.2.3.4 |  | |', LContent) > 0);
+  Assert.IsTrue(Pos('| Proprietary | 1 | Demo (product) | 1.2.3.4 |  |  |', LContent) > 0,
+    'the product and Demo.exe are one row, with the binary version');
+  Assert.AreEqual<Integer>(0, Pos('| | | Demo.exe |', LContent),
+    'Demo.exe is not a second licence row');
   Assert.IsTrue(Pos('| No licence information | 1 | JvComponent |  |  |  |', LContent) > 0);
   Assert.IsTrue(Pos('## Third-party units without manifest', LContent) > 0);
   Assert.IsTrue(Pos('| Jv | 1 | supplier, version, licence | JvComponent |', LContent) > 0);
@@ -484,7 +486,8 @@ begin
     'components are sorted by name without regard to case');
   Assert.IsTrue(Pos('| MPL-1.1 | 1 | JVCL | 3.5 |  | Copyleft licence. Check its terms for distribution with this product. |',
     LContent) > 0, 'a one-component group keeps the review note on its row');
-  Assert.IsTrue(Pos('| Proprietary | 2 | Demo (product) |  |  |  |', LContent) > 0);
+  Assert.IsTrue(Pos('| Proprietary | 1 | Demo (product) | 1.2.3.4 |  |  |', LContent) > 0,
+    'the product and Demo.exe are one licence row');
   Assert.IsTrue(LVsoft < Pos('| MPL-1.1 | 1 | JVCL |', LContent), 'licence groups stay in title order');
 end;
 
