@@ -61,7 +61,7 @@ Every SBOM generation follows the same pipeline, regardless of whether it was tr
 | `DX.Comply.LibrarySource.pas` | Collects the source files of a library release for `--library` |
 | `DX.Comply.CraChecks.pas` | Non-fatal CRA and BSI header and component warnings, and the `--strict` result |
 | `DX.Comply.SbomHeaderConfig.pas` | Reads and writes the SBOM header keys of `.dxcomply.json` |
-| `DX.Comply.VersionInfo.pas` | Reads the DX.Comply version from the version resource |
+| `DX.Comply.VersionInfo.pas` | Reads the DX.Comply version from the version resource. A binary's file version for the SBOM is the numeric fixed file info (a.b.c.d), then the FileVersion string, then the ProductVersion string |
 | `DX.Comply.UnitResolver.pas` | Resolves units to files, classifies origin (RTL/VCL/FMX/Local/ThirdParty), computes SHA-256/SHA-512 hashes |
 | `DX.Comply.HashService.pas` | SHA-256 and SHA-512 via `System.Hash` |
 | `DX.Comply.FileScanner.pas` | Lists the named project output and binaries in that directory |

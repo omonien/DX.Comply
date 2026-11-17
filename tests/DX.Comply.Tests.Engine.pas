@@ -566,7 +566,8 @@ type
     procedure Apply_OwnOutputBpl_GetsProductVersion;
     /// <summary>
     /// When no product version is set, an application EXE still on disk gets
-    /// its PE FileVersion so the report and CycloneDX stay aligned. Issue #90.
+    /// its numeric PE file version so the report and CycloneDX stay aligned.
+    /// Issue #90.
     /// </summary>
     [Test]
     procedure Apply_ExeWithoutProductVersion_GetsPeVersion;
@@ -589,8 +590,8 @@ type
     [Test]
     procedure Apply_NeighborExeWithoutVersion_GetsNoVersion;
     /// <summary>
-    /// An EXE beside the primary output keeps the FileVersion from its own
-    /// version resource. Issue #96.
+    /// An EXE beside the primary output keeps the numeric file version from
+    /// its own version resource. Issue #96.
     /// </summary>
     [Test]
     procedure Apply_NeighborExeWithVersion_KeepsOwnVersion;
@@ -3476,7 +3477,7 @@ begin
     Assert.IsTrue(IsRfc3339Utc(ComponentVersion(LJson, 'ThirdParty.exe')),
       'a neighboring EXE without version info gets its file date as version');
     Assert.AreEqual(cVendorVersion, ComponentVersion(LJson, 'Vendor.exe'),
-      'a neighboring EXE keeps its own FileVersion');
+      'a neighboring EXE keeps its own file version');
     Assert.IsTrue(Pos('"' + cVersionSourceProperty + '","value":"' + cVersionSourceFileDate + '"',
       LJson.ToJSON) > 0, 'a file date version is marked with the versionSource property');
     Assert.AreEqual(FileDateVersion(TPath.Combine(LOutput, 'plugin.dll')),
@@ -4034,7 +4035,7 @@ begin
     LList.Add(LArtefact);
     ApplyProductVersionToBuildFiles(LList, '');
     Assert.AreEqual(GetFileVersionText(LExe), LList[0].Version,
-      'an EXE with no product version must take FileVersion from the PE resource');
+      'an EXE with no product version must take its file version from the PE resource');
     Assert.IsTrue(LList[0].Version <> '', 'the test EXE must have a version resource');
   finally
     LList.Free;
@@ -4104,7 +4105,7 @@ begin
     LList.Add(LArtefact);
     ApplyProductVersionToBuildFiles(LList, '26.12.0.0', 'C:\Build\MyApp.exe');
     Assert.AreEqual('9.8.7.6', LList[0].Version,
-      'a neighboring EXE keeps its own FileVersion');
+      'a neighboring EXE keeps its own file version');
     Assert.AreNotEqual('26.12.0.0', LList[0].Version);
   finally
     LList.Free;

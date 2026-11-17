@@ -53,8 +53,8 @@ type
     procedure Write_CreatesReadableMarkdownReport;
 
     /// <summary>
-    /// EXE/DLL artefact versions (PE FileVersion or product version stored on
-    /// the artefact) appear in the Artefacts table. Issue #90.
+    /// EXE/DLL artefact versions (numeric file version or product version
+    /// stored on the artefact) appear in the Artefacts table. Issue #90.
     /// </summary>
     [Test]
     procedure Write_ArtefactVersion_AppearsInArtefactsTable;

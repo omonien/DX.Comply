@@ -60,9 +60,10 @@ var
   I: Integer;
 begin
   Lines.Add('## Artefacts');
-  // Issue #90: Version is the PE FileVersion/ProductVersion already stored
-  // on the artefact. The built program with no version of its own uses the
-  // product version, the same value as the SBOM and the licence table.
+  // Issue #90: Version is already stored on the artefact. That value is the
+  // numeric file version, then the FileVersion string, then the ProductVersion
+  // string. The built program with no version of its own uses the product
+  // version, the same value as the SBOM and the licence table.
   Lines.Add('| Relative Path | Type | Version | Size | SHA-256 |');
   Lines.Add('| --- | --- | --- | ---: | --- |');
   LDeliverable := FindDeliverableTargetIndex(AData.Artefacts,

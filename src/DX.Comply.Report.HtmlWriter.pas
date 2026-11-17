@@ -60,9 +60,10 @@ var
   LVersion: string;
   I: Integer;
 begin
-  // Issue #90: Version is the PE FileVersion/ProductVersion already stored
-  // on the artefact. The built program with no version of its own uses the
-  // product version, the same value as the SBOM and the licence table.
+  // Issue #90: Version is already stored on the artefact. That value is the
+  // numeric file version, then the FileVersion string, then the ProductVersion
+  // string. The built program with no version of its own uses the product
+  // version, the same value as the SBOM and the licence table.
   Lines.Add('<section id="artefacts"><h2>Artefacts</h2><div class="table-wrap"><table><thead><tr><th>Relative Path</th><th>Type</th><th>Version</th><th>Size</th><th>SHA-256</th></tr></thead><tbody>');
   LDeliverable := FindDeliverableTargetIndex(AData.Artefacts,
     AData.ProjectInfo.ProjectName, AData.ProjectInfo.OutputFilePath);
