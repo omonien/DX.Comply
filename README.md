@@ -6,11 +6,11 @@
 [![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey?logo=windows)](https://www.microsoft.com/windows)
 [![EU CRA](https://img.shields.io/badge/EU%20CRA-2024%2F2847-orange)](https://eur-lex.europa.eu/eli/reg/2024/2847/oj/eng)
 
-**Write a Software Bill of Materials from a Delphi build.**
+**Compliance documentation for Delphi projects. SBOM and CPE are the current building blocks.**
 
 Product page: [DX.Comply on developer-experts.net](https://www.developer-experts.net/en/dxcomply) ([German](https://www.developer-experts.net/de/dxcomply))
 
-> DX.Comply lists the units, packages and DLL names it can see in the build, with a hash where it could open the file. That component list is a starting point for the SBOM part of EU Cyber Resilience Act technical documentation (Annex I Part II, Annex VII). It does not make a product compliant, and it does not produce the rest of the technical file.
+> DX.Comply is a compliance tool for Delphi projects. An SBOM and a CPE for the product are the building blocks it writes today. Further compliance areas can follow. It lists the units, packages and DLL names it can see in the build, with a hash where it could open the file. That component list is a starting point for the SBOM part of EU Cyber Resilience Act technical documentation (Annex I Part II, Annex VII). It does not make a product compliant, and it does not produce the rest of the technical file.
 
 ---
 
@@ -18,7 +18,7 @@ Product page: [DX.Comply on developer-experts.net](https://www.developer-experts
 
 The EU **Cyber Resilience Act (CRA)**, Regulation (EU) 2024/2847, requires manufacturers to keep technical documentation for products with digital elements. That file includes a machine-readable Software Bill of Materials (SBOM). The regulation applies in full from **11 December 2027**.
 
-DX.Comply produces build evidence and that component list from a RAD Studio project, together with optional HTML and Markdown reports.
+DX.Comply produces that component list from a RAD Studio project, together with optional HTML and Markdown reports, and it can record or request a CPE for the product. Further compliance areas can follow.
 
 **You generate it. You archive it. You never have to submit it anywhere.**
 
@@ -106,6 +106,7 @@ GetIt installs the IDE plugin only. It does not include `dxcomply.exe`. The comm
 3. Choose **Project > DX.Comply - SBOM > Generate SBOM...** from the main menu.
 4. In the confirmation dialog, **select the build configuration** to use for MAP generation (the active IDE configuration is pre-selected). DX.Comply compiles the project via OTA with detailed MAP output, scans all evidence, and produces the SBOM.
 5. Done. `bom.json`, `bom.report.html`, and `bom.report.md` are in your project folder. To send all three to one folder, set **SBOM and report directory** under **Tools > Options > Third Party > DX.Comply**. The folder is created when it does not exist. Leave **Report base path** empty so the reports stay next to `bom.json`. A report base path overrides the report files only.
+6. To find or request a CPE for the product, choose **Project > DX.Comply - SBOM > SBOM and CPE...** and open the **CPE** tab. See [Finding or requesting a CPE](#finding-or-requesting-a-cpe).
 
 ### Option B: Command line / CI
 
@@ -281,18 +282,19 @@ The same header also carries the product data that section 5.2.2 and CRA Annex I
 | Supplier URL | Contact URL of the manufacturer. Not needed when the supplier is an email address | `--supplier-url=<url>` | `product.supplierUrl` | Supplier URL |
 | Licence | Distribution licence as SPDX expression, for example `MIT` or `LicenseRef-Proprietary` | `--licence=<SPDX expression>` | `product.licence` | Licence |
 | Version | Product version. Falls back to the project version info: FileVersion, or Major.Minor.Release.Build. On Android, versionName when FileVersion is absent. 16.0.0.7 keeps every digit | `--version=<version>` | `product.version` | Product version |
+| Product CPE | CPE 2.3 formatted string or CPE 2.2 URI of the product. Written on the root component and on the built program | `--cpe=<cpe>` | `product.cpe` | Product CPE |
 
 There are three ways to set them. All of them end up in the same SBOM fields.
 
 - **Command line.** Pass the flags above, for example `dxcomply --project=MyApp.dproj --sbom-creator=sbom@acme.example --licence=MIT`.
 - **`.dxcomply.json`.** Put the keys into the `.dxcomply.json` in the project folder (see [Configuration](#configuration)) and run `dxcomply.exe` with `--ci`. A relative path is checked in the current directory, then in the project folder when `--project` is set. An absolute `--config` path is used as given. A flag you pass on the command line wins over the file.
-- **IDE.** Choose **Project > DX.Comply - SBOM > SBOM Header Data...** The dialog edits the values for the active project and saves them in the `.dxcomply.json` next to the `.dproj`. Other keys in that file are kept, and an empty field removes its key. The SBOM creator is checked like on the command line, and the supplier URL must start with `http://` or `https://`. Because the dialog writes the same keys, `dxcomply.exe --ci` produces the same header when it loads that file. When a generation in the IDE reports missing header data, DX.Comply offers to open the dialog right away and to generate the SBOM again after you save.
+- **IDE.** Choose **Project > DX.Comply - SBOM > SBOM and CPE...** and open the **SBOM** tab. The dialog edits the values for the active project and saves them in the `.dxcomply.json` next to the `.dproj`. Other keys in that file are kept, and an empty field removes its key. The SBOM creator is checked like on the command line, and the supplier URL must start with `http://` or `https://`. Because the dialog writes the same keys, `dxcomply.exe --ci` produces the same header when it loads that file. When a generation in the IDE reports missing header data, DX.Comply offers to open the dialog right away and to generate the SBOM again after you save. The **CPE** tab is described under [Finding or requesting a CPE](#finding-or-requesting-a-cpe).
 
 ### CRA and BSI header warnings
 
 When the product header is missing data that the EU Cyber Resilience Act and BSI TR-03183-2 expect, DX.Comply prints a warning and still writes the SBOM. The process exit code stays unchanged unless `--strict` is set (see below). The CLI prints each line as `[WARN ]` without `--verbose`. The HTML and Markdown reports list the same lines under Warnings.
 
-The CLI warnings name the flag and the `.dxcomply.json` key, as listed below. In the IDE the same warnings name the **SBOM Header Data** dialog instead, because the IDE has no command line.
+The CLI warnings name the flag and the `.dxcomply.json` key, as listed below. In the IDE the same warnings name the **SBOM and CPE** dialog instead, because the IDE has no command line.
 
 - No supplier. Pass `--supplier=<name>`, set `product.supplier`, or fill CompanyName in the project version info.
 - A supplier with no email address and no URL. Pass `--supplier-url=<url>` or set `product.supplierUrl`.
@@ -413,7 +415,8 @@ Add a `.dxcomply.json` to your project folder and pass `--ci` so `dxcomply.exe` 
     "version": "2.1.0",
     "supplier": "Acme GmbH",
     "supplierUrl": "https://acme.example",
-    "licence": "MIT"
+    "licence": "MIT",
+    "cpe": "cpe:2.3:a:acme:my_application:2.1.0:*:*:*:*:*:*:*"
   },
   "report": {
     "enabled": true,
@@ -440,7 +443,7 @@ When `outputDir` is set and `output` is a file name with no directory of its own
 
 `configName` is the build configuration (the same value as `--config-name`). `platform` matches `--platform`. Use these when the project is not built as `Release|Win32`.
 
-`product.supplierUrl` is the supplier contact URL (`--supplier-url`). `product.licence` is the distribution licence of the product (`--licence`): an SPDX identifier, an SPDX expression, or a name. Leave a key out to omit that field.
+`product.supplierUrl` is the supplier contact URL (`--supplier-url`). `product.licence` is the distribution licence of the product (`--licence`): an SPDX identifier, an SPDX expression, or a name. `product.cpe` is the CPE of the product (`--cpe`): a CPE 2.3 formatted string or a CPE 2.2 URI. It is written on the root component and on the built program. Any other text is a warning and is left out. Leave a key out to omit that field. The NVD API key is not a key in this file. See [Finding or requesting a CPE](#finding-or-requesting-a-cpe).
 
 `copyright` is an optional string. A non-empty value, after trimming spaces, is the copyright notice for the product, for the project's own binary (including a second copy of that file), and for units marked by `own_code_units`, `own_code_prefixes`, or `own_code_folders`. It wins over `LegalCopyright` in the version resource of the built binary. Library mode reads the same key. When the key is missing, empty, or only spaces, that version resource is used instead. When both are empty, the files stay as they were: CycloneDX omits `copyright`, SPDX 2.3 writes `copyrightText` as `NOASSERTION`, SPDX 3.0.1 omits `software_copyrightText`, and the HTML and Markdown Copyright cells stay empty. A component manifest row still writes its own `copyright` on that library component. It does not replace this notice, and this notice does not replace the row. A binary that is not the project output, and a unit that is not own code, stay empty. There is no command-line flag for this key. The IDE project options and the SBOM header dialog do not edit it. A generation started from the IDE still reads `LegalCopyright` from the built binary. `dxcomply --ci` applies the key from `.dxcomply.json`.
 
@@ -452,7 +455,7 @@ When `--ci` is set and the file exists, values are merged in this order:
 2. Keys present in `.dxcomply.json`.
 3. Command-line options you actually pass. Those win over the file.
 
-An option you leave off the command line does not override the file, even though that option has a default. `dxcomply --ci --config-name=Debug` uses Debug even when the file says `"configName": "Release"`. `dxcomply --ci` with no `--config-name` uses the file's `configName`, or `Release` when the key is absent. The same rule applies to `--platform`, `--format`, `--output`, `--product`, `--version`, `--supplier`, `--supplier-url`, `--licence`, `--sbom-creator`, `--report`, `--report-content`, `--report-group-by-folder`, `--include`, `--exclude`, `--map-dir`, `--manifest`, `--match-prefixes`, `--define`, `--strict`, `--no-build`, `--spdx-version`, and `--no-composition-evidence`. `--define` is merged by name: a name you pass wins over the same name in `defines`, and every other name in the file stays. `--no-build=false` wins over `"noBuild": true` in the file.
+An option you leave off the command line does not override the file, even though that option has a default. `dxcomply --ci --config-name=Debug` uses Debug even when the file says `"configName": "Release"`. `dxcomply --ci` with no `--config-name` uses the file's `configName`, or `Release` when the key is absent. The same rule applies to `--platform`, `--format`, `--output`, `--product`, `--version`, `--supplier`, `--supplier-url`, `--licence`, `--cpe`, `--sbom-creator`, `--report`, `--report-content`, `--report-group-by-folder`, `--include`, `--exclude`, `--map-dir`, `--manifest`, `--match-prefixes`, `--define`, `--strict`, `--no-build`, `--spdx-version`, and `--no-composition-evidence`. `--nvd-api-key` is not a file key. `--define` is merged by name: a name you pass wins over the same name in `defines`, and every other name in the file stays. `--no-build=false` wins over `"noBuild": true` in the file.
 
 If you pass `--include` or `--exclude`, that list replaces the file's list. `--report` overrides the file's enabled flag and format, and leaves the file's report output path as it is. `--report-content` overrides `report.content` only.
 
@@ -511,7 +514,7 @@ There is no required `purl` field. When it is absent, DX.Comply writes `pkg:delp
 
 `copyright` is an optional string on each component. Use a year, such as `"2020"`, or any other copyright text. It is not a timestamp. Leave it out when you have nothing to record; the row stays valid. DX.Comply stores the text and does not use it to match units. When the text is set, it is written on the library component that row describes: CycloneDX JSON and XML `copyright`, SPDX 2.3 package `copyrightText`, and SPDX 3.0.1 `software_copyrightText` on the `software_Package` (the Software profile property `copyrightText`). A row that omits it, or sets only spaces, leaves those files as they are. CycloneDX has no `copyright` field, SPDX 2.3 keeps `copyrightText` as `NOASSERTION`, and SPDX 3.0.1 omits `software_copyrightText`. The HTML and Markdown licence summary shows the same text, and leaves the Copyright cell empty when the field is absent. The sample sets it on OmniThreadLibrary and leaves it off the other rows, so a report that matches those rows shows `2020` for OmniThreadLibrary and an empty Copyright cell for Spring4D, SynEdit and TMS VCL UI Pack. The OmniThreadLibrary component in the SBOM carries `2020`, and the other library components do not. That row text is not copied onto the product, the built program, or own-code units. Those use the notice described under [Configuration](#configuration).
 
-`cpe` is an optional string on each component. Set it when you already know the identifier. DX.Comply does not look one up and does not build one from the name or the version. Two forms are accepted, because the CycloneDX 1.6 schema accepts both. A CPE 2.3 formatted string looks like `cpe:2.3:a:openssl:openssl:3.0.2:*:*:*:*:*:*:*`. A CPE 2.2 URI looks like `cpe:/a:openssl:openssl:3.0.2`. Anything else, including a non-string, is a warning. That value is left out and the SBOM is still written. A blank value is the same as leaving the field out. When the value is accepted, it is written on the library component that row describes: CycloneDX JSON and XML `cpe` (after `copyright`, before `purl`), an SPDX 2.3 `externalRefs` entry with `referenceCategory` `SECURITY` and `referenceType` `cpe23Type` or `cpe22Type`, and an SPDX 3.0.1 `externalIdentifier` of type `cpe23` or `cpe22`. A row that omits it adds none of those fields. The sample sets a CPE 2.3 string on OpenSSL and leaves it off the other rows.
+`cpe` is an optional string on each component. Set it when you already know the identifier for that library. DX.Comply does not look a library CPE up and does not build one from the name or the version. The product CPE is separate: see [Finding or requesting a CPE](#finding-or-requesting-a-cpe). Two forms are accepted, because the CycloneDX 1.6 schema accepts both. A CPE 2.3 formatted string looks like `cpe:2.3:a:openssl:openssl:3.0.2:*:*:*:*:*:*:*`. A CPE 2.2 URI looks like `cpe:/a:openssl:openssl:3.0.2`. Anything else, including a non-string, is a warning. That value is left out and the SBOM is still written. A blank value is the same as leaving the field out. When the value is accepted, it is written on the library component that row describes: CycloneDX JSON and XML `cpe` (after `copyright`, before `purl`), an SPDX 2.3 `externalRefs` entry with `referenceCategory` `SECURITY` and `referenceType` `cpe23Type` or `cpe22Type`, and an SPDX 3.0.1 `externalIdentifier` of type `cpe23` or `cpe22`. A row that omits it adds none of those fields. The sample sets a CPE 2.3 string on OpenSSL and leaves it off the other rows.
 
 A file that cannot be read (missing, not JSON, or not an object or array) stops generation. The message names the file and the reason. Invalid JSON also names the line and the position. Missing fields, a short prefix, or an unrecognised licence name are warnings, and the SBOM is still written. A row with match rules that hits no unit is reported as a warning. The root `supplier` is the application publisher. It is used only when `--supplier` and `product.supplier` are both empty. Its URL is copied only when `--supplier-url` and `product.supplierUrl` are also empty.
 
@@ -639,6 +642,42 @@ Keep both when both apply. The library author archives the `--library` SBOM for 
 
 ---
 
+## Finding or requesting a CPE
+
+A CPE names a product in the NIST National Vulnerability Database. The first step is the public search page, [NVD CPE search](https://nvd.nist.gov/products/cpe/search). DX.Comply can run the same kind of keyword search, or it can prepare a dictionary submission when no name fits. The vendor and product strings are a proposal. NIST may normalize them.
+
+DX.Comply does not send mail and does not track a NIST review.
+
+### In the IDE
+
+Choose **Project > DX.Comply - SBOM > SBOM and CPE...** and open the **CPE** tab.
+
+The vendor, product and version start from `product.supplier`, `product.name` and `product.version`. An empty product name uses the project file name. An empty vendor or version uses CompanyName and the version info from the project. Those three fields are a proposal for the search and for a submission. Saving the **SBOM** tab does not copy the vendor back over `product.supplier`.
+
+**Search** calls the NVD CPE API 2.0 (`https://services.nvd.nist.gov/rest/json/cpes/2.0`) with the keyword. Nothing is requested until you click Search. The search runs in the background, so the IDE stays usable while the NVD answers. The list shows the CPE name, the title, and whether the name is current or deprecated. One page holds up to 50 names. When the NVD has more, the status line says so, for example `Matches: 50 of 312`, and a narrower keyword shows the others. **Apply selected CPE** puts that name into the Product CPE field on the SBOM tab. **Save** writes it to `product.cpe` in `.dxcomply.json` with the other fields, and **Cancel** leaves the file as it was. A deprecated name asks for confirmation first, because the NVD has replaced it. The next SBOM writes it on the root component and on the built program, the same way a manifest `cpe` is written on a library.
+
+The search works without an API key. The public service limits how often it answers. An optional key is sent as the `apiKey` header. Save it on the CPE tab. It is stored for the Windows user at `HKCU\Software\Developer Experts\DX.Comply\NIST`, value `ApiKey`. Other IDE settings stay in the options INI file. The key is not written to `.dxcomply.json` and it is not printed. The log line names only where it came from: the value you typed for this search, the `NVD_API_KEY` environment variable, or the registry. A value you type and leave non-empty is used first. Otherwise the environment variable is used, then the registry. Request a key at [https://nvd.nist.gov/developers/request-an-api-key](https://nvd.nist.gov/developers/request-an-api-key). If the service refuses the call and no key was sent, the message names that page.
+
+A timeout is reported as a timeout. Other failures name the HTTP status or the reason. When the list is empty, use **Save dictionary and mail text**.
+
+### Dictionary submission
+
+**Save dictionary and mail text** writes two files next to the SBOM (`bom.json` becomes `bom.cpe-dictionary.xml` and `bom.cpe-mail.txt`). The XML is a CPE Dictionary 2.3 document: a `cpe-item`, a title, a comment that the vendor and product are a proposal, a provenance comment and a `reference` for each http(s) supplier URL and repository URL, and a `cpe-23:cpe23-item`. The mail text is addressed to `cpe_dictionary@nist.gov`. It is also copied to the clipboard. You send it yourself.
+
+`dxcomply.exe --cpe-dictionary` writes the same two files next to the SBOM after a successful generation. It does not call the NVD.
+
+### Command line lookup
+
+`dxcomply.exe --cpe-lookup` searches the NVD for the configured vendor and product and prints the matches. It does not write an SBOM. Pass `--supplier` and `--product`, or `--project`, or `--ci` so the names can be read. The key is resolved in this order:
+
+1. `--nvd-api-key=<key>`
+2. Environment variable `NVD_API_KEY`
+3. Registry value `ApiKey` under `HKCU\Software\Developer Experts\DX.Comply\NIST`
+
+The key is not read from `.dxcomply.json` and it is not printed. The first line of the lookup says whether a key was used and which of those three sources supplied it. A missing vendor and product is exit code 2. A search failure is exit code 1. Zero matches is success and names `--cpe-dictionary`. When both `--cpe-lookup` and `--cpe-dictionary` are set, a failed search stops before the SBOM is written.
+
+SBOM generation stays on this machine. The NVD is called only when you click Search or pass `--cpe-lookup`.
+
 ## Requirements
 
 | Mode | Requirement |
@@ -647,7 +686,7 @@ Keep both when both apply. The library author archives the `--library` SBOM for 
 | **CLI tool** | Windows executable from the release ZIP, the installer `bin` folder, or a build of `src/CLI/dxcomply.dproj`. GetIt does not include it. Needs a `.dproj`, `.dpk`, `.groupproj`, or a Delphi 7 `.dpr` with `.dof` and `.cfg`, and a detailed MAP file. When that MAP file is missing for the selected configuration and platform, a `.dproj`, `.dpk`, or `.groupproj` is built with MSBuild. `--no-build` stops that run with exit code 1. A Delphi 7 project is not compiled. |
 | **Platform** | Windows build host |
 
-No internet connection is required. All processing is local.
+SBOM generation does not use the network. All of that processing is local. A CPE search calls the NVD only when you start it, from the CPE tab or with `--cpe-lookup`.
 
 ---
 
@@ -656,6 +695,7 @@ No internet connection is required. All processing is local.
 | Document | Description |
 |---|---|
 | [Architecture](docs/Architecture.md) | Engine pipeline, component overview, unit origin classification |
+| [Finding or requesting a CPE](#finding-or-requesting-a-cpe) | NVD keyword search, product.cpe, and a dictionary submission |
 | [Output folders](#output-folders) | One output folder per project, and `--include` for a shared folder |
 | [CI Integration](docs/CI-Integration.md) | Command-line usage, GitHub Actions examples, CI configuration, [output folders](docs/CI-Integration.md#output-folders) |
 | [Legacy Support](docs/LegacySupport.md) | MAP files from older Delphi versions, and which project files the CLI accepts |

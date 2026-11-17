@@ -83,6 +83,9 @@
         <DCCReference Include="..\DX.Comply.Locale.EN.pas"/>
         <DCCReference Include="DX.Comply.CLI.Options.pas"/>
         <DCCReference Include="DX.Comply.CLI.GitTag.pas"/>
+        <DCCReference Include="..\DX.Comply.Cpe.pas"/>
+        <DCCReference Include="..\DX.Comply.Cpe.NvdKey.pas"/>
+        <DCCReference Include="..\DX.Comply.Cpe.Nvd.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>

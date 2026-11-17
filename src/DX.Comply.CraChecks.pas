@@ -80,7 +80,7 @@ const
   /// Menu path of the IDE dialog that edits the SBOM header data. The IDE
   /// warning texts name it.
   /// </summary>
-  cIdeSbomHeaderDialogPath = 'Project > DX.Comply - SBOM > SBOM Header Data';
+  cIdeSbomHeaderDialogPath = 'Project > DX.Comply - SBOM > SBOM and CPE';
 
 implementation
 

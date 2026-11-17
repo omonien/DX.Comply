@@ -74,7 +74,7 @@ type
     function BuildGenericPurl(const ARelativePath: string): string;
     function BuildCreationInfo(const AMetadata: TSbomMetadata): TJSONObject;
     function BuildPackage(const AArtefact: TArtefactInfo; const ASpdxId,
-      ASupplier, ALicence, AVersion, ACopyright: string): TJSONObject;
+      ASupplier, ALicence, AVersion, ACopyright, ACpe: string): TJSONObject;
     function BuildRelationships(const AArtefacts: TArtefactList;
       const APackageIds: TArray<string>;
       const ADocumentSpdxId, AProjectName, AOutputFilePath: string): TJSONArray;
@@ -274,7 +274,7 @@ begin
 end;
 
 function TSpdxJsonWriter.BuildPackage(const AArtefact: TArtefactInfo;
-  const ASpdxId, ASupplier, ALicence, AVersion, ACopyright: string): TJSONObject;
+  const ASpdxId, ASupplier, ALicence, AVersion, ACopyright, ACpe: string): TJSONObject;
 var
   LPackage: TJSONObject;
   LChecksums: TJSONArray;
@@ -351,16 +351,29 @@ begin
     LPackage.AddPair('checksums', LChecksums);
   end;
 
-  // External reference. Omitted when the path cannot form a purl name.
+  // External references. A purl is omitted when the path cannot form one.
+  // A product CPE is a SECURITY reference on the built program only.
   var LPurl := BuildGenericPurl(AArtefact.RelativePath);
-  if LPurl <> '' then
+  var LCpeKind := ClassifyCpe(AcceptedCpe(ACpe));
+  if (LPurl <> '') or (LCpeKind <> ckNone) then
   begin
     var LExtRefs := TJSONArray.Create;
-    var LExtRef := TJSONObject.Create;
-    LExtRef.AddPair('referenceCategory', 'PACKAGE-MANAGER');
-    LExtRef.AddPair('referenceType', 'purl');
-    LExtRef.AddPair('referenceLocator', LPurl);
-    LExtRefs.Add(LExtRef);
+    if LPurl <> '' then
+    begin
+      var LExtRef := TJSONObject.Create;
+      LExtRef.AddPair('referenceCategory', 'PACKAGE-MANAGER');
+      LExtRef.AddPair('referenceType', 'purl');
+      LExtRef.AddPair('referenceLocator', LPurl);
+      LExtRefs.Add(LExtRef);
+    end;
+    if LCpeKind <> ckNone then
+    begin
+      var LCpeRef := TJSONObject.Create;
+      LCpeRef.AddPair('referenceCategory', 'SECURITY');
+      LCpeRef.AddPair('referenceType', SpdxCpeReferenceType(LCpeKind));
+      LCpeRef.AddPair('referenceLocator', AcceptedCpe(ACpe));
+      LExtRefs.Add(LCpeRef);
+    end;
     LPackage.AddPair('externalRefs', LExtRefs);
   end;
 
@@ -493,6 +506,7 @@ var
   LLicenceError: string;
   LLicence: string;
   LCopyright: string;
+  LCpe: string;
   LIsDeliverable: Boolean;
 begin
   LDocumentSpdxId := cSpdxIdPrefix + 'DOCUMENT';
@@ -538,9 +552,13 @@ begin
         AMetadata.Licence, LManifest);
       LCopyright := ComponentCopyrightFor(AArtefacts[I], LIsDeliverable,
         AMetadata.Copyright, LManifest);
+      if LIsDeliverable then
+        LCpe := AMetadata.Cpe
+      else
+        LCpe := '';
       LPackages.Add(BuildPackage(AArtefacts[I], LPackageIds[I], AMetadata.Supplier,
         LLicence, ComponentVersionFor(AArtefacts[I], LIsDeliverable,
-          AMetadata.ProductVersion, AProjectInfo.Version), LCopyright));
+          AMetadata.ProductVersion, AProjectInfo.Version), LCopyright, LCpe));
     end;
     LRoot.AddPair('packages', LPackages);
 

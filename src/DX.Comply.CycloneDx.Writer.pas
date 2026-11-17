@@ -55,7 +55,8 @@ type
     /// none of its own.
     /// </summary>
     function BuildComponent(const AArtefact: TArtefactInfo; const AIndex: Integer;
-      AUnresolvedSource: Boolean; const ALicence, AVersion, ACopyright: string): TJSONObject;
+      AUnresolvedSource: Boolean; const ALicence, AVersion, ACopyright,
+      ACpe: string): TJSONObject;
     function BuildDependencies(const AArtefacts: TArtefactList;
       const AProjectBomRef, AOutputFilePath: string): TJSONArray;
   public
@@ -163,6 +164,10 @@ begin
   if Trim(AMetadata.Copyright) <> '' then
     LComponent.AddPair('copyright', Trim(AMetadata.Copyright));
 
+  // CycloneDX 1.6 places cpe after copyright and before purl.
+  if AcceptedCpe(AMetadata.Cpe) <> '' then
+    LComponent.AddPair('cpe', AcceptedCpe(AMetadata.Cpe));
+
   if Trim(AMetadata.Purl) <> '' then
     LComponent.AddPair('purl', Trim(AMetadata.Purl));
 
@@ -218,7 +223,7 @@ end;
 
 function TCycloneDxJsonWriter.BuildComponent(const AArtefact: TArtefactInfo;
   const AIndex: Integer; AUnresolvedSource: Boolean;
-  const ALicence, AVersion, ACopyright: string): TJSONObject;
+  const ALicence, AVersion, ACopyright, ACpe: string): TJSONObject;
 var
   LComponent, LHashes, LRef, LRefHash: TJSONObject;
   LHashArray, LProperties, LRefs, LRefHashes: TJSONArray;
@@ -302,6 +307,10 @@ begin
   // The product notice is written on the built program and on own-code units.
   if Trim(ACopyright) <> '' then
     LComponent.AddPair('copyright', Trim(ACopyright));
+
+  // Same place as on metadata.component: after copyright, before externalReferences.
+  if AcceptedCpe(ACpe) <> '' then
+    LComponent.AddPair('cpe', AcceptedCpe(ACpe));
 
   // TR-03183-2 maps the deployable SHA-512 to externalReferences type
   // distribution. bom-1.6 requires a url, and no download URL is known, so
@@ -467,6 +476,7 @@ var
   LLicence: string;
   LVersion: string;
   LCopyright: string;
+  LCpe: string;
   LIsDeliverable: Boolean;
 begin
   Result := False;
@@ -520,8 +530,12 @@ begin
         AMetadata.ProductVersion, AProjectInfo.Version);
       LCopyright := ComponentCopyrightFor(AArtefacts[I], LIsDeliverable,
         AMetadata.Copyright, LManifest);
+      if LIsDeliverable then
+        LCpe := AMetadata.Cpe
+      else
+        LCpe := '';
       LComponents.Add(BuildComponent(AArtefacts[I], I,
-        LGraph.Status[I] = uusMissingSource, LLicence, LVersion, LCopyright));
+        LGraph.Status[I] = uusMissingSource, LLicence, LVersion, LCopyright, LCpe));
     end;
     LRoot.AddPair('components', LComponents);
 

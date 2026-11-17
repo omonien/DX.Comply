@@ -83,6 +83,7 @@ type
     scoSourceDirs,
     scoPurl,
     scoRepoUrl,
+    scoCpe,
     scoStrictMode,
     scoSpdxVersion,
     scoReportContent,
@@ -260,6 +261,12 @@ type
     /// </summary>
     RepoUrl: string;
     /// <summary>
+    /// CPE of the product, from --cpe or product.cpe. A CPE 2.3 formatted
+    /// string or a CPE 2.2 URI. Empty means the writers omit it. Any other
+    /// text is a warning and is omitted. The NVD API key is not stored here.
+    /// </summary>
+    Cpe: string;
+    /// <summary>
     /// Context the warning texts are written for. Default swcCli.
     /// </summary>
     WarningContext: TSbomWarningContext;
@@ -364,6 +371,7 @@ type
     function MergeFileConfig(const ACaller, AFile: TSbomConfig): TSbomConfig;
     function CreateWriter(AFormat: TSbomFormat): ISbomWriter;
     function CreateReportWriter(AFormat: THumanReadableReportFormat): IHumanReadableReportWriter;
+    function AcceptedProductCpe(const ACpe: string): string;
     function BuildMetadata(const AConfig: TSbomConfig; const AProjectInfo: TProjectInfo;
       const ABuildEvidence: TBuildEvidence; const ACompositionEvidence: TCompositionEvidence;
       const AWarnings: TList<string>;
@@ -571,6 +579,12 @@ type
     /// </summary>
     function GenerateFromConfig(const AProjectPath, AConfigPath: string): Boolean;
     /// <summary>
+    /// The configuration GenerateFromConfig would use, without generating
+    /// an SBOM. File values fill defaults. Fields listed in
+    /// ACaller.ExplicitOverrides keep the caller's value.
+    /// </summary>
+    function MergedConfig(const ACaller: TSbomConfig; const AConfigPath: string): TSbomConfig;
+    /// <summary>
     /// Project file a build mode run uses. A .dpr with a .dproj of the same
     /// name in the same folder resolves to that .dproj and reports an
     /// "Info: " progress message. Any other path is returned unchanged.
@@ -696,6 +710,7 @@ begin
   SetLength(Result.SourceDirs, 0);
   Result.Purl := '';
   Result.RepoUrl := '';
+  Result.Cpe := '';
   Result.WarningContext := swcCli;
   Result.StrictMode := False;
   Result.SpdxVersion := '';
@@ -2407,6 +2422,7 @@ var
   LManifestValue: TJSONValue;
   LSupplierValue: TJSONValue;
   LCopyrightValue: TJSONValue;
+  LCpeValue: TJSONValue;
   LText: string;
   I: Integer;
   LDefineWarnings: TList<string>;
@@ -2524,6 +2540,18 @@ begin
             Result.Purl := Trim(LProduct.GetValue<string>('purl'));
           if LProduct.GetValue('repoUrl') <> nil then
             Result.RepoUrl := Trim(LProduct.GetValue<string>('repoUrl'));
+          // A non-string is ignored so a bad value does not stop the run.
+          // A string that is not a CPE is kept here and omitted later, with
+          // a warning, the same way a manifest row is handled.
+          LCpeValue := LProduct.GetValue('cpe');
+          if (LCpeValue <> nil) and not (LCpeValue is TJSONNull) then
+          begin
+            if (LCpeValue is TJSONString) or (LCpeValue is TJSONNumber) then
+              Result.Cpe := Trim(LCpeValue.Value)
+            else
+              DoProgress('Warning: product.cpe in ' + TPath.GetFileName(AConfigPath) +
+                ' must be a string. The value was ignored.', 5);
+          end;
         end;
 
         // Product copyright. A non-empty string wins over LegalCopyright
@@ -2822,6 +2850,7 @@ begin
   Result.SupplierUrl := Trim(AConfig.SupplierUrl);
   Result.Licence := Trim(AConfig.Licence);
   Result.Copyright := ProductCopyrightNotice(AConfig.Copyright, AProjectInfo.OutputFilePath);
+  Result.Cpe := AcceptedProductCpe(AConfig.Cpe);
   Result.ComponentManifestJson := '';
   Result.Timestamp := FormatUtcTimestamp('');
   Result.ToolName := 'DX.Comply';
@@ -3410,6 +3439,7 @@ begin
     LMetadata.Licence := Trim(FConfig.Licence);
     LMetadata.Copyright := ProductCopyrightNotice(FConfig.Copyright,
       LProjectInfo.OutputFilePath);
+    LMetadata.Cpe := AcceptedProductCpe(FConfig.Cpe);
     LMetadata.SbomCreator := Trim(FConfig.SbomCreator);
     LMetadata.Timestamp := FormatUtcTimestamp('');
     LMetadata.ToolName := 'DX.Comply';
@@ -3965,6 +3995,8 @@ begin
     Result.Purl := ACaller.Purl;
   if scoRepoUrl in ACaller.ExplicitOverrides then
     Result.RepoUrl := ACaller.RepoUrl;
+  if scoCpe in ACaller.ExplicitOverrides then
+    Result.Cpe := ACaller.Cpe;
   if scoStrictMode in ACaller.ExplicitOverrides then
   begin
     Result.StrictMode := ACaller.StrictMode;
@@ -4006,27 +4038,42 @@ begin
       Result.OutputPath, Result.Platform, Result.Configuration);
 end;
 
-function TDxComplyGenerator.GenerateFromConfig(const AProjectPath, AConfigPath: string): Boolean;
-var
-  LCliConfig: TSbomConfig;
+function TDxComplyGenerator.AcceptedProductCpe(const ACpe: string): string;
 begin
-  LCliConfig := FConfig;
-  FConfig := MergeFileConfig(LCliConfig, LoadConfig(AConfigPath));
-  if (FConfig.Delphi7Root = '') and (LCliConfig.Delphi7Root <> '') then
-    FConfig.Delphi7Root := LCliConfig.Delphi7Root;
-  if LCliConfig.BdsVersion <> '' then
+  Result := Trim(ACpe);
+  if Result = '' then
+    Exit;
+  if ClassifyCpe(Result) = ckNone then
   begin
-    FConfig.BdsVersion := LCliConfig.BdsVersion;
+    DoProgress('Warning: product.cpe "' + Result +
+      '" is not a CPE 2.3 formatted string (cpe:2.3:part:vendor:product:version:...) ' +
+      'or a CPE 2.2 URI (cpe:/part:vendor:product:version:...) and was omitted.', 5);
+    Result := '';
   end;
-  if LCliConfig.PlatformExplicit then
-    FConfig.PlatformExplicit := True;
-  if LCliConfig.ConfigurationExplicit then
-    FConfig.ConfigurationExplicit := True;
-  if LCliConfig.ManifestFileExplicit then
+end;
+
+function TDxComplyGenerator.MergedConfig(const ACaller: TSbomConfig;
+  const AConfigPath: string): TSbomConfig;
+begin
+  Result := MergeFileConfig(ACaller, LoadConfig(AConfigPath));
+  if (Result.Delphi7Root = '') and (ACaller.Delphi7Root <> '') then
+    Result.Delphi7Root := ACaller.Delphi7Root;
+  if ACaller.BdsVersion <> '' then
+    Result.BdsVersion := ACaller.BdsVersion;
+  if ACaller.PlatformExplicit then
+    Result.PlatformExplicit := True;
+  if ACaller.ConfigurationExplicit then
+    Result.ConfigurationExplicit := True;
+  if ACaller.ManifestFileExplicit then
   begin
-    FConfig.ManifestFile := LCliConfig.ManifestFile;
-    FConfig.ManifestFileExplicit := True;
+    Result.ManifestFile := ACaller.ManifestFile;
+    Result.ManifestFileExplicit := True;
   end;
+end;
+
+function TDxComplyGenerator.GenerateFromConfig(const AProjectPath, AConfigPath: string): Boolean;
+begin
+  FConfig := MergedConfig(FConfig, AConfigPath);
   Result := Generate(AProjectPath);
 end;
 

@@ -285,6 +285,18 @@ function ClassifyLicence(const AValue: string; out ANormalised: string): TLicenc
 function ClassifyCpe(const AValue: string): TCpeKind;
 
 /// <summary>
+/// The CPE text writers should emit. Empty when AValue is blank or is
+/// neither a CPE 2.3 formatted string nor a CPE 2.2 URI.
+/// </summary>
+function AcceptedCpe(const AValue: string): string;
+
+/// <summary>
+/// SPDX 2.3 referenceType for a CPE external reference. A formatted string
+/// is cpe23Type. A URI is cpe22Type. ckNone returns an empty string.
+/// </summary>
+function SpdxCpeReferenceType(AKind: TCpeKind): string;
+
+/// <summary>
 /// Appends CycloneDX 1.6 licenses to a component. An empty value writes
 /// nothing. An SPDX id or a name is written twice, concluded then declared.
 /// An expression is one concluded entry. A URL is omitted for an expression.
@@ -830,6 +842,13 @@ begin
   if (AValue <> '') and TRegEx.IsMatch(AValue, scCpe22Pattern) then
     Exit(ckCpe22);
   Result := ckNone;
+end;
+
+function AcceptedCpe(const AValue: string): string;
+begin
+  Result := Trim(AValue);
+  if ClassifyCpe(Result) = ckNone then
+    Result := '';
 end;
 
 function SpdxCpeReferenceType(AKind: TCpeKind): string;

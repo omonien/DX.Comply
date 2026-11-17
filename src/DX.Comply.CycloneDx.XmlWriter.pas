@@ -66,7 +66,7 @@ type
     /// none of its own.
     /// </summary>
     procedure BuildComponent(const AArtefact: TArtefactInfo; const AIndex: Integer;
-      AUnresolvedSource: Boolean; const ALicence, AVersion, ACopyright: string);
+      AUnresolvedSource: Boolean; const ALicence, AVersion, ACopyright, ACpe: string);
     procedure BuildComponents(const AArtefacts: TArtefactList; const AMetadata: TSbomMetadata;
       const AGraph: TUsesDependencyGraph; const AProjectName, AOutputFilePath,
       AProjectVersion: string);
@@ -220,6 +220,9 @@ begin
   // CycloneDX 1.6 places copyright after licenses and before purl.
   if Trim(AMetadata.Copyright) <> '' then
     AddElement('copyright', Trim(AMetadata.Copyright));
+  // CycloneDX 1.6 places cpe after copyright and before purl.
+  if AcceptedCpe(AMetadata.Cpe) <> '' then
+    AddElement('cpe', AcceptedCpe(AMetadata.Cpe));
   if Trim(AMetadata.Purl) <> '' then
     AddElement('purl', AMetadata.Purl);
   AddPropertyElements(AMetadata.ComponentProperties);
@@ -250,7 +253,7 @@ end;
 
 procedure TCycloneDxXmlWriter.BuildComponent(const AArtefact: TArtefactInfo;
   const AIndex: Integer; AUnresolvedSource: Boolean;
-  const ALicence, AVersion, ACopyright: string);
+  const ALicence, AVersion, ACopyright, ACpe: string);
 var
   LComponentType: string;
   LBomRef: string;
@@ -300,6 +303,10 @@ begin
   // CycloneDX 1.6 places copyright after licenses and before externalReferences.
   if Trim(ACopyright) <> '' then
     AddElement('copyright', Trim(ACopyright));
+
+  // Same place as on the metadata component: after copyright, before externalReferences.
+  if AcceptedCpe(ACpe) <> '' then
+    AddElement('cpe', AcceptedCpe(ACpe));
 
   // A file has no package URL of its own, so no purl element is written.
 
@@ -411,6 +418,7 @@ var
   LLicenceError: string;
   LLicence: string;
   LCopyright: string;
+  LCpe: string;
   LIsDeliverable: Boolean;
 begin
   OpenTag('components');
@@ -430,9 +438,13 @@ begin
       AMetadata.Licence, LManifest);
     LCopyright := ComponentCopyrightFor(AArtefacts[I], LIsDeliverable,
       AMetadata.Copyright, LManifest);
+    if LIsDeliverable then
+      LCpe := AMetadata.Cpe
+    else
+      LCpe := '';
     BuildComponent(AArtefacts[I], I, AGraph.Status[I] = uusMissingSource, LLicence,
       ComponentVersionFor(AArtefacts[I], LIsDeliverable, AMetadata.ProductVersion,
-        AProjectVersion), LCopyright);
+        AProjectVersion), LCopyright, LCpe);
   end;
   // Library rows from a component manifest. Element order is owned by
   // DX.Comply.ComponentManifest so this writer stays a thin hook.

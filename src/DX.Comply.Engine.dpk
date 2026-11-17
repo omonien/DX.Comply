@@ -65,6 +65,9 @@ contains
   DX.Comply.CraChecks in 'DX.Comply.CraChecks.pas',
   DX.Comply.LibrarySource in 'DX.Comply.LibrarySource.pas',
   DX.Comply.Engine in 'DX.Comply.Engine.pas',
-  DX.Comply.SbomHeaderConfig in 'DX.Comply.SbomHeaderConfig.pas';
+  DX.Comply.SbomHeaderConfig in 'DX.Comply.SbomHeaderConfig.pas',
+  DX.Comply.Cpe in 'DX.Comply.Cpe.pas',
+  DX.Comply.Cpe.NvdKey in 'DX.Comply.Cpe.NvdKey.pas',
+  DX.Comply.Cpe.Nvd in 'DX.Comply.Cpe.Nvd.pas';
 
 end.

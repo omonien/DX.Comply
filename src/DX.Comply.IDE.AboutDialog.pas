@@ -90,10 +90,11 @@ const
   cCraOverviewUrl = 'https://digital-strategy.ec.europa.eu/en/policies/cyber-resilience-act';
   cCraRegulationUrl = 'https://eur-lex.europa.eu/eli/reg/2024/2847/oj/eng';
   cAboutBodyText =
-    'DX.Comply lists the units, packages and DLL names it can see in a Delphi ' +
-    'build, with a hash where it could open the file. The SBOM is a starting ' +
-    'point for the SBOM part of EU CRA technical documentation. It does not ' +
-    'make a product compliant.';
+    'DX.Comply is a compliance tool for Delphi projects. SBOM and CPE are the ' +
+    'current building blocks, and further areas can follow. It lists the units, ' +
+    'packages and DLL names it can see in a build, with a hash where it could ' +
+    'open the file. The SBOM is a starting point for the SBOM part of EU CRA ' +
+    'technical documentation. It does not make a product compliant.';
   cHeaderBitmapFileName = 'DX.Comply.Icon.bmp';
   cHeaderPngFileName = 'DX.Comply.Icon.png';
 

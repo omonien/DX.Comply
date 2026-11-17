@@ -1,4 +1,4 @@
-/// <summary>
+﻿/// <summary>
 /// DX.Comply.Tests
 /// DUnitX console test runner for DX.Comply.
 /// </summary>
@@ -61,7 +61,8 @@ uses
   DX.Comply.Tests.LibrarySource in 'DX.Comply.Tests.LibrarySource.pas',
   DX.Comply.Tests.CLI.GitTag in 'DX.Comply.Tests.CLI.GitTag.pas',
   DX.Comply.Tests.DprojForDpr in 'DX.Comply.Tests.DprojForDpr.pas',
-  DX.Comply.Tests.SbomHeaderConfig in 'DX.Comply.Tests.SbomHeaderConfig.pas';
+  DX.Comply.Tests.SbomHeaderConfig in 'DX.Comply.Tests.SbomHeaderConfig.pas',
+  DX.Comply.Tests.Cpe in 'DX.Comply.Tests.Cpe.pas';
 
 var
   LRunner: ITestRunner;

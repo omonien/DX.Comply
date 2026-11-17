@@ -318,9 +318,15 @@ type
     /// Otherwise this is LegalCopyright from the version resource of the
     /// project's own binary. Empty means the writers keep the previous
     /// output: CycloneDX omits copyright, SPDX 2.3 writes NOASSERTION, and
-    /// SPDX 3.0.1 omits software_copyrightText.
+    ///     SPDX 3.0.1 omits software_copyrightText.
     /// </summary>
     Copyright: string;
+    /// <summary>
+    /// CPE of the product, from product.cpe or --cpe. Written on the root
+    /// component and on the built program when it is a CPE 2.3 formatted
+    /// string or a CPE 2.2 URI. Empty, or any other text, is omitted.
+    /// </summary>
+    Cpe: string;
     /// <summary>
     /// Raw components.json text. Empty when no component manifest is in use.
     /// Writers read this to group matched units under library components.

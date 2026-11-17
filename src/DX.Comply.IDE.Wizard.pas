@@ -632,7 +632,7 @@ begin
     FProjectMenuItem.Add(LSubMenuItem);
 
     LSubMenuItem := TMenuItem.Create(FProjectMenuItem);
-    LSubMenuItem.Caption := 'SBOM Header Data...';
+    LSubMenuItem.Caption := 'SBOM and CPE...';
     LSubMenuItem.OnClick := OnSbomHeaderMenuItemClick;
     FProjectMenuItem.Add(LSubMenuItem);
 
@@ -805,7 +805,7 @@ begin
     end;
 
     // SBOM header keys, the same ones the CLI reads with --ci. They are
-    // edited in Project > DX.Comply - SBOM > SBOM Header Data.
+    // edited in Project > DX.Comply - SBOM > SBOM and CPE.
     if TSbomHeaderConfig.TryRead(LConfigPath, LHeader, LHeaderError) then
     begin
       TSbomHeaderConfig.ApplyToConfig(LHeader, LConfig);
@@ -880,13 +880,13 @@ begin
     var LProjectPath := Trim(LProject.FileName);
     if not LProjectPath.EndsWith('.dproj', True) then
     begin
-      MessageDlg('The SBOM header data is stored next to a saved .dproj file. Save the project first.',
+      MessageDlg('The SBOM and CPE data is stored next to a saved .dproj file. Save the project first.',
         mtInformation, [mbOK], 0);
       Exit;
     end;
     if ShowSbomHeaderDialog(LProjectPath, nil) then
     begin
-      TIDELogger.Info('DX.Comply: SBOM header data saved to ' +
+      TIDELogger.Info('DX.Comply: SBOM and CPE data saved to ' +
         TSbomHeaderConfig.ConfigPathForProject(LProjectPath));
     end;
   except
@@ -1293,10 +1293,10 @@ end;
 {$R DX.Comply.IDE.Splash.res}
 
 const
-  cSplashTitle = 'DX.Comply - SBOM documentation for Delphi';
+  cSplashTitle = 'DX.Comply - compliance documentation for Delphi';
   cSplashLicenseStatus = 'Open Source - MIT License';
   cAboutDescription =
-    'Writes a Software Bill of Materials (SBOM) from a RAD Studio project.';
+    'Compliance documentation for a RAD Studio project. SBOM and CPE are the current building blocks.';
 
 /// <summary>
 /// Loads the 48x48 splash bitmap from the embedded resource.

@@ -96,6 +96,10 @@ type
     FSourceDirs: TArray<string>;
     FPurl: string;
     FRepoUrl: string;
+    FCpe: string;
+    FNvdApiKey: string;
+    FCpeLookup: Boolean;
+    FCpeDictionary: Boolean;
     FDelphi7Root: string;
     FBdsVersion: string;
     FManifestFile: string;
@@ -262,6 +266,17 @@ type
     property Purl: string read FPurl;
     /// <summary>Repository URL from --repo-url.</summary>
     property RepoUrl: string read FRepoUrl;
+    /// <summary>Product CPE from --cpe. Empty when the flag was not passed.</summary>
+    property Cpe: string read FCpe;
+    /// <summary>
+    /// NVD API key from --nvd-api-key. Not copied into TSbomConfig and not
+    /// written to .dxcomply.json. Empty when the flag was not passed.
+    /// </summary>
+    property NvdApiKey: string read FNvdApiKey;
+    /// <summary>True when --cpe-lookup was passed.</summary>
+    property CpeLookup: Boolean read FCpeLookup;
+    /// <summary>True when --cpe-dictionary was passed.</summary>
+    property CpeDictionary: Boolean read FCpeDictionary;
     /// <summary>Delphi 7 installation directory from --delphi7-root.</summary>
     property Delphi7Root: string read FDelphi7Root;
     /// <summary>BDS version from --bds-version, for example 23.0.</summary>
@@ -279,6 +294,7 @@ implementation
 
 uses
   System.IOUtils,
+  DX.Comply.ComponentManifest,
   DX.Comply.Spdx3.Writer,
   DX.Comply.VersionInfo;
 
@@ -493,6 +509,18 @@ begin
     begin
       FNoBuild := True;
       Include(FExplicitOverrides, scoNoBuild);
+      Continue;
+    end;
+
+    if LArg = '--cpe-lookup' then
+    begin
+      FCpeLookup := True;
+      Continue;
+    end;
+
+    if LArg = '--cpe-dictionary' then
+    begin
+      FCpeDictionary := True;
       Continue;
     end;
 
@@ -727,6 +755,28 @@ begin
         FRepoUrl := Trim(LValue);
         Include(FExplicitOverrides, scoRepoUrl);
       end
+      else if LKey = 'cpe' then
+      begin
+        if ClassifyCpe(Trim(LValue)) = ckNone then
+        begin
+          FParseError := 'Invalid value for --cpe: expected a CPE 2.3 formatted string ' +
+            '(cpe:2.3:part:vendor:product:version:...) or a CPE 2.2 URI ' +
+            '(cpe:/part:vendor:product:version:...).';
+          Exit(False);
+        end;
+        FCpe := Trim(LValue);
+        Include(FExplicitOverrides, scoCpe);
+      end
+      else if LKey = 'nvd-api-key' then
+      begin
+        // The value is not copied into the error text.
+        if Trim(LValue) = '' then
+        begin
+          FParseError := 'Invalid value for --nvd-api-key: value is empty.';
+          Exit(False);
+        end;
+        FNvdApiKey := Trim(LValue);
+      end
       else if LKey = 'manifest' then
       begin
         if Trim(LValue) = '' then
@@ -798,6 +848,9 @@ begin
     if FLibraryMode and (Length(FSourceDirs) > 0) then
       Exit(True);
     if FCiMode then
+      Exit(True);
+    // --cpe-lookup can name the product with --supplier and --product.
+    if FCpeLookup then
       Exit(True);
     FParseError := '--project is required.';
     Exit(False);
@@ -1045,6 +1098,28 @@ begin
     Line('                                version is known. Without a version,');
     Line('                                no purl is written.');
     Line('                                File key: product.repoUrl');
+    Line('  --cpe=<cpe>                   CPE of the product. A CPE 2.3 formatted');
+    Line('                                string or a CPE 2.2 URI. Written on the');
+    Line('                                root component and on the built program.');
+    Line('                                File key: product.cpe');
+    Line('  --cpe-lookup                  Search the NVD CPE dictionary for the');
+    Line('                                configured vendor and product and print');
+    Line('                                the matches. Does not write an SBOM.');
+    Line('                                With --cpe-dictionary, a failed search');
+    Line('                                stops before the SBOM is written.');
+    Line('  --cpe-dictionary              After the SBOM is written, also write');
+    Line('                                a CPE Dictionary 2.3 submission and a');
+    Line('                                mail text next to that file. DX.Comply');
+    Line('                                does not send the message. This flag');
+    Line('                                does not call the NVD.');
+    Line('  --nvd-api-key=<key>           NVD API key for --cpe-lookup. Used in');
+    Line('                                this order: this option, then the');
+    Line('                                environment variable NVD_API_KEY, then');
+    Line('                                HKCU\Software\Developer Experts\');
+    Line('                                DX.Comply\NIST value ApiKey.');
+    Line('                                Not read from .dxcomply.json.');
+    Line('                                The key is sent as the apiKey header');
+    Line('                                and is not printed.');
     Line('  --match-prefixes=<mode>       corroborated (default) or legacy.');
     Line('                                legacy applies a prefix with no dot');
     Line('                                outside an Embarcadero product path,');
@@ -1224,6 +1299,7 @@ begin
   Result.SourceDirs                  := FSourceDirs;
   Result.Purl                        := FPurl;
   Result.RepoUrl                     := FRepoUrl;
+  Result.Cpe                         := FCpe;
   Result.MapFileDir                  := FMapDir;
   Result.Delphi7Root                 := FDelphi7Root;
   Result.BdsVersion                  := FBdsVersion;

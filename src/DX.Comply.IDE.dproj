@@ -124,6 +124,9 @@
         <DCCReference Include="DX.Comply.LibrarySource.pas"/>
         <DCCReference Include="DX.Comply.Engine.pas"/>
         <DCCReference Include="DX.Comply.SbomHeaderConfig.pas"/>
+        <DCCReference Include="DX.Comply.Cpe.pas"/>
+        <DCCReference Include="DX.Comply.Cpe.NvdKey.pas"/>
+        <DCCReference Include="DX.Comply.Cpe.Nvd.pas"/>
         <DCCReference Include="DX.Comply.IDE.Logger.pas"/>
         <DCCReference Include="DX.Comply.IDE.AboutDialog.pas"/>
         <DCCReference Include="DX.Comply.IDE.PathSupport.pas"/>
