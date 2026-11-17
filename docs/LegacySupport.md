@@ -2,7 +2,7 @@
 
 ## Overview
 
-The release installer is built for Delphi 13 and registers the IDE plugin there. The command line tool is separate. GetIt installs the IDE plugin only and does not include `dxcomply.exe`. The executable is in the release ZIP and in the installer `bin` folder, or you can build `src/CLI/dxcomply.dproj`. It does not compile the project. It reads a `.dproj`, `.dpk`, or `.groupproj`, or a Delphi 7 `.dpr` with its `.dof` and `.cfg`, and a detailed MAP file, so the Delphi version that wrote the MAP file does not have to be Delphi 13.
+The release installer is built for Delphi 13 and registers the IDE plugin there. The command line tool is separate. GetIt installs the IDE plugin only and does not include `dxcomply.exe`. The executable is in the release ZIP and in the installer `bin` folder, or you can build `src/CLI/dxcomply.dproj`. It reads a `.dproj`, `.dpk`, or `.groupproj`, or a Delphi 7 `.dpr` with its `.dof` and `.cfg`, and a detailed MAP file, so the Delphi version that wrote the MAP file does not have to be Delphi 13. When the MAP file for the selected configuration and platform of a `.dproj`, `.dpk`, or `.groupproj` is missing, the CLI builds that project and prints a warning that names the missing MAP file, the configuration, and the platform. `--no-build` stops that run with exit code 1. A Delphi 7 project is not compiled.
 
 The MAP file lists the units linked into the executable. DX.Comply turns that list into a CycloneDX or SPDX SBOM, with a hash where it could open the file.
 
@@ -16,7 +16,7 @@ The release installer registers the IDE plugin for Delphi 13. In that IDE, the p
 
 ### CLI tool
 
-The CLI tool expects the MAP file to already exist. `--project` may be a `.dproj`, `.dpk`, or `.groupproj`. A Delphi 7 project is the `.dpr` together with its `.dof` and `.cfg`, or the `.dpk` when a package has no `.dproj`. Delphi 2005 and 2006 can use the `.bdsproj`. A `.dof` by itself is not a project file. You compile the project yourself (either interactively or in a CI pipeline), then run `dxcomply` to generate the SBOM from the build output.
+`--project` may be a `.dproj`, `.dpk`, or `.groupproj`. A Delphi 7 project is the `.dpr` together with its `.dof` and `.cfg`, or the `.dpk` when a package has no `.dproj`. Delphi 2005 and 2006 can use the `.bdsproj`. A `.dof` by itself is not a project file. For a `.dproj`, `.dpk`, or `.groupproj`, a missing MAP file for the selected configuration and platform is built by the CLI unless you pass `--no-build`. A Delphi 7 project is not compiled. You build that project yourself (either interactively or in a CI pipeline), then run `dxcomply` to generate the SBOM from the build output. If that MAP file is missing, the CLI stops.
 
 ---
 
@@ -74,10 +74,19 @@ You can fully automate SBOM generation by adding a Post-Build Event to a dedicat
    - Add a Post-Build Event:
 
 ```cmd
-dxcomply --project="$(PROJECTPATH)" --output="$(OUTPUTDIR)bom.json" --no-pause
+call sbom.bat "$(PROJECTPATH)" $(Config) $(Platform)
 ```
 
-4. When you build with the `SBOM` configuration, both the application and its SBOM are generated in one step.
+`sbom.bat`:
+
+```bat
+@echo off
+dxcomply --project=%1 --config-name=%2 --platform=%3 --no-build --output=bom.json --no-pause
+```
+
+Without `--config-name` the CLI looks for the Release MAP file. Inside another configuration that file is often missing, and the CLI would start a second MSBuild. `--no-build` stops the run with exit code 1 when the MAP file for `%2` and `%3` is missing, instead of compiling again. Add `--map-dir` when that MAP file is not in the output directory the project records, for example `--map-dir=%4` and a fourth argument on the `call` line.
+
+4. When you build with the `SBOM` configuration, the application is compiled by the IDE and the SBOM is written from that MAP file.
 
 ### CI Pipeline Example
 

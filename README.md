@@ -83,7 +83,7 @@ DX.Comply writes **CycloneDX 1.6** JSON by default. Each linked unit is a `libra
 
 The installer in the current release is built for Delphi 13 (RAD Studio 37.0). Run it from the [Releases](https://github.com/omonien/DX.Comply/releases) page. It registers the IDE plugin for Delphi 13 and copies the command line tool onto the machine as `dxcomply.exe` in the installer's `bin` folder.
 
-The command line tool does not use the IDE and does not compile the project. It reads a `.dproj`, `.dpk`, or `.groupproj`, or a Delphi 7 `.dpr` with its `.dof` and `.cfg`, together with a detailed MAP file from a build. That MAP file can come from an older Delphi.
+The command line tool does not use the IDE. It reads a `.dproj`, `.dpk`, or `.groupproj`, or a Delphi 7 `.dpr` with its `.dof` and `.cfg`, together with a detailed MAP file. When the MAP file for the selected configuration and platform of a `.dproj`, `.dpk`, or `.groupproj` is missing, the tool builds that project and prints a warning that names the missing MAP file, the configuration, and the platform. `--no-build` stops that run with exit code 1 instead of compiling. A Delphi 7 project is not compiled. The MAP file can come from an older Delphi.
 
 ### GetIt
 
@@ -111,7 +111,7 @@ GetIt installs the IDE plugin only. It does not include `dxcomply.exe`. The comm
 
 `dxcomply.exe` is not part of a GetIt install. Use the copy from the release ZIP or the installer `bin` folder, or build `src/CLI/dxcomply.dproj`, which writes `dxcomply.exe`. The examples assume that executable is on `PATH`, or that the current directory is the folder that contains it.
 
-The CLI tool expects an existing detailed MAP file. Build your project first with `DCC_MapFile=3`, then run:
+The CLI reads a detailed MAP file for the configuration and platform you select. The default is Release and Win32. When that MAP file is missing, the CLI builds the project (a nested MSBuild) and prints a warning that names the missing MAP file, the configuration, and the platform. Pass `--config-name` and `--platform` for the build you just made. Pass `--no-build` when the project is already built, including from a post-build event, so a second build is not started. A missing MAP file then stops the run with exit code 1. Build with `DCC_MapFile=3`, then run:
 
 ```cmd
 dxcomply --project=MyApp.dproj --format=cyclonedx-json --output=bom.json --no-pause
@@ -169,7 +169,7 @@ dxcomply --project=MyApp.dpr --output=bom.json --no-pause
 
 The CLI reads the sibling `.dof` and `.cfg`. When both files define a setting, the `.dof` value is used. These projects have one Win32 option set, so `--platform` and `--config-name` are not applied. The built-in Win32 and Release defaults are not reported. A platform or configuration you set on the command line or in `.dxcomply.json` is reported and ignored. A blank package output directory uses the registry value `Package DPL Output` when Delphi 7's `RootDir` was found, and the project directory otherwise. The `.map` file must sit next to the output binary. If it is missing, the CLI stops. Library units come from a Delphi 7 install when `Software\Borland\Delphi\7.0` is in the registry. The scan still runs when that install is missing; pass `--delphi7-root` or set `delphi7Root` in `.dxcomply.json`. For a `.dproj`, if the MAP file is not in the output directory taken from the project, pass `--map-dir`.
 
-> **Tip:** You can automate this with a **Post-Build Event** in a dedicated build configuration. Create a configuration named e.g. `SBOM` that enables detailed MAP output and runs `dxcomply` as a post-build step. This way, a single build generates both your application and its SBOM.
+> **Tip:** You can automate this with a **Post-Build Event** in a dedicated build configuration. Create a configuration named `SBOM` that enables detailed MAP output and runs `call sbom.bat "$(PROJECTPATH)" $(Config) $(Platform)`. The batch file passes `--config-name=%2 --platform=%3` and `--no-build`, and can pass `--map-dir` when the MAP file is not in the recorded output directory. Without the configuration, the CLI looks for the Release MAP file. See [docs/LegacySupport.md](docs/LegacySupport.md).
 
 See [docs/LegacySupport.md](docs/LegacySupport.md) for details.
 
@@ -310,7 +310,7 @@ The CLI warnings name the flag and the `.dxcomply.json` key, as listed below. In
 | Exit code | Meaning |
 |-----------|---------|
 | 0 | SBOM generated |
-| 1 | Generation failed |
+| 1 | Generation failed. `--no-build` (or `"noBuild": true`) uses this code when a build would otherwise run. The message names the MAP file, the configuration, and the platform. |
 | 2 | Invalid arguments |
 | 3 | SBOM generated, but `--strict` is set and at least one CRA/BSI warning was raised |
 
@@ -406,6 +406,7 @@ Add a `.dxcomply.json` to your project folder and pass `--ci` so `dxcomply.exe` 
   },
   "sbomCreator": "sbom@example.com",
   "strict": false,
+  "noBuild": false,
   "product": {
     "name": "My Application",
     "version": "2.1.0",
@@ -448,13 +449,13 @@ When `--ci` is set and the file exists, values are merged in this order:
 2. Keys present in `.dxcomply.json`.
 3. Command-line options you actually pass. Those win over the file.
 
-An option you leave off the command line does not override the file, even though that option has a default. `dxcomply --ci --config-name=Debug` uses Debug even when the file says `"configName": "Release"`. `dxcomply --ci` with no `--config-name` uses the file's `configName`, or `Release` when the key is absent. The same rule applies to `--platform`, `--format`, `--output`, `--product`, `--version`, `--supplier`, `--supplier-url`, `--licence`, `--sbom-creator`, `--report`, `--report-content`, `--report-group-by-folder`, `--include`, `--exclude`, `--map-dir`, `--manifest`, `--match-prefixes`, `--define`, `--strict`, `--spdx-version`, and `--no-composition-evidence`. `--define` is merged by name: a name you pass wins over the same name in `defines`, and every other name in the file stays.
+An option you leave off the command line does not override the file, even though that option has a default. `dxcomply --ci --config-name=Debug` uses Debug even when the file says `"configName": "Release"`. `dxcomply --ci` with no `--config-name` uses the file's `configName`, or `Release` when the key is absent. The same rule applies to `--platform`, `--format`, `--output`, `--product`, `--version`, `--supplier`, `--supplier-url`, `--licence`, `--sbom-creator`, `--report`, `--report-content`, `--report-group-by-folder`, `--include`, `--exclude`, `--map-dir`, `--manifest`, `--match-prefixes`, `--define`, `--strict`, `--no-build`, `--spdx-version`, and `--no-composition-evidence`. `--define` is merged by name: a name you pass wins over the same name in `defines`, and every other name in the file stays. `--no-build=false` wins over `"noBuild": true` in the file.
 
 If you pass `--include` or `--exclude`, that list replaces the file's list. `--report` overrides the file's enabled flag and format, and leaves the file's report output path as it is. `--report-content` overrides `report.content` only.
 
 Without `--ci`, the file is not read. `--config=<path>` chooses which file `--ci` loads. The default path is `.dxcomply.json`. A relative path is checked in the current directory, then in the project folder when `--project` is set. An absolute path is used as given. When `--ci` is set and none of those paths exists, `dxcomply.exe` prints a warning that lists the paths it tried and continues. That warning does not change the exit code.
 
-`deepEvidence.mode` may be `always` or `when-missing`. The old `deepEvidence.build` boolean is ignored.
+`deepEvidence.mode` may be `always` or `when-missing` (the default). `when-missing` builds the project when the MAP file for the selected configuration and platform is not on disk. `always` builds even when that file exists. The build is a nested MSBuild through `build/DelphiBuildDPROJ.ps1`, with `DCC_MapFile=3`. Before it starts, the CLI prints a warning that names the MAP file, the configuration, and the platform. The old `deepEvidence.build` boolean is ignored. `"noBuild": true`, or `--no-build`, refuses that build and exits with code 1. The message names the same MAP file, configuration, and platform. With `--ci`, the flag wins over `noBuild` in the file. A Delphi 7 project is not compiled.
 
 
 ## Component manifest
@@ -563,7 +564,7 @@ The CRA requires (Annex I, Part II):
 
 ### Why does Generate SBOM in the IDE compile my project every time?
 
-The IDE always runs a Deep-Evidence build so the MAP file matches the sources you have open now. A stale MAP would describe an older link set. The CLI does not compile. You build with a detailed MAP yourself, then run `dxcomply`.
+The IDE always runs a Deep-Evidence build so the MAP file matches the sources you have open now. A stale MAP would describe an older link set. The CLI builds a `.dproj`, `.dpk`, or `.groupproj` when the MAP file for the selected configuration and platform is missing, or when `deepEvidence.mode` is `always`. It prints a warning that names that MAP file, the configuration, and the platform. Pass `--no-build`, or set `"noBuild": true` in `.dxcomply.json`, when the project is already built. The run then stops with exit code 1 instead of starting MSBuild. Without `--config-name` the CLI looks for the Release MAP file. A Delphi 7 project is not compiled.
 
 ### How do I point a manifest folder at a path that differs per machine?
 
@@ -640,7 +641,7 @@ Keep both when both apply. The library author archives the `--library` SBOM for 
 | Mode | Requirement |
 |---|---|
 | **IDE plugin** | Release installer: Delphi 13. The design-time package is the IDE integration. |
-| **CLI tool** | Windows executable from the release ZIP, the installer `bin` folder, or a build of `src/CLI/dxcomply.dproj`. GetIt does not include it. Needs a `.dproj`, `.dpk`, `.groupproj`, or a Delphi 7 `.dpr` with `.dof` and `.cfg`, and a detailed MAP file. It does not compile the project. |
+| **CLI tool** | Windows executable from the release ZIP, the installer `bin` folder, or a build of `src/CLI/dxcomply.dproj`. GetIt does not include it. Needs a `.dproj`, `.dpk`, `.groupproj`, or a Delphi 7 `.dpr` with `.dof` and `.cfg`, and a detailed MAP file. When that MAP file is missing for the selected configuration and platform, a `.dproj`, `.dpk`, or `.groupproj` is built with MSBuild. `--no-build` stops that run with exit code 1. A Delphi 7 project is not compiled. |
 | **Platform** | Windows build host |
 
 No internet connection is required. All processing is local.

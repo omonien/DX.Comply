@@ -83,6 +83,11 @@ type
     MapFilePath: string;
     /// <summary>Working directory used for the build process, when known.</summary>
     WorkingDirectory: string;
+    /// <summary>
+    /// True when noBuild stopped a build that would otherwise have run.
+    /// The caller must fail the run. This is not a continuable build error.
+    /// </summary>
+    BlockedByNoBuild: Boolean;
   end;
 
   /// <summary>
