@@ -66,7 +66,7 @@ type
     /// none of its own.
     /// </summary>
     procedure BuildComponent(const AArtefact: TArtefactInfo; const AIndex: Integer;
-      AUnresolvedSource: Boolean; const ALicence, AVersion: string);
+      AUnresolvedSource: Boolean; const ALicence, AVersion, ACopyright: string);
     procedure BuildComponents(const AArtefacts: TArtefactList; const AMetadata: TSbomMetadata;
       const AGraph: TUsesDependencyGraph; const AProjectName, AOutputFilePath,
       AProjectVersion: string);
@@ -214,8 +214,12 @@ begin
     AddElement('version', AMetadata.ProductVersion)
   else if AProjectInfo.Version <> '' then
     AddElement('version', AProjectInfo.Version);
-  // bom-1.6 component order: version, then licenses, then purl, then properties.
+  // bom-1.6 component order: version, then licenses, then copyright, then purl,
+  // then properties.
   AppendCycloneDxLicencesXml(FLines, AMetadata.Licence, '', FIndentLevel);
+  // CycloneDX 1.6 places copyright after licenses and before purl.
+  if Trim(AMetadata.Copyright) <> '' then
+    AddElement('copyright', Trim(AMetadata.Copyright));
   if Trim(AMetadata.Purl) <> '' then
     AddElement('purl', AMetadata.Purl);
   AddPropertyElements(AMetadata.ComponentProperties);
@@ -246,7 +250,7 @@ end;
 
 procedure TCycloneDxXmlWriter.BuildComponent(const AArtefact: TArtefactInfo;
   const AIndex: Integer; AUnresolvedSource: Boolean;
-  const ALicence, AVersion: string);
+  const ALicence, AVersion, ACopyright: string);
 var
   LComponentType: string;
   LBomRef: string;
@@ -292,6 +296,10 @@ begin
   // label (issue #165). An own-code unit carries the product licence when
   // one is set (issue #166). Empty writes nothing.
   AppendCycloneDxLicencesXml(FLines, ALicence, '', FIndentLevel);
+
+  // CycloneDX 1.6 places copyright after licenses and before externalReferences.
+  if Trim(ACopyright) <> '' then
+    AddElement('copyright', Trim(ACopyright));
 
   // A file has no package URL of its own, so no purl element is written.
 
@@ -402,6 +410,7 @@ var
   LManifest: TComponentManifest;
   LLicenceError: string;
   LLicence: string;
+  LCopyright: string;
   LIsDeliverable: Boolean;
 begin
   OpenTag('components');
@@ -419,9 +428,11 @@ begin
     LIsDeliverable := IsSameDeliverableFile(AArtefacts, I, LRootIndex);
     LLicence := ComponentLicenceFor(AArtefacts[I], LIsDeliverable,
       AMetadata.Licence, LManifest);
+    LCopyright := ComponentCopyrightFor(AArtefacts[I], LIsDeliverable,
+      AMetadata.Copyright, LManifest);
     BuildComponent(AArtefacts[I], I, AGraph.Status[I] = uusMissingSource, LLicence,
       ComponentVersionFor(AArtefacts[I], LIsDeliverable, AMetadata.ProductVersion,
-        AProjectVersion));
+        AProjectVersion), LCopyright);
   end;
   // Library rows from a component manifest. Element order is owned by
   // DX.Comply.ComponentManifest so this writer stays a thin hook.

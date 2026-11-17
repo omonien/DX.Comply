@@ -313,6 +313,15 @@ type
     /// </summary>
     Licence: string;
     /// <summary>
+    /// Copyright notice of the product, the project's own binary, and
+    /// own-code units. A non-empty copyright value in .dxcomply.json wins.
+    /// Otherwise this is LegalCopyright from the version resource of the
+    /// project's own binary. Empty means the writers keep the previous
+    /// output: CycloneDX omits copyright, SPDX 2.3 writes NOASSERTION, and
+    /// SPDX 3.0.1 omits software_copyrightText.
+    /// </summary>
+    Copyright: string;
+    /// <summary>
     /// Raw components.json text. Empty when no component manifest is in use.
     /// Writers read this to group matched units under library components.
     /// </summary>

@@ -142,6 +142,13 @@ type
     /// </summary>
     Licence: string;
     /// <summary>
+    /// Copyright notice from the copyright key in .dxcomply.json.
+    /// A non-empty value wins over LegalCopyright on the project's own
+    /// binary. Empty means the engine reads that version-resource string.
+    /// There is no command-line flag. Spaces alone count as empty.
+    /// </summary>
+    Copyright: string;
+    /// <summary>
     /// Optional SBOM creator contact from --sbom-creator or sbomCreator.
     /// An email address or an http(s) URL. Empty means the field is omitted.
     /// A company name is not accepted.
@@ -671,6 +678,7 @@ begin
   Result.Supplier := '';
   Result.SupplierUrl := '';
   Result.Licence := '';
+  Result.Copyright := '';
   Result.SbomCreator := '';
   Result.ManifestFile := '';
   Result.ManifestFileExplicit := False;
@@ -2398,6 +2406,7 @@ var
   LWarnings: TJSONObject;
   LManifestValue: TJSONValue;
   LSupplierValue: TJSONValue;
+  LCopyrightValue: TJSONValue;
   LText: string;
   I: Integer;
   LDefineWarnings: TList<string>;
@@ -2515,6 +2524,19 @@ begin
             Result.Purl := Trim(LProduct.GetValue<string>('purl'));
           if LProduct.GetValue('repoUrl') <> nil then
             Result.RepoUrl := Trim(LProduct.GetValue<string>('repoUrl'));
+        end;
+
+        // Product copyright. A non-empty string wins over LegalCopyright
+        // on the built binary. A non-string is ignored so a bad value does
+        // not stop the run. Spaces alone stay empty.
+        LCopyrightValue := LJson.GetValue('copyright');
+        if (LCopyrightValue <> nil) and not (LCopyrightValue is TJSONNull) then
+        begin
+          if (LCopyrightValue is TJSONString) or (LCopyrightValue is TJSONNumber) then
+            Result.Copyright := Trim(LCopyrightValue.Value)
+          else
+            DoProgress('Warning: copyright in ' + TPath.GetFileName(AConfigPath) +
+              ' must be a string. The value was ignored.', 5);
         end;
 
         // Deep Evidence
@@ -2710,6 +2732,16 @@ begin
   end;
 end;
 
+function ProductCopyrightNotice(const AConfigured, ABinaryPath: string): string;
+begin
+  // A non-empty copyright value in .dxcomply.json wins over the binary.
+  // Spaces alone are empty, so LegalCopyright is still read.
+  Result := Trim(AConfigured);
+  if Result <> '' then
+    Exit;
+  Result := GetFileLegalCopyright(ABinaryPath);
+end;
+
 function TDxComplyGenerator.BuildMetadata(const AConfig: TSbomConfig;
   const AProjectInfo: TProjectInfo; const ABuildEvidence: TBuildEvidence;
   const ACompositionEvidence: TCompositionEvidence; const AWarnings: TList<string>;
@@ -2789,6 +2821,7 @@ begin
   Result.LibraryRequiresDeclared := False;
   Result.SupplierUrl := Trim(AConfig.SupplierUrl);
   Result.Licence := Trim(AConfig.Licence);
+  Result.Copyright := ProductCopyrightNotice(AConfig.Copyright, AProjectInfo.OutputFilePath);
   Result.ComponentManifestJson := '';
   Result.Timestamp := FormatUtcTimestamp('');
   Result.ToolName := 'DX.Comply';
@@ -3375,6 +3408,8 @@ begin
       LMetadata.Supplier := LProjectInfo.CompanyName;
     LMetadata.SupplierUrl := Trim(FConfig.SupplierUrl);
     LMetadata.Licence := Trim(FConfig.Licence);
+    LMetadata.Copyright := ProductCopyrightNotice(FConfig.Copyright,
+      LProjectInfo.OutputFilePath);
     LMetadata.SbomCreator := Trim(FConfig.SbomCreator);
     LMetadata.Timestamp := FormatUtcTimestamp('');
     LMetadata.ToolName := 'DX.Comply';

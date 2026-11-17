@@ -58,6 +58,13 @@ function SelectFileVersionText(AHasFixedFileInfo: Boolean;
 function GetFileVersionText(const APath: string): string;
 
 /// <summary>
+/// LegalCopyright string from the version resource of the file at APath.
+/// Returns an empty string when the file is missing, has no version
+/// resource, or the string is absent or only spaces.
+/// </summary>
+function GetFileLegalCopyright(const APath: string): string;
+
+/// <summary>
 /// Tool version of the module that contains this unit.
 /// Falls back to 1.0.0 when the version resource is missing.
 /// </summary>
@@ -247,6 +254,19 @@ begin
   Result := SelectFileVersionText(LHasFixedInfo, LFixedInfo,
     QueryVersionString(LVersionData, 'FileVersion'),
     QueryVersionString(LVersionData, 'ProductVersion'));
+end;
+
+function GetFileLegalCopyright(const APath: string): string;
+var
+  LVersionData: TBytes;
+begin
+  Result := '';
+  if (APath = '') or not FileExists(APath) then
+    Exit;
+  LVersionData := LoadFileVersionData(APath);
+  if Length(LVersionData) = 0 then
+    Exit;
+  Result := QueryVersionString(LVersionData, 'LegalCopyright');
 end;
 
 function GetModuleVersionString(AModule: HMODULE; const AName: string): string;

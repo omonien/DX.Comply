@@ -20,6 +20,9 @@
 /// whitespace (issue #40). licenseConcluded and licenseDeclared are
 /// NOASSERTION, except the built program and own-code units when a product
 /// licence is set, and Embarcadero units, which use their origin label.
+/// copyrightText is NOASSERTION, except the built program and own-code units
+/// when a product copyright notice is known. A manifest library keeps the
+/// copyright on its row.
 /// A licence that already starts with LicenseRef- keeps that prefix.
 /// supplier uses Organization: when metadata supplies a name.
 ///
@@ -71,7 +74,7 @@ type
     function BuildGenericPurl(const ARelativePath: string): string;
     function BuildCreationInfo(const AMetadata: TSbomMetadata): TJSONObject;
     function BuildPackage(const AArtefact: TArtefactInfo; const ASpdxId,
-      ASupplier, ALicence, AVersion: string): TJSONObject;
+      ASupplier, ALicence, AVersion, ACopyright: string): TJSONObject;
     function BuildRelationships(const AArtefacts: TArtefactList;
       const APackageIds: TArray<string>;
       const ADocumentSpdxId, AProjectName, AOutputFilePath: string): TJSONArray;
@@ -271,7 +274,7 @@ begin
 end;
 
 function TSpdxJsonWriter.BuildPackage(const AArtefact: TArtefactInfo;
-  const ASpdxId, ASupplier, ALicence, AVersion: string): TJSONObject;
+  const ASpdxId, ASupplier, ALicence, AVersion, ACopyright: string): TJSONObject;
 var
   LPackage: TJSONObject;
   LChecksums: TJSONArray;
@@ -319,9 +322,13 @@ begin
   if IsBsiEmailAddress(Trim(ASupplier)) then
     LPackage.AddPair('originator', 'Person: ' + Trim(ASupplier) + ' (' +
       Trim(ASupplier) + ')');
-  // A scanned file has no copyright notice. A manifest library sets its
-  // own copyrightText from the row when that row has one.
-  LPackage.AddPair('copyrightText', 'NOASSERTION');
+  // SPDX 2.3 requires copyrightText. The product notice is written on the
+  // built program and on own-code units. A manifest library sets its own
+  // text later, from the row. Anything else stays NOASSERTION.
+  if Trim(ACopyright) <> '' then
+    LPackage.AddPair('copyrightText', Trim(ACopyright))
+  else
+    LPackage.AddPair('copyrightText', 'NOASSERTION');
 
   // Checksums. SHA256 stays first. SHA512 is the SPDX 2.3 algorithm name.
   if (AArtefact.Hash <> '') or (AArtefact.HashSha512 <> '') then
@@ -485,6 +492,7 @@ var
   LManifest: TComponentManifest;
   LLicenceError: string;
   LLicence: string;
+  LCopyright: string;
   LIsDeliverable: Boolean;
 begin
   LDocumentSpdxId := cSpdxIdPrefix + 'DOCUMENT';
@@ -528,9 +536,11 @@ begin
       LIsDeliverable := IsSameDeliverableFile(AArtefacts, I, LRootIndex);
       LLicence := ComponentLicenceFor(AArtefacts[I], LIsDeliverable,
         AMetadata.Licence, LManifest);
+      LCopyright := ComponentCopyrightFor(AArtefacts[I], LIsDeliverable,
+        AMetadata.Copyright, LManifest);
       LPackages.Add(BuildPackage(AArtefacts[I], LPackageIds[I], AMetadata.Supplier,
         LLicence, ComponentVersionFor(AArtefacts[I], LIsDeliverable,
-          AMetadata.ProductVersion, AProjectInfo.Version)));
+          AMetadata.ProductVersion, AProjectInfo.Version), LCopyright));
     end;
     LRoot.AddPair('packages', LPackages);
 

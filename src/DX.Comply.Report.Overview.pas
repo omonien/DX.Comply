@@ -617,11 +617,13 @@ begin
     end;
     if Trim(AData.Metadata.Licence) <> '' then
     begin
-      LLicences.Add(Trim(AData.Metadata.Licence), LProductName + ' (product)', '', '');
+      LLicences.Add(Trim(AData.Metadata.Licence), LProductName + ' (product)', '',
+        Trim(AData.Metadata.Copyright));
     end
     else
     begin
-      LLicences.Add(cNoLicenceGroupTitle, LProductName + ' (product)', '', '');
+      LLicences.Add(cNoLicenceGroupTitle, LProductName + ' (product)', '',
+        Trim(AData.Metadata.Copyright));
     end;
 
     // Manifest libraries carry the licence of their row. The origin summary
@@ -673,13 +675,17 @@ begin
         if LIsDeliverable then
           LVersion := ComponentVersionFor(LArtefact, True,
             AData.Metadata.ProductVersion, AData.ProjectInfo.Version);
+        // The built program and own-code units show the product notice.
+        // A manifest library row keeps the copyright on that row, above.
+        var LCopyright := ComponentCopyrightFor(LArtefact, LIsDeliverable,
+          AData.Metadata.Copyright, LManifest);
         if LComponentLicence <> '' then
         begin
-          LLicences.Add(LComponentLicence, LName, LVersion, '');
+          LLicences.Add(LComponentLicence, LName, LVersion, LCopyright);
         end
         else if not LGrouped.ContainsKey(i) then
         begin
-          LLicences.Add(cNoLicenceGroupTitle, LName, LVersion, '');
+          LLicences.Add(cNoLicenceGroupTitle, LName, LVersion, LCopyright);
         end;
         if Result.ManifestUsed and (ArtefactUnitName(LArtefact) <> '') then
         begin
