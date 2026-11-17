@@ -4,7 +4,7 @@
 
 ## Was DX.Comply heute schreibt
 
-DX.Comply schreibt eine Komponentenliste (SBOM) und Build-Nachweise. Es listet die Units, Packages und DLL-Namen, die es aus dem Build sehen kann, und einen Hash, wo es die Datei oeffnen konnte. Diese Liste ist ein Anfang fuer den SBOM-Teil der technischen Dokumentation nach dem EU Cyber Resilience Act (Anhang I Teil II, Anhang VII). Sie macht ein Produkt nicht konform und ersetzt die uebrige technische Dokumentation nicht.
+SBOM und CPE sind die heutigen Bausteine. Weitere Bereiche koennen folgen. DX.Comply schreibt eine Komponentenliste (SBOM) und Build-Nachweise. Es listet die Units, Packages und DLL-Namen, die es aus dem Build sehen kann, und einen Hash, wo es die Datei oeffnen konnte. Diese Liste ist ein Anfang fuer den SBOM-Teil der technischen Dokumentation nach dem EU Cyber Resilience Act (Anhang I Teil II, Anhang VII). Sie macht ein Produkt nicht konform und ersetzt die uebrige technische Dokumentation nicht.
 
 Lieferant, Version und Lizenz fuer Komponenten Dritter schreibt DX.Comply, wenn ein Komponenten-Manifest (components.json) sie enthaelt. Der Rest der technischen Dokumentation fehlt weiterhin: Verfahren zur Behandlung von Schwachstellen, Offenlegungspolitik, Auslieferung von Updates und Risikobewertung. Schwachstellenmanagement und Meldewesen liegen ausserhalb dieses Werkzeugs.
 

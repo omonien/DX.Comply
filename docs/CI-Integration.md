@@ -28,6 +28,16 @@ executable from the pipeline.
 The `--no-pause` flag suppresses the interactive "Press Enter to quit" prompt
 and is **required** in all automated pipeline steps.
 
+`--cpe=<cpe>` sets `product.cpe` (a CPE 2.3 formatted string or a CPE 2.2 URI)
+on the product and on the built program. `--cpe-lookup` searches the NVD CPE
+API for the configured vendor and product and prints the matches. It does not
+write an SBOM. `--cpe-dictionary` writes a CPE Dictionary 2.3 file and a mail
+text next to the SBOM after generation and does not call the NVD. DX.Comply
+does not send that message. The optional NVD API key is `--nvd-api-key`, then
+the environment variable `NVD_API_KEY`, then
+`HKCU\Software\Developer Experts\DX.Comply\NIST` value `ApiKey`. It is not read
+from `.dxcomply.json` and it is not printed. The log names only the source.
+
 The default output directory comes from `DCC_ExeOutput`, then the BPL, DCP, and
 DCU output paths in the `.dproj`. `$(Platform)` and `$(Config)` are expanded.
 For 32-bit Android the platform folder is `Android`, so a default layout is
@@ -180,7 +190,8 @@ store the configuration in `.dxcomply.json` at the repository root.
   "product": {
     "name": "My Application",
     "version": "2.1.0",
-    "supplier": "My Company GmbH"
+    "supplier": "My Company GmbH",
+    "cpe": "cpe:2.3:a:example:my_application:2.1.0:*:*:*:*:*:*:*"
   }
 }
 ```

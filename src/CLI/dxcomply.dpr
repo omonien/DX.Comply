@@ -9,10 +9,12 @@
 /// the requested output path so pipeline runs do not depend on the IDE plugin.
 ///
 /// Exit codes:
-///   0 - SBOM generated successfully
-///   1 - Generation failed. --no-build uses this code when a build would run.
+///   0 - SBOM generated successfully, or --cpe-lookup found no error
+///   1 - Generation failed, the NVD search failed, or the CPE files could
+///       not be written. --no-build uses this code when a build would run.
 ///   2 - Invalid arguments
-///   3 - SBOM generated, but --strict is set and a CRA/BSI warning was raised
+///   3 - SBOM generated, but --strict is set and a CRA/BSI warning was raised.
+///       Used only when a requested CPE dictionary file was written as well.
 /// </remarks>
 ///
 /// <copyright>
@@ -31,6 +33,9 @@ uses
   System.SysUtils,
   DX.Comply.Engine,
   DX.Comply.Engine.Intf,
+  DX.Comply.Cpe,
+  DX.Comply.Cpe.Nvd,
+  DX.Comply.Cpe.NvdKey,
   DX.Comply.CLI.Options in 'DX.Comply.CLI.Options.pas',
   DX.Comply.CLI.GitTag in 'DX.Comply.CLI.GitTag.pas';
 
@@ -38,8 +43,57 @@ const
   cExitStrictWarnings = 3;
 
 // ---------------------------------------------------------------------------
-// Progress callback — negative progress signals an error
+// CPE lookup. Does not write an SBOM.
 // ---------------------------------------------------------------------------
+
+function RunCpeLookup(AOptions: TCliOptions;
+  const AResolution: TConfigPathResolution): Boolean;
+var
+  LConfig: TSbomConfig;
+  LGenerator: TDxComplyGenerator;
+  LSubmission: TCpeSubmission;
+  LResolved: TNvdApiKeyResolution;
+  LSearch: TNvdCpeSearchResult;
+  LKeyword: string;
+begin
+  Result := False;
+  LConfig := AOptions.ToSbomConfig;
+  if AOptions.CiMode and AResolution.Found then
+  begin
+    LGenerator := TDxComplyGenerator.Create;
+    try
+      LConfig := LGenerator.MergedConfig(AOptions.ToSbomConfig, AResolution.Path);
+    finally
+      LGenerator.Free;
+    end;
+  end;
+
+  LSubmission.Vendor := LConfig.Supplier;
+  LSubmission.Product := LConfig.ProductName;
+  LSubmission.Version := LConfig.ProductVersion;
+  LSubmission.References := CpeReferencesFromUrls(LConfig.SupplierUrl, LConfig.RepoUrl);
+  FillEmptyCpeNamesFromProject(AOptions.Project, LConfig.Platform,
+    LConfig.Configuration, LSubmission);
+  LKeyword := CpeLookupKeyword(LSubmission.Vendor, LSubmission.Product);
+  if LKeyword = '' then
+  begin
+    Writeln('Error: --cpe-lookup needs a vendor and a product. Set product.supplier and product.name, or pass --supplier and --product.');
+    ExitCode := 2;
+    Exit;
+  end;
+
+  LResolved := ResolveNvdApiKey(AOptions.NvdApiKey, nil);
+  LSearch := SearchNvdCpes(LKeyword, LResolved.Key);
+  Writeln(FormatNvdCpeLookupReport(LKeyword, NvdApiKeyLogLine(LResolved), LSearch));
+  if not LSearch.IsSuccess then
+  begin
+    Writeln('Error: ', LSearch.Error);
+    ExitCode := 1;
+    Exit;
+  end;
+  Result := True;
+  ExitCode := 0;
+end;
 
 procedure OnProgress(const AMessage: string; const AProgress: Integer);
 begin
@@ -105,6 +159,14 @@ begin
     LConfigWarning := TCliOptions.ConfigFileWarning(LOptions.CiMode, LConfigResolution);
     if LConfigWarning <> '' then
       Writeln(LConfigWarning);
+
+    if LOptions.CpeLookup then
+    begin
+      if not RunCpeLookup(LOptions, LConfigResolution) then
+        Exit;
+      if not LOptions.CpeDictionary then
+        Exit;
+    end;
 
     if LOptions.Project = '' then
     begin
@@ -190,10 +252,36 @@ begin
       begin
         Writeln('SBOM generated: ', LConfig.OutputPath);
         ExitCode := 0;
+        var LDictionaryWritten := not LOptions.CpeDictionary;
+        if LOptions.CpeDictionary then
+        begin
+          var LSubmission: TCpeSubmission;
+          var LDictionaryPath, LMailPath, LFileError: string;
+          LSubmission.Vendor := LConfig.Supplier;
+          LSubmission.Product := LConfig.ProductName;
+          LSubmission.Version := LConfig.ProductVersion;
+          LSubmission.References := CpeReferencesFromUrls(LConfig.SupplierUrl, LConfig.RepoUrl);
+          FillEmptyCpeNamesFromProject(LOptions.Project, LConfig.Platform,
+            LConfig.Configuration, LSubmission);
+          if WriteCpeSubmissionFiles(LConfig.OutputPath, LOptions.Project, LSubmission,
+            LDictionaryPath, LMailPath, LFileError) then
+          begin
+            Writeln('CPE dictionary: ', LDictionaryPath);
+            Writeln('CPE mail text: ', LMailPath);
+            Writeln('DX.Comply does not send the message.');
+            LDictionaryWritten := True;
+          end
+          else
+          begin
+            Writeln('Error: Could not write the CPE dictionary files. ', LFileError);
+            ExitCode := 1;
+          end;
+        end;
         // Issue #111: the SBOM and report are written, then strict mode fails
-        // the run on any CRA/BSI warning with its own exit code.
+        // the run on any CRA/BSI warning with its own exit code. A failed
+        // dictionary write keeps exit code 1.
         var LCraWarnings := LGenerator.CraWarnings;
-        if LConfig.StrictMode and (Length(LCraWarnings) > 0) then
+        if LDictionaryWritten and LConfig.StrictMode and (Length(LCraWarnings) > 0) then
         begin
           Writeln(Format('Strict mode: %d CRA/BSI warning(s):', [Length(LCraWarnings)]));
           for var LWarning in LCraWarnings do

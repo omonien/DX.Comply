@@ -59,7 +59,7 @@
       Top = 56
       Width = 328
       Height = 21
-      Caption = 'SBOM documentation for Delphi'
+      Caption = 'Compliance documentation for Delphi'
       Font.Charset = DEFAULT_CHARSET
       Font.Color = clGrayText
       Font.Height = -16
@@ -88,10 +88,11 @@
     Height = 52
     AutoSize = False
     Caption =
-      'DX.Comply lists the units, packages and DLL names it can see in a Delphi ' +
-      'build, with a hash where it could open the file. The SBOM is a starting ' +
-      'point for the SBOM part of EU CRA technical documentation. It does not ' +
-      'make a product compliant.'
+      'DX.Comply is a compliance tool for Delphi projects. SBOM and CPE are the ' +
+      'current building blocks, and further areas can follow. It lists the units, ' +
+      'packages and DLL names it can see in a build, with a hash where it could ' +
+      'open the file. The SBOM is a starting point for the SBOM part of EU CRA ' +
+      'technical documentation. It does not make a product compliant.'
     Transparent = True
     WordWrap = True
   end

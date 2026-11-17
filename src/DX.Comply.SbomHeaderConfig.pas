@@ -5,8 +5,8 @@
 ///
 /// <remarks>
 /// The header keys are the ones the CRA/BSI warnings ask for:
-///   sbomCreator, product.supplier, product.supplierUrl, product.licence
-///   and product.version.
+///   sbomCreator, product.supplier, product.supplierUrl, product.licence,
+///   product.version and product.cpe.
 /// The CLI reads the same keys in TDxComplyGenerator.LoadConfig, so a file
 /// written here works for both the IDE and dxcomply --ci.
 /// Writing keeps every other key and the order of existing keys. An empty
@@ -42,6 +42,11 @@ type
     Licence: string;
     /// <summary>product.version: version override. Empty uses the project version info.</summary>
     ProductVersion: string;
+    /// <summary>
+    /// product.cpe: CPE of this product. Empty removes the key. A value that
+    /// is not a CPE 2.3 formatted string or a CPE 2.2 URI is not valid.
+    /// </summary>
+    Cpe: string;
     /// <summary>All fields empty.</summary>
     class function Empty: TSbomHeaderData; static;
     /// <summary>Copy with every field trimmed.</summary>
@@ -87,6 +92,13 @@ type
     class function TryWrite(const AConfigPath: string; const AHeader: TSbomHeaderData;
       out AError: string): Boolean; static;
     /// <summary>
+    /// Writes only product.cpe. Other keys stay. An empty ACpe removes the
+    /// key. A value that is not a CPE 2.3 formatted string or a CPE 2.2 URI
+    /// fails and leaves the file unchanged. Does not require an SBOM creator.
+    /// </summary>
+    class function TryWriteProductCpe(const AConfigPath, ACpe: string;
+      out AError: string): Boolean; static;
+    /// <summary>
     /// Problems the user must fix before saving. Empty when AHeader is valid.
     /// The SBOM creator is checked like the engine does (IsAcceptableBsiCreator),
     /// the supplier URL must be an http(s) URL. Empty fields are valid.
@@ -107,6 +119,7 @@ uses
   System.IOUtils,
   System.JSON,
   System.Generics.Collections,
+  DX.Comply.ComponentManifest,
   DX.Comply.Engine.Intf;
 
 const
@@ -116,6 +129,7 @@ const
   cKeySupplierUrl = 'supplierUrl';
   cKeyLicence = 'licence';
   cKeyVersion = 'version';
+  cKeyCpe = 'cpe';
 
 { TSbomHeaderData }
 
@@ -126,6 +140,7 @@ begin
   Result.SupplierUrl := '';
   Result.Licence := '';
   Result.ProductVersion := '';
+  Result.Cpe := '';
 end;
 
 function TSbomHeaderData.Trimmed: TSbomHeaderData;
@@ -135,6 +150,7 @@ begin
   Result.SupplierUrl := Trim(SupplierUrl);
   Result.Licence := Trim(Licence);
   Result.ProductVersion := Trim(ProductVersion);
+  Result.Cpe := Trim(Cpe);
 end;
 
 { Helpers }
@@ -238,6 +254,8 @@ begin
         Exit(False);
       if not TryReadText(LProduct, cKeyVersion, 'product.version', AHeader.ProductVersion, AError) then
         Exit(False);
+      if not TryReadText(LProduct, cKeyCpe, 'product.cpe', AHeader.Cpe, AError) then
+        Exit(False);
     end;
     Result := True;
   finally
@@ -289,7 +307,8 @@ begin
       LProduct := TJSONObject(LProductValue);
     end
     else if (LHeader.Supplier <> '') or (LHeader.SupplierUrl <> '') or
-            (LHeader.Licence <> '') or (LHeader.ProductVersion <> '') then
+            (LHeader.Licence <> '') or (LHeader.ProductVersion <> '') or
+            (LHeader.Cpe <> '') then
     begin
       if Assigned(LProductValue) then
       begin
@@ -305,6 +324,7 @@ begin
       SetOrRemove(LProduct, cKeySupplierUrl, LHeader.SupplierUrl);
       SetOrRemove(LProduct, cKeyLicence, LHeader.Licence);
       SetOrRemove(LProduct, cKeyVersion, LHeader.ProductVersion);
+      SetOrRemove(LProduct, cKeyCpe, LHeader.Cpe);
       if LProduct.Count = 0 then
       begin
         LRoot.RemovePair(cKeyProduct).Free;
@@ -357,6 +377,10 @@ begin
     begin
       LErrors.Add('The supplier URL must start with http:// or https://.');
     end;
+    if (LHeader.Cpe <> '') and (ClassifyCpe(LHeader.Cpe) = ckNone) then
+    begin
+      LErrors.Add('product.cpe must be a CPE 2.3 formatted string (cpe:2.3:part:vendor:product:version:...) or a CPE 2.2 URI (cpe:/part:vendor:product:version:...).');
+    end;
     Result := LErrors.ToArray;
   finally
     LErrors.Free;
@@ -386,6 +410,75 @@ begin
   if LHeader.ProductVersion <> '' then
   begin
     AConfig.ProductVersion := LHeader.ProductVersion;
+  end;
+  if LHeader.Cpe <> '' then
+  begin
+    AConfig.Cpe := LHeader.Cpe;
+  end;
+end;
+
+class function TSbomHeaderConfig.TryWriteProductCpe(const AConfigPath, ACpe: string;
+  out AError: string): Boolean;
+var
+  LExisting, LCpe: string;
+  LRoot: TJSONObject;
+  LProductValue: TJSONValue;
+  LProduct: TJSONObject;
+  LEncoding: TUTF8Encoding;
+begin
+  AError := '';
+  LCpe := Trim(ACpe);
+  if (LCpe <> '') and (ClassifyCpe(LCpe) = ckNone) then
+  begin
+    AError := 'product.cpe must be a CPE 2.3 formatted string or a CPE 2.2 URI.';
+    Exit(False);
+  end;
+  try
+    LExisting := '';
+    if TFile.Exists(AConfigPath) then
+      LExisting := TFile.ReadAllText(AConfigPath, TEncoding.UTF8);
+    if not ParseRoot(LExisting, LRoot, AError) then
+      Exit(False);
+    try
+      LProductValue := LRoot.GetValue(cKeyProduct);
+      if Assigned(LProductValue) and not (LProductValue is TJSONObject) and
+         not (LProductValue is TJSONNull) then
+      begin
+        AError := 'product must be a JSON object';
+        Exit(False);
+      end;
+      LProduct := nil;
+      if LProductValue is TJSONObject then
+        LProduct := TJSONObject(LProductValue)
+      else if LCpe <> '' then
+      begin
+        if Assigned(LProductValue) then
+          LRoot.RemovePair(cKeyProduct).Free;
+        LProduct := TJSONObject.Create;
+        LRoot.AddPair(cKeyProduct, LProduct);
+      end;
+      if Assigned(LProduct) then
+      begin
+        SetOrRemove(LProduct, cKeyCpe, LCpe);
+        if LProduct.Count = 0 then
+          LRoot.RemovePair(cKeyProduct).Free;
+      end;
+      LEncoding := TUTF8Encoding.Create(False);
+      try
+        TFile.WriteAllText(AConfigPath, LRoot.Format(2) + sLineBreak, LEncoding);
+      finally
+        LEncoding.Free;
+      end;
+      Result := True;
+    finally
+      LRoot.Free;
+    end;
+  except
+    on E: Exception do
+    begin
+      AError := E.Message;
+      Result := False;
+    end;
   end;
 end;
 
