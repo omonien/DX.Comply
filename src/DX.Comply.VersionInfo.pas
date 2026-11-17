@@ -9,6 +9,9 @@
 /// ParamStr(0), which inside the IDE is bds.exe. The CLI and the test runner
 /// read their own executable the same way. GetDxComplyToolVersion is the
 /// helper the CLI --version path can call later.
+/// GetFileVersionText prefers the numeric file version (a.b.c.d). It uses
+/// the FileVersion string, then the ProductVersion string, only when the
+/// file has no fixed file info. The SBOM and the reports share that value.
 /// </remarks>
 ///
 /// <copyright>
@@ -37,10 +40,20 @@ function GetModuleProductVersion(AModule: HMODULE): string;
 function GetModuleVersionString(AModule: HMODULE; const AName: string): string;
 
 /// <summary>
-/// Version of the file at APath from its version resource: the FileVersion
-/// string, else the ProductVersion string, else the fixed file version.
-/// Returns an empty string when the file is missing or has no version
-/// resource. Used for third-party binaries listed in a build SBOM.
+/// Chooses the version text for a binary. When AHasFixedFileInfo is true,
+/// dwFileVersionMS and dwFileVersionLS are formatted as a.b.c.d, including
+/// 0.0.0.0. Otherwise AFileVersion is used, then AProductVersion. Blank
+/// strings are skipped.
+/// </summary>
+function SelectFileVersionText(AHasFixedFileInfo: Boolean;
+  const AFixedInfo: TVSFixedFileInfo; const AFileVersion, AProductVersion: string): string;
+
+/// <summary>
+/// Version of the file at APath from its version resource. The numeric file
+/// version (a.b.c.d) is used when fixed file info is present. Otherwise the
+/// FileVersion string is used, then the ProductVersion string. Returns an
+/// empty string when the file is missing or has no version resource. Used
+/// for binaries listed in a build SBOM and in the reports.
 /// </summary>
 function GetFileVersionText(const APath: string): string;
 
@@ -177,28 +190,51 @@ begin
     LoWord(LVersionInfo^.dwProductVersionLS)]);
 end;
 
-function QueryFixedFileVersion(const AVersionData: TBytes): string;
+function TryReadFixedFileInfo(const AVersionData: TBytes;
+  out AInfo: TVSFixedFileInfo): Boolean;
 var
   LVersionInfo: PVSFixedFileInfo;
   LVersionLength: UINT;
 begin
-  Result := '';
-  if (Length(AVersionData) = 0) or
-    not VerQueryValue(@AVersionData[0], '\', Pointer(LVersionInfo), LVersionLength) or
-    (LVersionLength < SizeOf(VS_FIXEDFILEINFO)) then
+  AInfo := Default(TVSFixedFileInfo);
+  Result := False;
+  if Length(AVersionData) = 0 then
     Exit;
-  if (LVersionInfo^.dwFileVersionMS = 0) and (LVersionInfo^.dwFileVersionLS = 0) then
+  if not VerQueryValue(@AVersionData[0], '\', Pointer(LVersionInfo), LVersionLength) then
+    Exit;
+  if LVersionLength < SizeOf(VS_FIXEDFILEINFO) then
     Exit;
 
+  AInfo := LVersionInfo^;
+  Result := True;
+end;
+
+function FormatFixedFileVersion(AVersionMS, AVersionLS: DWORD): string;
+begin
   Result := Format('%d.%d.%d.%d', [
-    HiWord(LVersionInfo^.dwFileVersionMS),
-    LoWord(LVersionInfo^.dwFileVersionMS),
-    HiWord(LVersionInfo^.dwFileVersionLS),
-    LoWord(LVersionInfo^.dwFileVersionLS)]);
+    HiWord(AVersionMS),
+    LoWord(AVersionMS),
+    HiWord(AVersionLS),
+    LoWord(AVersionLS)]);
+end;
+
+function SelectFileVersionText(AHasFixedFileInfo: Boolean;
+  const AFixedInfo: TVSFixedFileInfo; const AFileVersion, AProductVersion: string): string;
+begin
+  // Vendors edit the string values freely. The numeric fields are the
+  // file version stored in the fixed file info.
+  if AHasFixedFileInfo then
+    Exit(FormatFixedFileVersion(AFixedInfo.dwFileVersionMS, AFixedInfo.dwFileVersionLS));
+
+  Result := Trim(AFileVersion);
+  if Result = '' then
+    Result := Trim(AProductVersion);
 end;
 
 function GetFileVersionText(const APath: string): string;
 var
+  LFixedInfo: TVSFixedFileInfo;
+  LHasFixedInfo: Boolean;
   LVersionData: TBytes;
 begin
   Result := '';
@@ -207,11 +243,10 @@ begin
   LVersionData := LoadFileVersionData(APath);
   if Length(LVersionData) = 0 then
     Exit;
-  Result := QueryVersionString(LVersionData, 'FileVersion');
-  if Result = '' then
-    Result := QueryVersionString(LVersionData, 'ProductVersion');
-  if Result = '' then
-    Result := QueryFixedFileVersion(LVersionData);
+  LHasFixedInfo := TryReadFixedFileInfo(LVersionData, LFixedInfo);
+  Result := SelectFileVersionText(LHasFixedInfo, LFixedInfo,
+    QueryVersionString(LVersionData, 'FileVersion'),
+    QueryVersionString(LVersionData, 'ProductVersion'));
 end;
 
 function GetModuleVersionString(AModule: HMODULE; const AName: string): string;

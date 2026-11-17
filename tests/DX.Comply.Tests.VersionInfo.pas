@@ -5,7 +5,9 @@
 ///
 /// <remarks>
 /// Confirms the helper reads the running module (HInstance) and that a zero
-/// module handle does not switch to the host executable.
+/// module handle does not switch to the host executable. The file version
+/// selection tests pass fixed file info and version strings, so they do not
+/// need a binary.
 /// </remarks>
 ///
 /// <copyright>
@@ -58,6 +60,43 @@ type
     /// </summary>
     [Test]
     procedure VersionCaption_UsesModuleVersionOrUnavailable;
+
+    /// <summary>
+    /// A numeric file version wins when the version strings differ.
+    /// </summary>
+    [Test]
+    procedure Select_NumericVersion_WinsOverDifferentText;
+
+    /// <summary>
+    /// A numeric file version is used when both version strings are empty.
+    /// </summary>
+    [Test]
+    procedure Select_NumericVersion_UsedWhenStringsEmpty;
+
+    /// <summary>
+    /// Fixed file info of 0.0.0.0 is a version and is not replaced by text.
+    /// </summary>
+    [Test]
+    procedure Select_ZeroNumericVersion_WinsOverText;
+
+    /// <summary>
+    /// Without fixed file info, the FileVersion string is used.
+    /// </summary>
+    [Test]
+    procedure Select_NoFixedInfo_UsesFileVersion;
+
+    /// <summary>
+    /// Without fixed file info, a blank FileVersion falls through to
+    /// ProductVersion.
+    /// </summary>
+    [Test]
+    procedure Select_NoFixedInfo_BlankFileVersion_UsesProductVersion;
+
+    /// <summary>
+    /// Without fixed file info and without version strings, the result is empty.
+    /// </summary>
+    [Test]
+    procedure Select_NoFixedInfo_BothBlank_ReturnsEmpty;
   end;
 
 implementation
@@ -65,6 +104,14 @@ implementation
 uses
   System.RegularExpressions,
   System.SysUtils;
+
+function MakeFixedFileInfo(AMajor, AMinor, ARelease, ABuild: Word): TVSFixedFileInfo;
+begin
+  Result := Default(TVSFixedFileInfo);
+  Result.dwSignature := VS_FFI_SIGNATURE;
+  Result.dwFileVersionMS := (DWORD(AMajor) shl 16) or DWORD(AMinor);
+  Result.dwFileVersionLS := (DWORD(ARelease) shl 16) or DWORD(ABuild);
+end;
 
 procedure TVersionInfoTests.ToolVersion_MatchesRunningModule;
 var
@@ -120,6 +167,70 @@ begin
       'The caption must show the module product version');
     Assert.Contains(LCaption, LModuleVersion);
   end;
+end;
+
+procedure TVersionInfoTests.Select_NumericVersion_WinsOverDifferentText;
+var
+  LInfo: TVSFixedFileInfo;
+begin
+  // Issue #188: a vendor string such as "6, 10, 5, 0" must not replace 6.10.5.0.
+  LInfo := MakeFixedFileInfo(6, 10, 5, 0);
+  LInfo.dwProductVersionMS := (DWORD(1) shl 16) or DWORD(2);
+  LInfo.dwProductVersionLS := (DWORD(3) shl 16) or DWORD(4);
+  Assert.AreEqual('6.10.5.0',
+    SelectFileVersionText(True, LInfo, '6, 10, 5, 0', '1.2.3.4'),
+    'the numeric file version wins when the version strings differ');
+end;
+
+procedure TVersionInfoTests.Select_NumericVersion_UsedWhenStringsEmpty;
+var
+  LInfo: TVSFixedFileInfo;
+begin
+  LInfo := MakeFixedFileInfo(9, 8, 7, 6);
+  Assert.AreEqual('9.8.7.6', SelectFileVersionText(True, LInfo, '', ''),
+    'fixed file info is enough when both version strings are empty');
+end;
+
+procedure TVersionInfoTests.Select_ZeroNumericVersion_WinsOverText;
+var
+  LInfo: TVSFixedFileInfo;
+begin
+  LInfo := MakeFixedFileInfo(0, 0, 0, 0);
+  Assert.AreEqual('0.0.0.0', SelectFileVersionText(True, LInfo, '1.2.3', '4.5.6'),
+    'fixed file info of 0.0.0.0 is a version and is not replaced by text');
+end;
+
+procedure TVersionInfoTests.Select_NoFixedInfo_UsesFileVersion;
+var
+  LInfo: TVSFixedFileInfo;
+begin
+  LInfo := Default(TVSFixedFileInfo);
+  Assert.AreEqual('1.2.3-beta',
+    SelectFileVersionText(False, LInfo, '  1.2.3-beta  ', '9.9.9'),
+    'without fixed file info the FileVersion string is used, trimmed');
+end;
+
+procedure TVersionInfoTests.Select_NoFixedInfo_BlankFileVersion_UsesProductVersion;
+var
+  LInfo: TVSFixedFileInfo;
+begin
+  LInfo := Default(TVSFixedFileInfo);
+  Assert.AreEqual('4.5.6',
+    SelectFileVersionText(False, LInfo, '   ', '  4.5.6  '),
+    'a blank FileVersion string falls through to ProductVersion');
+  Assert.AreEqual('4.5.6', SelectFileVersionText(False, LInfo, '', '4.5.6'),
+    'an empty FileVersion string falls through to ProductVersion');
+end;
+
+procedure TVersionInfoTests.Select_NoFixedInfo_BothBlank_ReturnsEmpty;
+var
+  LInfo: TVSFixedFileInfo;
+begin
+  LInfo := Default(TVSFixedFileInfo);
+  Assert.AreEqual('', SelectFileVersionText(False, LInfo, '', ''),
+    'no fixed file info and no version strings means no version');
+  Assert.AreEqual('', SelectFileVersionText(False, LInfo, '  ', '   '),
+    'whitespace is not a version string');
 end;
 
 initialization

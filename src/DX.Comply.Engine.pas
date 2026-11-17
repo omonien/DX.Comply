@@ -584,10 +584,12 @@ type
 /// Build mode versions for files that have no version yet.
 /// The file at AOwnOutputPath (the executable, DLL, or package the project
 /// builds) and a .dcp get AVersion, the product version. When AVersion is
-/// empty, that .exe, .dll, or .bpl still on disk gets its PE FileVersion
-/// (or ProductVersion) so the report and CycloneDX stay aligned (issue #90).
+/// empty, that .exe, .dll, or .bpl still on disk gets its numeric PE file
+/// version (a.b.c.d), or the FileVersion string and then the ProductVersion
+/// string when fixed file info is absent, so the report and CycloneDX stay
+/// aligned (issue #90).
 /// Any other .exe, .dll, or .bpl found on disk gets the version from its own
-/// version resource (issue #96). A .dcp is the project's own only when
+/// version resource the same way (issue #96). A .dcp is the project's own only when
 /// AOwnOutputPath is a package whose name starts with the .dcp name; any
 /// other .dcp is treated like a third-party file. A file that still has no
 /// version and exists on disk gets its last modification time in UTC as an
