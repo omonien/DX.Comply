@@ -68,6 +68,13 @@ function ParseNvdCpeResponse(const AJson: string): TNvdCpeSearchResult;
 function SearchNvdCpes(const AKeyword, AApiKey: string): TNvdCpeSearchResult;
 
 /// <summary>
+/// Number of matches as text. One page holds up to 50 names. When the
+/// service reports more, the text is "50 of 312", so the reader knows the
+/// list is not complete.
+/// </summary>
+function NvdCpeMatchCountText(const AResult: TNvdCpeSearchResult): string;
+
+/// <summary>
 /// Text --cpe-lookup prints. AKeyLogLine is the source line from
 /// NvdApiKeyLogLine. The key itself is not accepted here. A failed search
 /// stops after the keyword. Zero matches names --cpe-dictionary and says
@@ -319,6 +326,13 @@ begin
   end;
 end;
 
+function NvdCpeMatchCountText(const AResult: TNvdCpeSearchResult): string;
+begin
+  Result := IntToStr(Length(AResult.Matches));
+  if AResult.TotalResults > Length(AResult.Matches) then
+    Result := Result + ' of ' + IntToStr(AResult.TotalResults);
+end;
+
 function FormatNvdCpeLookupReport(const AKeyword, AKeyLogLine: string;
   const AResult: TNvdCpeSearchResult): string;
 var
@@ -334,7 +348,9 @@ begin
     LLines.Add('Keyword: ' + Trim(AKeyword));
     if not AResult.IsSuccess then
       Exit(LLines.Text);
-    LLines.Add('Matches: ' + IntToStr(Length(AResult.Matches)));
+    LLines.Add('Matches: ' + NvdCpeMatchCountText(AResult));
+    if AResult.TotalResults > Length(AResult.Matches) then
+      LLines.Add('Only the first page is listed. Use a narrower vendor and product to see the others.');
     for LMatch in AResult.Matches do
     begin
       LLines.Add(LMatch.CpeName);

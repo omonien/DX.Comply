@@ -91,6 +91,13 @@ type
 
     [Test]
     procedure LookupReport_ZeroMatchesNamesDictionary;
+
+    /// <summary>
+    /// The NVD returns one page. When it reports more names than the page
+    /// holds, the count says so.
+    /// </summary>
+    [Test]
+    procedure LookupReport_MoreThanOnePage_NamesTheTotal;
   end;
 
   [TestFixture]
@@ -127,6 +134,10 @@ type
     [Test]
     procedure Spdx_WritesSecurityExternalRefOnDeliverable;
 
+    /// <summary>SPDX 3.0.1 keeps the product CPE as an external identifier.</summary>
+    [Test]
+    procedure Spdx3_WritesProductCpeAsExternalIdentifier;
+
     [Test]
     procedure ProductCpe_RoundTripThroughConfig;
 
@@ -148,6 +159,7 @@ uses
   DX.Comply.Engine.Intf,
   DX.Comply.SbomHeaderConfig,
   DX.Comply.Spdx.Writer,
+  DX.Comply.Spdx3.Writer,
   DX.Comply.CLI.Options,
   DX.Comply.Tests.Paths;
 
@@ -344,6 +356,29 @@ begin
   Assert.AreEqual(0, Pos('secret-token-value', LReport), LReport);
 end;
 
+procedure TNvdCpeResponseTests.LookupReport_MoreThanOnePage_NamesTheTotal;
+var
+  LParsed: TNvdCpeSearchResult;
+  LReport: string;
+begin
+  LParsed := ParseNvdCpeResponse(
+    '{"totalResults":312,"products":[' +
+    '{"cpe":{"cpeName":"cpe:2.3:a:acme:widget:1.0:*:*:*:*:*:*:*","deprecated":false}},' +
+    '{"cpe":{"cpeName":"cpe:2.3:a:acme:widget:2.0:*:*:*:*:*:*:*","deprecated":false}}]}');
+  Assert.AreEqual('2 of 312', NvdCpeMatchCountText(LParsed));
+  LReport := FormatNvdCpeLookupReport('Acme Widget', 'NVD API key: none', LParsed);
+  Assert.IsTrue(Pos('Matches: 2 of 312', LReport) > 0, LReport);
+  Assert.IsTrue(Pos('Only the first page is listed', LReport) > 0, LReport);
+
+  // The whole result on one page keeps the plain count.
+  LParsed := ParseNvdCpeResponse(
+    '{"totalResults":1,"products":[' +
+    '{"cpe":{"cpeName":"cpe:2.3:a:acme:widget:1.0:*:*:*:*:*:*:*","deprecated":false}}]}');
+  Assert.AreEqual('1', NvdCpeMatchCountText(LParsed));
+  Assert.AreEqual(0, Pos('first page',
+    FormatNvdCpeLookupReport('Acme Widget', 'NVD API key: none', LParsed)));
+end;
+
 procedure TNvdCpeResponseTests.LookupReport_ZeroMatchesNamesDictionary;
 var
   LParsed: TNvdCpeSearchResult;
@@ -487,6 +522,8 @@ begin
       LWriter := TCycloneDxXmlWriter.Create
     else if AFormat = sfSpdxJson then
       LWriter := TSpdxJsonWriter.Create
+    else if AFormat = sfSpdx3Json then
+      LWriter := TSpdx3JsonWriter.Create
     else
       LWriter := TCycloneDxJsonWriter.Create;
     Assert.IsTrue(LWriter.Write(LPath, LMetadata, LArtefacts, LProject));
@@ -567,6 +604,47 @@ begin
       end;
     end;
     Assert.IsTrue(LFound, LPackage.ToString);
+  finally
+    LRoot.Free;
+  end;
+end;
+
+procedure TProductCpeWriterTests.Spdx3_WritesProductCpeAsExternalIdentifier;
+const
+  cCpe = 'cpe:2.3:a:acme:widget:1.2.3:*:*:*:*:*:*:*';
+var
+  LJson: string;
+  LRoot, LElement, LIdentifier: TJSONObject;
+  LGraph, LIdentifiers: TJSONArray;
+  I, J: Integer;
+  LFound: Boolean;
+begin
+  LJson := WriteProductCpe(sfSpdx3Json, cCpe);
+  LRoot := TJSONObject.ParseJSONValue(LJson) as TJSONObject;
+  Assert.IsNotNull(LRoot, LJson);
+  try
+    LGraph := LRoot.GetValue<TJSONArray>('@graph');
+    LFound := False;
+    for I := 0 to LGraph.Count - 1 do
+    begin
+      if not (LGraph.Items[I] is TJSONObject) then
+        Continue;
+      LElement := TJSONObject(LGraph.Items[I]);
+      if not (LElement.GetValue('externalIdentifier') is TJSONArray) then
+        Continue;
+      LIdentifiers := TJSONArray(LElement.GetValue('externalIdentifier'));
+      for J := 0 to LIdentifiers.Count - 1 do
+      begin
+        LIdentifier := LIdentifiers.Items[J] as TJSONObject;
+        if LIdentifier.GetValue<string>('externalIdentifierType', '') = 'cpe23' then
+        begin
+          LFound := True;
+          Assert.AreEqual(cCpe, LIdentifier.GetValue<string>('identifier', ''));
+          Assert.AreEqual('software_Package', LElement.GetValue<string>('type', ''));
+        end;
+      end;
+    end;
+    Assert.IsTrue(LFound, 'The built program must carry the CPE: ' + LJson);
   finally
     LRoot.Free;
   end;

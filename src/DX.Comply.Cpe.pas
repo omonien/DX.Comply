@@ -522,7 +522,7 @@ end;
 procedure FillEmptyCpeNamesFromProject(const AProjectPath, APlatform,
   AConfiguration: string; var ASubmission: TCpeSubmission);
 var
-  LScanner: TProjectScanner;
+  LScanner: IProjectScanner;
   LInfo: TProjectInfo;
   LPlatform, LConfiguration: string;
 begin
@@ -537,26 +537,24 @@ begin
   LConfiguration := Trim(AConfiguration);
   if LConfiguration = '' then
     LConfiguration := 'Release';
-  LScanner := TProjectScanner.Create;
+  // Held as an interface, as the engine does. The scanner is reference
+  // counted, so it must not be freed through an object reference.
   try
+    LScanner := TProjectScanner.Create;
+    LInfo := LScanner.Scan(AProjectPath, LPlatform, LConfiguration);
     try
-      LInfo := LScanner.Scan(AProjectPath, LPlatform, LConfiguration);
-      try
-        if Trim(ASubmission.Vendor) = '' then
-          ASubmission.Vendor := Trim(LInfo.CompanyName);
-        if Trim(ASubmission.Product) = '' then
-          ASubmission.Product := Trim(LInfo.ProjectName);
-        if Trim(ASubmission.Version) = '' then
-          ASubmission.Version := Trim(LInfo.Version);
-      finally
-        LInfo.Free;
-      end;
-    except
-      on Exception do
-        ;
+      if Trim(ASubmission.Vendor) = '' then
+        ASubmission.Vendor := Trim(LInfo.CompanyName);
+      if Trim(ASubmission.Product) = '' then
+        ASubmission.Product := Trim(LInfo.ProjectName);
+      if Trim(ASubmission.Version) = '' then
+        ASubmission.Version := Trim(LInfo.Version);
+    finally
+      LInfo.Free;
     end;
-  finally
-    LScanner.Free;
+  except
+    on Exception do
+      ;
   end;
 end;
 

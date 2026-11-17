@@ -4047,7 +4047,7 @@ begin
   begin
     DoProgress('Warning: product.cpe "' + Result +
       '" is not a CPE 2.3 formatted string (cpe:2.3:part:vendor:product:version:...) ' +
-      'or a CPE 2.2 URI (cpe:/part:vendor:product:version:...) and was omitted', 5);
+      'or a CPE 2.2 URI (cpe:/part:vendor:product:version:...) and was omitted.', 5);
     Result := '';
   end;
 end;

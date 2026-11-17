@@ -92,13 +92,6 @@ type
     class function TryWrite(const AConfigPath: string; const AHeader: TSbomHeaderData;
       out AError: string): Boolean; static;
     /// <summary>
-    /// Writes only product.cpe. Other keys stay. An empty ACpe removes the
-    /// key. A value that is not a CPE 2.3 formatted string or a CPE 2.2 URI
-    /// fails and leaves the file unchanged. Does not require an SBOM creator.
-    /// </summary>
-    class function TryWriteProductCpe(const AConfigPath, ACpe: string;
-      out AError: string): Boolean; static;
-    /// <summary>
     /// Problems the user must fix before saving. Empty when AHeader is valid.
     /// The SBOM creator is checked like the engine does (IsAcceptableBsiCreator),
     /// the supplier URL must be an http(s) URL. Empty fields are valid.
@@ -414,71 +407,6 @@ begin
   if LHeader.Cpe <> '' then
   begin
     AConfig.Cpe := LHeader.Cpe;
-  end;
-end;
-
-class function TSbomHeaderConfig.TryWriteProductCpe(const AConfigPath, ACpe: string;
-  out AError: string): Boolean;
-var
-  LExisting, LCpe: string;
-  LRoot: TJSONObject;
-  LProductValue: TJSONValue;
-  LProduct: TJSONObject;
-  LEncoding: TUTF8Encoding;
-begin
-  AError := '';
-  LCpe := Trim(ACpe);
-  if (LCpe <> '') and (ClassifyCpe(LCpe) = ckNone) then
-  begin
-    AError := 'product.cpe must be a CPE 2.3 formatted string or a CPE 2.2 URI.';
-    Exit(False);
-  end;
-  try
-    LExisting := '';
-    if TFile.Exists(AConfigPath) then
-      LExisting := TFile.ReadAllText(AConfigPath, TEncoding.UTF8);
-    if not ParseRoot(LExisting, LRoot, AError) then
-      Exit(False);
-    try
-      LProductValue := LRoot.GetValue(cKeyProduct);
-      if Assigned(LProductValue) and not (LProductValue is TJSONObject) and
-         not (LProductValue is TJSONNull) then
-      begin
-        AError := 'product must be a JSON object';
-        Exit(False);
-      end;
-      LProduct := nil;
-      if LProductValue is TJSONObject then
-        LProduct := TJSONObject(LProductValue)
-      else if LCpe <> '' then
-      begin
-        if Assigned(LProductValue) then
-          LRoot.RemovePair(cKeyProduct).Free;
-        LProduct := TJSONObject.Create;
-        LRoot.AddPair(cKeyProduct, LProduct);
-      end;
-      if Assigned(LProduct) then
-      begin
-        SetOrRemove(LProduct, cKeyCpe, LCpe);
-        if LProduct.Count = 0 then
-          LRoot.RemovePair(cKeyProduct).Free;
-      end;
-      LEncoding := TUTF8Encoding.Create(False);
-      try
-        TFile.WriteAllText(AConfigPath, LRoot.Format(2) + sLineBreak, LEncoding);
-      finally
-        LEncoding.Free;
-      end;
-      Result := True;
-    finally
-      LRoot.Free;
-    end;
-  except
-    on E: Exception do
-    begin
-      AError := E.Message;
-      Result := False;
-    end;
   end;
 end;
 
