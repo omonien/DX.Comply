@@ -154,6 +154,13 @@ type
     /// </summary>
     [Test]
     procedure Licences_ProductBinary_NotMergedWhenDifferentFile;
+    /// <summary>
+    /// A product row with no merged binary shows the product version.
+    /// The project version is used when the header has none. A merged
+    /// binary still shows that binary's version. Issue #199.
+    /// </summary>
+    [Test]
+    procedure Licences_ProductWithoutBinary_ShowsProductVersion;
   end;
 
 implementation
@@ -777,7 +784,8 @@ begin
         Inc(LCopies);
       end;
   Assert.AreEqual(2, LCopies, 'Both copies of the built program use the product version');
-  Assert.AreEqual('', VersionOf(LOverview, 'WernigApp (product)'));
+  Assert.AreEqual<string>('16.0.0.7', VersionOf(LOverview, 'WernigApp (product)'),
+    'a product row without a merged binary shows the product version');
   Assert.AreEqual('', VersionOf(LOverview, 'vendor.dll'),
     'A third-party DLL does not inherit the product version');
   Assert.AreEqual('', VersionOf(LOverview, 'plugin.dll'));
@@ -1045,6 +1053,79 @@ begin
   Assert.AreEqual<string>('MyPkg (product)', LOwn.Components[0].Name);
   Assert.AreEqual<string>('MyPkg290.bpl', LOwn.Components[1].Name);
   Assert.AreEqual<string>('1.0.0', LOwn.Components[1].Version);
+end;
+
+procedure TReportOverviewTests.Licences_ProductWithoutBinary_ShowsProductVersion;
+
+  procedure AddSource(const APath, AVersion: string);
+  var
+    LArtefact: TArtefactInfo;
+  begin
+    LArtefact := Default(TArtefactInfo);
+    LArtefact.RelativePath := APath;
+    LArtefact.ArtefactType := 'file';
+    LArtefact.LibrarySourceFile := True;
+    LArtefact.Version := AVersion;
+    FArtefacts.Add(LArtefact);
+  end;
+
+begin
+  // Library mode: FixtureLib.dpk has the product's file stem, but it is
+  // source, not the built binary, so the rows stay separate.
+  FData.Metadata.ProductName := 'FixtureLib';
+  FData.Metadata.ProductVersion := '1.2.3.0';
+  FData.Metadata.Licence := 'MIT';
+  FData.ProjectInfo.ProjectName := 'FixtureLib';
+  FData.ProjectInfo.Version := '9.9.9.9';
+  AddSource('FixtureLib.dpk', '1.2.3.0');
+  AddSource('FixtureLib.Core.pas', '1.2.3.0');
+
+  var LOverview := BuildReportOverview(FData);
+  var LOwn := FindLicence(LOverview.Licences, 'MIT');
+  Assert.AreEqual<Integer>(1, LOwn.Count);
+  Assert.AreEqual<string>('FixtureLib (product)', LOwn.Components[0].Name);
+  Assert.AreEqual<string>('1.2.3.0', LOwn.Components[0].Version,
+    'the product row shows the header version');
+  var LNone := FindLicence(LOverview.Licences, cNoLicenceGroupTitle);
+  Assert.AreEqual<Integer>(2, LNone.Count);
+  Assert.AreEqual<string>('FixtureLib.Core.pas', LNone.Components[0].Name);
+  Assert.AreEqual<string>('FixtureLib.dpk', LNone.Components[1].Name);
+
+  // Header empty: the project version is the one the overview shows.
+  FData.Metadata.ProductVersion := '';
+  LOverview := BuildReportOverview(FData);
+  LOwn := FindLicence(LOverview.Licences, 'MIT');
+  Assert.AreEqual<string>('9.9.9.9', LOwn.Components[0].Version,
+    'the project version fills an empty product version');
+
+  // A merged binary replaces that version with the binary's own version.
+  FArtefacts.Clear;
+  FData.Metadata.ProductName := 'Demo';
+  FData.Metadata.ProductVersion := '2.0.0';
+  FData.ProjectInfo.ProjectName := 'Demo';
+  FData.ProjectInfo.Version := '2.0.0';
+  FData.Metadata.Licence := 'Proprietary';
+  var LExe := Default(TArtefactInfo);
+  LExe.RelativePath := 'Demo.exe';
+  LExe.ArtefactType := 'file';
+  LExe.Version := '9.8.7.6';
+  FArtefacts.Add(LExe);
+  LOverview := BuildReportOverview(FData);
+  LOwn := FindLicence(LOverview.Licences, 'Proprietary');
+  Assert.AreEqual<Integer>(1, LOwn.Count);
+  Assert.AreEqual<string>('Demo (product)', LOwn.Components[0].Name);
+  Assert.AreEqual<string>('9.8.7.6', LOwn.Components[0].Version,
+    'a merged binary keeps its own version');
+
+  // An empty binary version leaves the product version on the combined row.
+  FArtefacts.Clear;
+  LExe.Version := '';
+  FArtefacts.Add(LExe);
+  LOverview := BuildReportOverview(FData);
+  LOwn := FindLicence(LOverview.Licences, 'Proprietary');
+  Assert.AreEqual<Integer>(1, LOwn.Count);
+  Assert.AreEqual<string>('2.0.0', LOwn.Components[0].Version,
+    'an empty binary version keeps the product version');
 end;
 
 initialization

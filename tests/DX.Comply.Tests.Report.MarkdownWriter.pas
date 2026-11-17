@@ -403,8 +403,8 @@ begin
   LWriter := TMarkdownReportWriter.Create;
   Assert.IsTrue(LWriter.Write(FOutputPath, FData, THumanReadableReportConfig.Default));
   LContent := TFile.ReadAllText(FOutputPath, TEncoding.UTF8);
-  Assert.IsTrue(Pos('| MIT | 2 | libWernigApp.so | 16.0.0.7 |', LContent) > 0,
-    'The licence table uses the product version');
+  Assert.IsTrue(Pos('| libWernigApp.so | 16.0.0.7 |', LContent) > 0,
+    'The licence table uses the product version for the deliverable');
   Assert.IsTrue(Pos('| vendor.dll |  |', LContent) > 0,
     'A third-party DLL does not inherit the product version in the licence table');
   Assert.IsTrue(Pos('| Android\Release\libWernigApp.so | file | 16.0.0.7 |', LContent) > 0,

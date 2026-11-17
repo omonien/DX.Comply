@@ -19,12 +19,14 @@
 /// The built program's licence row uses its own version, or the product
 /// version from the SBOM header when the file has none. A third-party file
 /// does not inherit that version.
-/// The product row is first in its licence group. When that row and the
-/// project's own binary are the same file, the file name without its
-/// extension is the product name, and the report shows one row. The
-/// version on it is the binary's version. A second copy of the file stays
-/// on its own row. When the names differ, the product stays first and the
-/// binary stays in the sorted list (issue #199).
+/// The product row is first in its licence group. It shows the product
+/// version from the SBOM header, or the project version when the header
+/// has none. When that row and the project's own binary are the same
+/// file, the file name without its extension is the product name, and
+/// the report shows one row. The version on it is the binary's version,
+/// or the product version when the file has none. A second copy of the
+/// file stays on its own row. When the names differ, the product stays
+/// first and the binary stays in the sorted list (issue #199).
 /// </remarks>
 ///
 /// <copyright>
@@ -95,8 +97,10 @@ type
     /// <summary>Component name, without the version.</summary>
     Name: string;
     /// <summary>
-    /// Manifest version, or the built program's version on the product row
-    /// when that program is the same file. Empty when the row does not set one.
+    /// Manifest version. The product row shows the product version, or the
+    /// project version when the header has none. When the product and the
+    /// project's own binary are the same file, that row shows the binary's
+    /// version instead. Empty when the row does not set one.
     /// </summary>
     Version: string;
     /// <summary>Manifest copyright text. Empty when the field is not set.</summary>
@@ -432,9 +436,11 @@ begin
     begin
       if not LList[I].IsProduct then
         Continue;
+      // The combined row shows the binary's version. An empty value is
+      // rejected above, so the product version already on the row stays
+      // when the file has none.
       LItem := LList[I];
-      if LItem.Version = '' then
-        LItem.Version := Trim(AVersion);
+      LItem.Version := Trim(AVersion);
       LList[I] := LItem;
       Exit;
     end;
@@ -706,15 +712,21 @@ begin
     begin
       LProductName := AData.ProjectInfo.ProjectName;
     end;
+    // A product row with no merged binary shows the header version, or the
+    // project version when the header has none. A merged binary replaces
+    // that value with the binary's version below.
+    var LProductVersion := Trim(AData.Metadata.ProductVersion);
+    if LProductVersion = '' then
+      LProductVersion := Trim(AData.ProjectInfo.Version);
     if Trim(AData.Metadata.Licence) <> '' then
     begin
-      LLicences.Add(Trim(AData.Metadata.Licence), LProductName + ' (product)', '',
-        Trim(AData.Metadata.Copyright), True);
+      LLicences.Add(Trim(AData.Metadata.Licence), LProductName + ' (product)',
+        LProductVersion, Trim(AData.Metadata.Copyright), True);
     end
     else
     begin
-      LLicences.Add(cNoLicenceGroupTitle, LProductName + ' (product)', '',
-        Trim(AData.Metadata.Copyright), True);
+      LLicences.Add(cNoLicenceGroupTitle, LProductName + ' (product)',
+        LProductVersion, Trim(AData.Metadata.Copyright), True);
     end;
 
     // Manifest libraries carry the licence of their row. The origin summary
@@ -771,9 +783,10 @@ begin
         var LCopyright := ComponentCopyrightFor(LArtefact, LIsDeliverable,
           AData.Metadata.Copyright, LManifest);
         // The primary binary and the product are one row when they name the
-        // same file. A second copy of that file name is a different path
-        // and stays in the list. A binary whose name is not the product
-        // stays in the list as well. The product row is already first.
+        // same file. The combined row then shows the binary's version.
+        // An empty binary version leaves the product version. A second
+        // copy of that file name is a different path and stays in the list.
+        // A binary whose name is not the product stays in the list as well.
         if (i = LDeliverable) and SameProductBinary(LProductName, LArtefact) then
           LLicences.SetProductVersion(LVersion)
         else if LComponentLicence <> '' then
