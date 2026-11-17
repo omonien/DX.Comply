@@ -327,6 +327,19 @@ function ComponentLicenceFor(const AArtefact: TArtefactInfo;
   const AManifest: TComponentManifest): string;
 
 /// <summary>
+/// Copyright notice written on one SBOM component and in the report tables.
+/// The built program, and a second copy of that file, use the product
+/// notice. A unit marked by own_code_units, own_code_prefixes, or
+/// own_code_folders uses it as well, including a shipped .pas, .dpr, or
+/// .dpk in library mode. An empty notice stays empty. A unit matched to a
+/// manifest library stays empty. That library keeps the copyright on its row.
+/// A neighboring binary stays empty.
+/// </summary>
+function ComponentCopyrightFor(const AArtefact: TArtefactInfo;
+  AIsDeliverable: Boolean; const AProductCopyright: string;
+  const AManifest: TComponentManifest): string;
+
+/// <summary>
 /// Version written on one SBOM component and in the report tables.
 /// A version already stored on the artefact is kept. A third-party file
 /// is left as it is, including an empty version and a file-date stand-in.
@@ -3707,6 +3720,37 @@ begin
 
   if IsEmbarcaderoOrigin(AArtefact.Origin) then
     Result := Trim(AArtefact.Origin);
+end;
+
+function ComponentCopyrightFor(const AArtefact: TArtefactInfo;
+  AIsDeliverable: Boolean; const AProductCopyright: string;
+  const AManifest: TComponentManifest): string;
+var
+  LNotice: string;
+  LMatch: TManifestMatch;
+begin
+  Result := '';
+  LNotice := Trim(AProductCopyright);
+  if LNotice = '' then
+    Exit;
+
+  // The built program carries the notice. A unit keeps the own-code rule
+  // below. Same split as ComponentLicenceFor.
+  if AIsDeliverable and
+    not SameText(AArtefact.ArtefactType, 'unit-evidence') then
+    Exit(LNotice);
+
+  if not (SameText(AArtefact.ArtefactType, 'unit-evidence') or
+    IsShippedPascalFile(AArtefact)) then
+    Exit;
+
+  if not AManifest.Loaded then
+    Exit;
+
+  LMatch := MatchManifestUnit(AManifest, ArtefactUnitName(AArtefact),
+    ArtefactMatchPath(AManifest, AArtefact));
+  if LMatch.Kind = mmOwnCode then
+    Result := LNotice;
 end;
 
 function ComponentVersionFor(const AArtefact: TArtefactInfo;

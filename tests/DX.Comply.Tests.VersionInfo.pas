@@ -97,13 +97,28 @@ type
     /// </summary>
     [Test]
     procedure Select_NoFixedInfo_BothBlank_ReturnsEmpty;
+
+    /// <summary>
+    /// A missing file, a PE with no version resource, and a PE that has
+    /// FileVersion but no LegalCopyright all return an empty notice.
+    /// </summary>
+    [Test]
+    procedure LegalCopyright_MissingOrNoNotice_IsEmpty;
+
+    /// <summary>
+    /// The running executable's file and its module resource agree.
+    /// </summary>
+    [Test]
+    procedure LegalCopyright_FileMatchesRunningModule;
   end;
 
 implementation
 
 uses
+  System.IOUtils,
   System.RegularExpressions,
-  System.SysUtils;
+  System.SysUtils,
+  DX.Comply.Tests.Paths;
 
 function MakeFixedFileInfo(AMajor, AMinor, ARelease, ABuild: Word): TVSFixedFileInfo;
 begin
@@ -231,6 +246,37 @@ begin
     'no fixed file info and no version strings means no version');
   Assert.AreEqual('', SelectFileVersionText(False, LInfo, '  ', '   '),
     'whitespace is not a version string');
+end;
+
+procedure TVersionInfoTests.LegalCopyright_MissingOrNoNotice_IsEmpty;
+var
+  LNoVersion: string;
+  LWithVersion: string;
+begin
+  Assert.AreEqual('', GetFileLegalCopyright(''),
+    'an empty path has no LegalCopyright');
+  Assert.AreEqual('', GetFileLegalCopyright('C:\DoesNotExist\DX.Comply.NoSuch.exe'),
+    'a missing file has no LegalCopyright');
+
+  LNoVersion := TPath.Combine(RepoRoot, 'tests' + PathDelim + 'fixtures' +
+    PathDelim + 'binaries' + PathDelim + 'FakeNoVersion.exe');
+  LWithVersion := TPath.Combine(RepoRoot, 'tests' + PathDelim + 'fixtures' +
+    PathDelim + 'binaries' + PathDelim + 'FakeWithVersion.exe');
+  Assert.IsTrue(TFile.Exists(LNoVersion), LNoVersion);
+  Assert.IsTrue(TFile.Exists(LWithVersion), LWithVersion);
+  Assert.AreEqual('', GetFileLegalCopyright(LNoVersion),
+    'FakeNoVersion.exe has no version resource');
+  Assert.AreEqual('9.8.7.6', GetFileVersionText(LWithVersion),
+    'FakeWithVersion.exe still has a FileVersion');
+  Assert.AreEqual('', GetFileLegalCopyright(LWithVersion),
+    'FileVersion is not a copyright notice');
+end;
+
+procedure TVersionInfoTests.LegalCopyright_FileMatchesRunningModule;
+begin
+  Assert.AreEqual(GetModuleVersionString(HInstance, 'LegalCopyright'),
+    GetFileLegalCopyright(ParamStr(0)),
+    'the test executable file and its module must report the same LegalCopyright');
 end;
 
 initialization

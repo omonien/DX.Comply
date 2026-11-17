@@ -55,7 +55,7 @@ type
     /// none of its own.
     /// </summary>
     function BuildComponent(const AArtefact: TArtefactInfo; const AIndex: Integer;
-      AUnresolvedSource: Boolean; const ALicence, AVersion: string): TJSONObject;
+      AUnresolvedSource: Boolean; const ALicence, AVersion, ACopyright: string): TJSONObject;
     function BuildDependencies(const AArtefacts: TArtefactList;
       const AProjectBomRef, AOutputFilePath: string): TJSONArray;
   public
@@ -155,8 +155,13 @@ begin
   end;
 
   // Same classification as a manifest library. Empty writes nothing.
-  // licences sit before purl and properties, matching the component sequence.
+  // licences sit before copyright, then purl and properties.
   AddCycloneDxLicences(LComponent, AMetadata.Licence, '');
+
+  // CycloneDX 1.6 places copyright after licenses and before purl.
+  // An empty notice keeps the field out.
+  if Trim(AMetadata.Copyright) <> '' then
+    LComponent.AddPair('copyright', Trim(AMetadata.Copyright));
 
   if Trim(AMetadata.Purl) <> '' then
     LComponent.AddPair('purl', Trim(AMetadata.Purl));
@@ -213,7 +218,7 @@ end;
 
 function TCycloneDxJsonWriter.BuildComponent(const AArtefact: TArtefactInfo;
   const AIndex: Integer; AUnresolvedSource: Boolean;
-  const ALicence, AVersion: string): TJSONObject;
+  const ALicence, AVersion, ACopyright: string): TJSONObject;
 var
   LComponent, LHashes, LRef, LRefHash: TJSONObject;
   LHashArray, LProperties, LRefs, LRefHashes: TJSONArray;
@@ -292,6 +297,11 @@ begin
   // unit carries the product licence when one is set (issue #166).
   // Empty writes nothing.
   AddCycloneDxLicences(LComponent, ALicence, '');
+
+  // CycloneDX 1.6 places copyright after licenses and before externalReferences.
+  // The product notice is written on the built program and on own-code units.
+  if Trim(ACopyright) <> '' then
+    LComponent.AddPair('copyright', Trim(ACopyright));
 
   // TR-03183-2 maps the deployable SHA-512 to externalReferences type
   // distribution. bom-1.6 requires a url, and no download URL is known, so
@@ -456,6 +466,7 @@ var
   LLicenceError: string;
   LLicence: string;
   LVersion: string;
+  LCopyright: string;
   LIsDeliverable: Boolean;
 begin
   Result := False;
@@ -507,8 +518,10 @@ begin
         AMetadata.Licence, LManifest);
       LVersion := ComponentVersionFor(AArtefacts[I], LIsDeliverable,
         AMetadata.ProductVersion, AProjectInfo.Version);
+      LCopyright := ComponentCopyrightFor(AArtefacts[I], LIsDeliverable,
+        AMetadata.Copyright, LManifest);
       LComponents.Add(BuildComponent(AArtefacts[I], I,
-        LGraph.Status[I] = uusMissingSource, LLicence, LVersion));
+        LGraph.Status[I] = uusMissingSource, LLicence, LVersion, LCopyright));
     end;
     LRoot.AddPair('components', LComponents);
 
