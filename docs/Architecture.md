@@ -69,7 +69,7 @@ Every SBOM generation follows the same pipeline, regardless of whether it was tr
 | `DX.Comply.CycloneDx.XmlWriter.pas` | CycloneDX 1.6 XML output |
 | `DX.Comply.Spdx.Writer.pas` | SPDX 2.3 JSON output |
 | `DX.Comply.Spdx3.Writer.pas` | SPDX 3.0.1 JSON-LD output, converted from the SPDX 2.3 document |
-| `DX.Comply.Report.HtmlWriter.pas` | HTML companion report |
+| `DX.Comply.Report.HtmlWriter.pas` | HTML companion report. Long lists start collapsed and expand for print |
 | `DX.Comply.Report.MarkdownWriter.pas` | Markdown companion report |
 | `DX.Comply.Report.Intf.pas` | Report writer interface and shared report types, including the report content choice |
 | `DX.Comply.Report.Overview.pas` | Origin, supplier, and licence summaries of the reports |

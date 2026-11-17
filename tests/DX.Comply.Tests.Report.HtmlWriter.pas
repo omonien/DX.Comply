@@ -124,6 +124,18 @@ type
     /// </summary>
     [Test]
     procedure Write_PrefixMatchesNotApplied_Section;
+    /// <summary>
+    /// Long lists use a collapsed details element and the heading shows the
+    /// count. Short sections stay open. Issue #198.
+    /// </summary>
+    [Test]
+    procedure Write_LongSections_StartCollapsed;
+    /// <summary>
+    /// Print and PDF export expand every list. The stylesheet and the
+    /// beforeprint script are both in the page. Issue #198.
+    /// </summary>
+    [Test]
+    procedure Write_PrintCss_ShowsExpandedSections;
   end;
 
 implementation
@@ -396,19 +408,20 @@ begin
   Assert.IsTrue(Pos('<section id="origin-summary"><h2>Origin summary</h2>', LContent) > 0);
   Assert.IsTrue(Pos('<a href="#third-party-units-without-manifest">Third party</a></td><td>1</td>',
     LContent) > 0);
-  Assert.IsTrue(Pos('<section id="licences"><h2>Licences</h2>', LContent) > 0);
-  Assert.IsTrue(Pos('<th>Name</th><th>Version</th><th>Copyright</th><th>Note</th>', LContent) > 0);
-  Assert.AreEqual(0, Pos('<th>Names</th><th>Note</th>', LContent));
-  Assert.IsTrue(Pos('<td rowspan="2">Proprietary</td><td rowspan="2">2</td><td>Demo (product)</td><td></td><td></td><td rowspan="2"></td>',
-    LContent) > 0);
-  Assert.IsTrue(Pos('<tr><td>Demo.dll</td><td>2.0.0.1</td><td></td></tr>', LContent) > 0);
-  Assert.IsTrue(Pos('<td>No licence information</td><td>1</td><td>JvComponent</td><td></td><td></td><td></td>',
-    LContent) > 0);
-  Assert.IsTrue(Pos('<section id="third-party-units-without-manifest">', LContent) > 0);
+  Assert.IsTrue(Pos('<section id="licences" class="flat"><h2>Licences</h2>', LContent) > 0);
+  Assert.IsTrue(Pos('<th>Name</th><th>Version</th><th>Copyright</th>', LContent) > 0);
+  Assert.AreEqual<Integer>(0, Pos('<th>Names</th><th>Note</th>', LContent));
+  Assert.IsTrue(Pos('<summary>Proprietary (2 files)</summary>', LContent) > 0);
+  Assert.IsTrue(Pos('<td>Demo (product)</td><td></td><td></td>', LContent) > 0);
+  Assert.IsTrue(Pos('<td>Demo.dll</td><td>2.0.0.1</td><td></td>', LContent) > 0);
+  Assert.IsTrue(Pos('<summary>No licence information (1 file)</summary>', LContent) > 0);
+  Assert.IsTrue(Pos('<td>JvComponent</td><td></td><td></td>', LContent) > 0);
+  Assert.IsTrue(Pos('<section id="third-party-units-without-manifest" class="flat">', LContent) > 0);
+  Assert.IsTrue(Pos('<summary>Third-party units without manifest (1 unit)</summary>', LContent) > 0);
   Assert.IsTrue(Pos('<td>Jv</td><td>1</td><td>supplier, version, licence</td><td>JvComponent</td>',
     LContent) > 0);
-  Assert.IsTrue(Pos('<section id="artefacts">', LContent) > 0);
-  Assert.IsTrue(Pos('<section id="unit-evidence">', LContent) > 0);
+  Assert.IsTrue(Pos('<section id="artefacts" class="flat">', LContent) > 0);
+  Assert.IsTrue(Pos('<section id="unit-evidence" class="flat">', LContent) > 0);
   Assert.IsTrue(Pos('id="origin-summary"', LContent) < Pos('id="artefacts"', LContent),
     'the origin summary is near the top');
 end;
@@ -535,22 +548,23 @@ begin
   var LWriter: IHumanReadableReportWriter := THtmlReportWriter.Create;
   Assert.IsTrue(LWriter.Write(FOutputPath, FData, THumanReadableReportConfig.Default));
   var LContent := TFile.ReadAllText(FOutputPath, TEncoding.UTF8);
-  Assert.IsTrue(Pos('<th>Declared licence</th><th>Components</th><th>Name</th><th>Version</th><th>Copyright</th><th>Note</th>',
-    LContent) > 0);
-  Assert.AreEqual(0, Pos('Logger Pro 2.1.2', LContent), 'the version is not glued to the name');
-  var LEvent := Pos('<td rowspan="5">Apache-2.0</td><td rowspan="5">5</td><td>delphi Event Bus</td><td>2.1</td><td>A &amp; B</td><td rowspan="5"></td>',
-    LContent);
-  var LLogger := Pos('<tr><td>Logger Pro</td><td>2.1.2</td><td>2020 | 2021</td></tr>', LContent);
-  var LNoVersion := Pos('<tr><td>NoVersion Lib</td><td></td><td>1999</td></tr>', LContent);
-  var LSvg := Pos('<tr><td>SVG Icon Image List</td><td>4.8.1</td><td></td></tr>', LContent);
-  var LVsoft := Pos('<tr><td>VSoft Command Line Parser</td><td>0.1.9</td><td></td></tr>', LContent);
-  Assert.IsTrue(LEvent > 0, 'the licence and the count span the group');
+  Assert.IsTrue(Pos('<summary>Apache-2.0 (5 files)</summary>', LContent) > 0);
+  Assert.IsTrue(Pos('<th>Name</th><th>Version</th><th>Copyright</th>', LContent) > 0);
+  Assert.AreEqual<Integer>(0, Pos('Logger Pro 2.1.2', LContent), 'the version is not glued to the name');
+  var LEvent := Pos('<td>delphi Event Bus</td><td>2.1</td><td>A &amp; B</td>', LContent);
+  var LLogger := Pos('<td>Logger Pro</td><td>2.1.2</td><td>2020 | 2021</td>', LContent);
+  var LNoVersion := Pos('<td>NoVersion Lib</td><td></td><td>1999</td>', LContent);
+  var LSvg := Pos('<td>SVG Icon Image List</td><td>4.8.1</td><td></td>', LContent);
+  var LVsoft := Pos('<td>VSoft Command Line Parser</td><td>0.1.9</td><td></td>', LContent);
+  Assert.IsTrue(LEvent > 0, 'the first component of the group is present');
   Assert.IsTrue((LEvent < LLogger) and (LLogger < LNoVersion) and (LNoVersion < LSvg) and (LSvg < LVsoft),
     'components are sorted by name without regard to case');
-  Assert.IsTrue(Pos('<tr><td>MPL-1.1</td><td>1</td><td>JVCL</td><td>3.5</td><td></td><td>Copyleft licence. Check its terms for distribution with this product.</td></tr>',
-    LContent) > 0, 'a one-component group keeps the review note on its row');
-  Assert.IsTrue(Pos('<td rowspan="2">Proprietary</td><td rowspan="2">2</td>', LContent) > 0);
-  Assert.IsTrue(LVsoft < Pos('<td>MPL-1.1</td>', LContent), 'licence groups stay in title order');
+  Assert.IsTrue(Pos('<summary>MPL-1.1 (1 file)<span class="hint">Copyleft licence. ' +
+    'Check its terms for distribution with this product.</span></summary>', LContent) > 0,
+    'a one-component group keeps the review note on its heading');
+  Assert.IsTrue(Pos('<td>JVCL</td><td>3.5</td><td></td>', LContent) > 0);
+  Assert.IsTrue(Pos('<summary>Proprietary (2 files)</summary>', LContent) > 0);
+  Assert.IsTrue(LVsoft < Pos('<summary>MPL-1.1 (1 file)', LContent), 'licence groups stay in title order');
 end;
 
 procedure THtmlReportWriterTests.Write_Title_PrefixesProjectName;
@@ -606,10 +620,111 @@ begin
   Assert.IsTrue(LWriter.Write(FOutputPath, FData, THumanReadableReportConfig.Default));
   LContent := TFile.ReadAllText(FOutputPath, TEncoding.UTF8);
   Assert.IsTrue(Pos('id="prefix-matches-not-applied"', LContent) > 0);
-  Assert.IsTrue(Pos('<h2>Prefix matches not applied</h2>', LContent) > 0);
+  Assert.IsTrue(Pos('<summary>Prefix matches not applied (1 unit)</summary>', LContent) > 0);
   Assert.IsTrue(Pos('<th>Unit</th><th>Prefix</th><th>Row</th><th>Kept origin</th>', LContent) > 0);
   Assert.IsTrue(Pos('<td>Winapi.GDIPAPI</td><td>GDIP</td><td>TMS VCL UI Pack</td><td>Embarcadero RTL</td>',
     LContent) > 0);
+end;
+
+procedure THtmlReportWriterTests.Write_LongSections_StartCollapsed;
+var
+  LContent: string;
+  LOwn: Integer;
+  LRtl: Integer;
+  LThird: Integer;
+  LWriter: IHumanReadableReportWriter;
+
+  procedure AddResolved(const AName: string; AOrigin: TUnitOriginKind);
+  var
+    LUnit: TResolvedUnitInfo;
+  begin
+    LUnit := Default(TResolvedUnitInfo);
+    LUnit.UnitName := AName;
+    LUnit.EvidenceKind := uekPas;
+    LUnit.OriginKind := AOrigin;
+    LUnit.Confidence := rcStrong;
+    FCompositionEvidence.Units.Add(LUnit);
+  end;
+
+  procedure AddUnitArtefact(const AName, AOrigin: string);
+  var
+    LUnit: TArtefactInfo;
+  begin
+    LUnit := Default(TArtefactInfo);
+    LUnit.RelativePath := AName + '.pas';
+    LUnit.ArtefactType := 'unit-evidence';
+    LUnit.Origin := AOrigin;
+    FArtefacts.Add(LUnit);
+  end;
+begin
+  FData.Metadata.Licence := 'MIT';
+  FData.Metadata.ComponentManifestJson :=
+    '{"components":[],"own_code_units":["MainForm"]}';
+  AddUnitArtefact('System.SysUtils', 'Embarcadero RTL');
+  AddUnitArtefact('MainForm', 'Local project');
+  AddResolved('System.SysUtils', uokEmbarcaderoRtl);
+  AddResolved('MainForm', uokLocalProject);
+
+  LWriter := THtmlReportWriter.Create;
+  Assert.IsTrue(LWriter.Write(FOutputPath, FData, THumanReadableReportConfig.Default));
+  LContent := TFile.ReadAllText(FOutputPath, TEncoding.UTF8);
+
+  Assert.IsTrue(Pos('<details class="fold">', LContent) > 0);
+  Assert.AreEqual<Integer>(0, Pos('<details class="fold" open', LContent));
+  Assert.AreEqual<Integer>(0, Pos('<details open', LContent));
+
+  Assert.IsTrue(Pos('<summary>MIT (3 files)</summary>', LContent) > 0,
+    'the product licence heading shows the file count');
+  Assert.IsTrue(Pos('<td>MainForm</td>', LContent) > 0, 'own units stay in the licence list');
+  Assert.IsTrue(Pos('<summary>Embarcadero RTL (1 file)</summary>', LContent) > 0);
+  Assert.IsTrue(Pos('<td>System.SysUtils</td>', LContent) > 0);
+  Assert.IsTrue(Pos('<summary>Artefacts (1 file)</summary>', LContent) > 0);
+
+  LRtl := Pos('<summary>Embarcadero RTL (1 unit)</summary>', LContent);
+  LOwn := Pos('<summary>Local project (1 unit)</summary>', LContent);
+  LThird := Pos('<summary>Third party (1 unit)</summary>', LContent);
+  Assert.IsTrue(LRtl > 0, 'Embarcadero RTL units are their own list');
+  Assert.IsTrue(LOwn > 0, 'own units are their own list');
+  Assert.IsTrue(LThird > 0, 'third-party units are their own list');
+  Assert.IsTrue((LRtl < LOwn) and (LOwn < LThird), 'origin lists keep a stable order');
+
+  Assert.IsTrue(Pos('<h1>', LContent) < Pos('<details class="fold">', LContent),
+    'the report heading stays open');
+  Assert.IsTrue(Pos('<h2>Project Overview</h2>', LContent) < Pos('<details class="fold">', LContent));
+  Assert.IsTrue(Pos('<h2>Origin summary</h2>', LContent) < Pos('<details class="fold">', LContent));
+  Assert.IsTrue(Pos('<section><h2>Structural check</h2>', LContent) > 0);
+  Assert.IsTrue(Pos('<section><h2>Warnings</h2><ul>', LContent) > 0);
+  Assert.AreEqual<Integer>(0, Pos('<summary>Project Overview', LContent));
+  Assert.AreEqual<Integer>(0, Pos('<summary>Origin summary', LContent));
+  Assert.AreEqual<Integer>(0, Pos('<summary>Structural check', LContent));
+  Assert.AreEqual<Integer>(0, Pos('<summary>Warnings', LContent));
+end;
+
+procedure THtmlReportWriterTests.Write_PrintCss_ShowsExpandedSections;
+var
+  LContent: string;
+  LWriter: IHumanReadableReportWriter;
+begin
+  LWriter := THtmlReportWriter.Create;
+  Assert.IsTrue(LWriter.Write(FOutputPath, FData, THumanReadableReportConfig.Default));
+  LContent := TFile.ReadAllText(FOutputPath, TEncoding.UTF8);
+
+  Assert.IsTrue(Pos('<details class="fold">', LContent) > 0,
+    'the lists stay collapsed when the script does not run');
+  Assert.IsTrue(Pos('@media print{', LContent) > 0);
+  Assert.IsTrue(Pos('details.fold>summary{display:block!important;list-style:none!important}',
+    LContent) > 0, 'print CSS shows the heading and hides the arrow');
+  Assert.IsTrue(Pos('details.fold>summary::-webkit-details-marker{display:none!important}',
+    LContent) > 0);
+  Assert.IsTrue(Pos('details.fold>summary::marker{content:none!important;display:none!important}',
+    LContent) > 0);
+  Assert.IsTrue(Pos('details.fold>summary~*{display:block!important}', LContent) > 0,
+    'print CSS shows the list body');
+  Assert.IsTrue(Pos('details.fold table{display:table!important}', LContent) > 0);
+  Assert.IsTrue(Pos('addEventListener("beforeprint",expand)', LContent) > 0);
+  Assert.IsTrue(Pos('addEventListener("afterprint",restore)', LContent) > 0);
+  Assert.IsTrue(Pos('nodes[i].open=true', LContent) > 0);
+  Assert.IsTrue(Pos('nodes[i].open=saved[i]', LContent) > 0);
 end;
 
 initialization
