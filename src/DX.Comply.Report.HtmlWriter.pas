@@ -5,7 +5,9 @@
 ///
 /// <remarks>
 /// The HTML report presents the same report payload as the Markdown writer,
-/// with cards, badges and readable tables.
+/// with cards, badges and readable tables. Long lists start collapsed
+/// (issue #198). Printing the page, or saving it as PDF, shows them expanded.
+/// The Markdown report is unchanged.
 /// </remarks>
 ///
 /// <copyright>
@@ -29,6 +31,20 @@ type
   THtmlReportWriter = class(TInterfacedObject, IHumanReadableReportWriter)
   private
     function EscapeHtml(const AValue: string): string;
+    /// <summary>
+    /// "1 file" or "42 files". The singular word is AOne, the plural is AMany.
+    /// </summary>
+    function ItemCountText(ACount: Integer; const AOne, AMany: string): string;
+    /// <summary>
+    /// Collapsed heading text, for example "MIT (42 files)". The title is escaped.
+    /// </summary>
+    function FoldSummary(const ATitle: string; ACount: Integer;
+      const AOne, AMany: string): string;
+    /// <summary>
+    /// Opens a collapsed details element. ASummaryHtml is already HTML.
+    /// </summary>
+    procedure BeginFold(Lines: TStrings; const ASummaryHtml: string);
+    procedure EndFold(Lines: TStrings);
     procedure AddArtefacts(Lines: TStrings; const AData: TComplianceReportData);
     procedure AddUnitEvidence(Lines: TStrings; const AData: TComplianceReportData;
       const AConfig: THumanReadableReportConfig);
@@ -46,6 +62,7 @@ type
 implementation
 
 uses
+  System.Generics.Collections,
   System.IOUtils,
   System.SysUtils,
   DX.Comply.ComponentManifest,
@@ -55,8 +72,10 @@ uses
 procedure THtmlReportWriter.AddArtefacts(Lines: TStrings; const AData: TComplianceReportData);
 var
   LArtefact: TArtefactInfo;
-  LPathCell: string;
+  LBody: TStringList;
+  LCount: Integer;
   LDeliverable: Integer;
+  LPathCell: string;
   LVersion: string;
   I: Integer;
 begin
@@ -64,55 +83,131 @@ begin
   // numeric file version, then the FileVersion string, then the ProductVersion
   // string. The built program with no version of its own uses the product
   // version, the same value as the SBOM and the licence table.
-  Lines.Add('<section id="artefacts"><h2>Artefacts</h2><div class="table-wrap"><table><thead><tr><th>Relative Path</th><th>Type</th><th>Version</th><th>Size</th><th>SHA-256</th></tr></thead><tbody>');
-  LDeliverable := FindDeliverableTargetIndex(AData.Artefacts,
-    AData.ProjectInfo.ProjectName, AData.ProjectInfo.OutputFilePath);
-  for I := 0 to AData.Artefacts.Count - 1 do
-  begin
-    LArtefact := AData.Artefacts[I];
-    if LArtefact.ArtefactType = 'unit-evidence' then
-      Continue;
-    LVersion := ComponentVersionFor(LArtefact,
-      IsSameDeliverableFile(AData.Artefacts, I, LDeliverable),
-      AData.Metadata.ProductVersion, AData.ProjectInfo.Version);
-    LPathCell := EscapeHtml(SafeText(SafeText(LArtefact.RelativePath, LArtefact.ComponentName), LArtefact.FilePath));
-    // Issue #59: a DLL found only in a system directory has no hash. Show
-    // where it was found instead.
-    if LArtefact.Location <> '' then
-      LPathCell := LPathCell + '<br><small>System directory: ' +
-        EscapeHtml(LArtefact.Location) + '</small>';
-    if LArtefact.FileSize >= 0 then
-      Lines.Add(Format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%d</td><td><code>%s</code></td></tr>', [
-        LPathCell,
-        EscapeHtml(SafeText(LArtefact.ArtefactType)),
-        EscapeHtml(SafeText(LVersion)),
-        LArtefact.FileSize,
-        EscapeHtml(SafeText(LArtefact.Hash))]))
-    else
-      Lines.Add(Format('<tr><td>%s</td><td>%s</td><td>%s</td><td>n/a</td><td><code>%s</code></td></tr>', [
-        LPathCell,
-        EscapeHtml(SafeText(LArtefact.ArtefactType)),
-        EscapeHtml(SafeText(LVersion)),
-        EscapeHtml(SafeText(LArtefact.Hash))]));
+  // Issue #198: the file list starts collapsed. The heading carries the count.
+  LBody := TStringList.Create;
+  try
+    LCount := 0;
+    LDeliverable := FindDeliverableTargetIndex(AData.Artefacts,
+      AData.ProjectInfo.ProjectName, AData.ProjectInfo.OutputFilePath);
+    for I := 0 to AData.Artefacts.Count - 1 do
+    begin
+      LArtefact := AData.Artefacts[I];
+      if LArtefact.ArtefactType = 'unit-evidence' then
+        Continue;
+      Inc(LCount);
+      LVersion := ComponentVersionFor(LArtefact,
+        IsSameDeliverableFile(AData.Artefacts, I, LDeliverable),
+        AData.Metadata.ProductVersion, AData.ProjectInfo.Version);
+      LPathCell := EscapeHtml(SafeText(SafeText(LArtefact.RelativePath, LArtefact.ComponentName), LArtefact.FilePath));
+      // Issue #59: a DLL found only in a system directory has no hash. Show
+      // where it was found instead.
+      if LArtefact.Location <> '' then
+        LPathCell := LPathCell + '<br><small>System directory: ' +
+          EscapeHtml(LArtefact.Location) + '</small>';
+      if LArtefact.FileSize >= 0 then
+        LBody.Add(Format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%d</td><td><code>%s</code></td></tr>', [
+          LPathCell,
+          EscapeHtml(SafeText(LArtefact.ArtefactType)),
+          EscapeHtml(SafeText(LVersion)),
+          LArtefact.FileSize,
+          EscapeHtml(SafeText(LArtefact.Hash))]))
+      else
+        LBody.Add(Format('<tr><td>%s</td><td>%s</td><td>%s</td><td>n/a</td><td><code>%s</code></td></tr>', [
+          LPathCell,
+          EscapeHtml(SafeText(LArtefact.ArtefactType)),
+          EscapeHtml(SafeText(LVersion)),
+          EscapeHtml(SafeText(LArtefact.Hash))]));
+    end;
+    Lines.Add('<section id="artefacts" class="flat">');
+    BeginFold(Lines, 'Artefacts (' + ItemCountText(LCount, 'file', 'files') + ')');
+    Lines.Add('<div class="table-wrap"><table><thead><tr><th>Relative Path</th><th>Type</th><th>Version</th><th>Size</th><th>SHA-256</th></tr></thead><tbody>');
+    for I := 0 to LBody.Count - 1 do
+      Lines.Add(LBody[I]);
+    Lines.Add('</tbody></table></div>');
+    EndFold(Lines);
+    Lines.Add('</section>');
+  finally
+    LBody.Free;
   end;
-  Lines.Add('</tbody></table></div></section>');
+end;
+
+function UnitOriginRank(const AOrigin: string): Integer;
+begin
+  // A stable order so Embarcadero RTL, then VCL and FMX, then the project's
+  // own units (local project), sit above the third-party list.
+  if SameText(AOrigin, 'Embarcadero RTL') then
+    Exit(0);
+  if SameText(AOrigin, 'Embarcadero VCL') then
+    Exit(1);
+  if SameText(AOrigin, 'Embarcadero FMX') then
+    Exit(2);
+  if SameText(AOrigin, 'Local project') then
+    Exit(3);
+  if SameText(AOrigin, 'Third party') then
+    Exit(4);
+  if SameText(AOrigin, 'Unknown') or SameText(AOrigin, 'n/a') then
+    Exit(6);
+  Result := 5;
+end;
+
+function CompareOrigins(const ALeft, ARight: string): Integer;
+begin
+  Result := UnitOriginRank(ALeft) - UnitOriginRank(ARight);
+  if Result = 0 then
+    Result := CompareText(ALeft, ARight);
+end;
+
+procedure SortOriginNames(AOrder: TList<string>);
+var
+  i: Integer;
+  j: Integer;
+  LKey: string;
+begin
+  // A handful of origin names. Insertion sort leaves the unit order inside
+  // each list alone. That order comes from BuildConsolidatedUnitEvidenceRows.
+  for i := 1 to AOrder.Count - 1 do
+  begin
+    LKey := AOrder[i];
+    j := i;
+    while (j > 0) and (CompareOrigins(AOrder[j - 1], LKey) > 0) do
+    begin
+      AOrder[j] := AOrder[j - 1];
+      Dec(j);
+    end;
+    AOrder[j] := LKey;
+  end;
 end;
 
 procedure THtmlReportWriter.AddUnitEvidence(Lines: TStrings;
   const AData: TComplianceReportData; const AConfig: THumanReadableReportConfig);
 var
+  LGroups: TObjectDictionary<string, TList<TConsolidatedUnitEvidenceRow>>;
+  LLabel: string;
+  LList: TList<TConsolidatedUnitEvidenceRow>;
+  LOrder: TList<string>;
+  LOrigin: string;
   LRow: TConsolidatedUnitEvidenceRow;
   LRows: TConsolidatedUnitEvidenceRowList;
+
   function Checkmark(const AValue: Boolean): string;
   begin
     if AValue then
       Exit('&#10003;');
     Result := '';
   end;
-begin
-  LRows := BuildConsolidatedUnitEvidenceRows(AData);
-  try
-    Lines.Add('<section id="unit-evidence"><h2>Unit Evidence</h2><div class="table-wrap"><table><thead>');
+
+  function RowIncluded(const ARow: TConsolidatedUnitEvidenceRow): Boolean;
+  begin
+    if AConfig.IncludeCompositionEvidence and AConfig.IncludeBuildEvidence then
+      Exit(True);
+    if AConfig.IncludeCompositionEvidence then
+      Exit(ARow.HasCompositionEvidence);
+    Result := AConfig.IncludeBuildEvidence and ARow.HasBuildEvidence;
+  end;
+
+  procedure EmitHeader;
+  begin
+    Lines.Add('<div class="table-wrap"><table><thead>');
     if AConfig.IncludeCompositionEvidence and AConfig.IncludeBuildEvidence then
       Lines.Add('<tr><th>Unit</th><th>Origin</th><th>Evidence</th><th>Confidence</th><th>SHA-256</th><th>SBOM Trace</th><th>Build Trace</th><th>Location</th></tr>')
     else if AConfig.IncludeCompositionEvidence then
@@ -120,40 +215,87 @@ begin
     else
       Lines.Add('<tr><th>Unit</th><th>Origin</th><th>Evidence</th><th>Confidence</th><th>SHA-256</th><th>Build Trace</th><th>Location</th></tr>');
     Lines.Add('</thead><tbody>');
+  end;
 
-    for LRow in LRows do
-    begin
-      if AConfig.IncludeCompositionEvidence and AConfig.IncludeBuildEvidence then
-        Lines.Add(Format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td><code>%s</code></td><td style="text-align:center">%s</td><td style="text-align:center">%s</td><td>%s</td></tr>', [
-          EscapeHtml(SafeText(LRow.UnitName)),
-          EscapeHtml(SafeText(LRow.Origin)),
-          EscapeHtml(SafeText(LRow.Evidence)),
-          EscapeHtml(SafeText(LRow.Confidence)),
-          EscapeHtml(SafeText(LRow.HashSha256, '')),
-          Checkmark(LRow.HasCompositionEvidence),
-          Checkmark(LRow.HasBuildEvidence),
-          EscapeHtml(SafeText(LRow.Location))]))
-      else if AConfig.IncludeCompositionEvidence and LRow.HasCompositionEvidence then
-        Lines.Add(Format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td><code>%s</code></td><td style="text-align:center">%s</td><td>%s</td></tr>', [
-          EscapeHtml(SafeText(LRow.UnitName)),
-          EscapeHtml(SafeText(LRow.Origin)),
-          EscapeHtml(SafeText(LRow.Evidence)),
-          EscapeHtml(SafeText(LRow.Confidence)),
-          EscapeHtml(SafeText(LRow.HashSha256, '')),
-          Checkmark(True),
-          EscapeHtml(SafeText(LRow.Location))]))
-      else if AConfig.IncludeBuildEvidence and LRow.HasBuildEvidence then
-        Lines.Add(Format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td><code>%s</code></td><td style="text-align:center">%s</td><td>%s</td></tr>', [
-          EscapeHtml(SafeText(LRow.UnitName)),
-          EscapeHtml(SafeText(LRow.Origin)),
-          EscapeHtml(SafeText(LRow.Evidence)),
-          EscapeHtml(SafeText(LRow.Confidence)),
-          EscapeHtml(SafeText(LRow.HashSha256, '')),
-          Checkmark(True),
-          EscapeHtml(SafeText(LRow.Location))]));
+  procedure EmitRow(const ARow: TConsolidatedUnitEvidenceRow);
+  begin
+    if AConfig.IncludeCompositionEvidence and AConfig.IncludeBuildEvidence then
+      Lines.Add(Format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td><code>%s</code></td><td style="text-align:center">%s</td><td style="text-align:center">%s</td><td>%s</td></tr>', [
+        EscapeHtml(SafeText(ARow.UnitName)),
+        EscapeHtml(SafeText(ARow.Origin)),
+        EscapeHtml(SafeText(ARow.Evidence)),
+        EscapeHtml(SafeText(ARow.Confidence)),
+        EscapeHtml(SafeText(ARow.HashSha256, '')),
+        Checkmark(ARow.HasCompositionEvidence),
+        Checkmark(ARow.HasBuildEvidence),
+        EscapeHtml(SafeText(ARow.Location))]))
+    else if AConfig.IncludeCompositionEvidence then
+      Lines.Add(Format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td><code>%s</code></td><td style="text-align:center">%s</td><td>%s</td></tr>', [
+        EscapeHtml(SafeText(ARow.UnitName)),
+        EscapeHtml(SafeText(ARow.Origin)),
+        EscapeHtml(SafeText(ARow.Evidence)),
+        EscapeHtml(SafeText(ARow.Confidence)),
+        EscapeHtml(SafeText(ARow.HashSha256, '')),
+        Checkmark(True),
+        EscapeHtml(SafeText(ARow.Location))]))
+    else
+      Lines.Add(Format('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td><code>%s</code></td><td style="text-align:center">%s</td><td>%s</td></tr>', [
+        EscapeHtml(SafeText(ARow.UnitName)),
+        EscapeHtml(SafeText(ARow.Origin)),
+        EscapeHtml(SafeText(ARow.Evidence)),
+        EscapeHtml(SafeText(ARow.Confidence)),
+        EscapeHtml(SafeText(ARow.HashSha256, '')),
+        Checkmark(True),
+        EscapeHtml(SafeText(ARow.Location))]));
+  end;
+
+begin
+  // Issue #198: one collapsed list per origin, so the Embarcadero RTL list
+  // and the project's own units (local project) can be opened on their own.
+  LRows := BuildConsolidatedUnitEvidenceRows(AData);
+  try
+    LGroups := TObjectDictionary<string, TList<TConsolidatedUnitEvidenceRow>>.Create([doOwnsValues]);
+    try
+      LOrder := TList<string>.Create;
+      try
+        for LRow in LRows do
+        begin
+          if not RowIncluded(LRow) then
+            Continue;
+          LLabel := SafeText(LRow.Origin);
+          if LGroups.TryGetValue(LLabel, LList) then
+            LList.Add(LRow)
+          else
+          begin
+            LList := TList<TConsolidatedUnitEvidenceRow>.Create;
+            LGroups.Add(LLabel, LList);
+            LOrder.Add(LLabel);
+            LList.Add(LRow);
+          end;
+        end;
+        SortOriginNames(LOrder);
+
+        Lines.Add('<section id="unit-evidence" class="flat"><h2>Unit Evidence</h2>');
+        if LOrder.Count = 0 then
+          Lines.Add('<p>No unit evidence was recorded.</p>')
+        else
+          for LOrigin in LOrder do
+          begin
+            LList := LGroups[LOrigin];
+            BeginFold(Lines, FoldSummary(LOrigin, LList.Count, 'unit', 'units'));
+            EmitHeader;
+            for LRow in LList do
+              EmitRow(LRow);
+            Lines.Add('</tbody></table></div>');
+            EndFold(Lines);
+          end;
+        Lines.Add('</section>');
+      finally
+        LOrder.Free;
+      end;
+    finally
+      LGroups.Free;
     end;
-
-    Lines.Add('</tbody></table></div></section>');
   finally
     LRows.Free;
   end;
@@ -247,41 +389,38 @@ begin
   end;
   Lines.Add('</section>');
 
-  // Issue #112, #156: one row per component. The licence, the count and the
-  // note span the rows of the group, matching the Markdown table where those
-  // cells are filled on the first row only.
-  Lines.Add('<section id="' + cAnchorLicences + '"><h2>Licences</h2>');
+  // Issue #112, #156: one row per component. Issue #198: each licence is a
+  // collapsed list. The heading shows the licence and the file count. The
+  // review note stays visible on that heading. The Markdown table is unchanged
+  // and still fills the licence, the count and the note on the first row only.
+  Lines.Add('<section id="' + cAnchorLicences + '" class="flat"><h2>Licences</h2>');
   Lines.Add('<p>Licences as declared in the SBOM. Review hints are not legal advice.</p>');
-  Lines.Add('<div class="table-wrap"><table>');
-  Lines.Add('<colgroup><col style="width:16%"><col style="width:11%"><col style="width:24%">' +
-    '<col style="width:12%"><col style="width:18%"><col style="width:19%"></colgroup>');
-  Lines.Add('<thead><tr><th>Declared licence</th><th>Components</th><th>Name</th>' +
-    '<th>Version</th><th>Copyright</th><th>Note</th></tr></thead><tbody>');
   for var LGroup in LOverview.Licences do
   begin
-    var LSpan := '';
-    if LGroup.Count > 1 then
-      LSpan := Format(' rowspan="%d"', [LGroup.Count]);
+    var LSummary := FoldSummary(LGroup.Title, LGroup.Count, 'file', 'files');
+    if LGroup.Note <> '' then
+      LSummary := LSummary + '<span class="hint">' + EscapeHtml(LGroup.Note) + '</span>';
+    BeginFold(Lines, LSummary);
+    Lines.Add('<div class="table-wrap"><table>');
+    Lines.Add('<thead><tr><th>Name</th><th>Version</th><th>Copyright</th></tr></thead><tbody>');
     for var i := 0 to High(LGroup.Components) do
     begin
       var LComponent := LGroup.Components[i];
-      if i = 0 then
-        Lines.Add(Format('<tr><td%s>%s</td><td%s>%d</td><td>%s</td><td>%s</td><td>%s</td><td%s>%s</td></tr>',
-          [LSpan, EscapeHtml(LGroup.Title), LSpan, LGroup.Count,
-          EscapeHtml(LComponent.Name), EscapeHtml(LComponent.Version),
-          EscapeHtml(LComponent.Copyright), LSpan, EscapeHtml(LGroup.Note)]))
-      else
-        Lines.Add(Format('<tr><td>%s</td><td>%s</td><td>%s</td></tr>', [
-          EscapeHtml(LComponent.Name), EscapeHtml(LComponent.Version),
-          EscapeHtml(LComponent.Copyright)]));
+      Lines.Add(Format('<tr><td>%s</td><td>%s</td><td>%s</td></tr>', [
+        EscapeHtml(LComponent.Name), EscapeHtml(LComponent.Version),
+        EscapeHtml(LComponent.Copyright)]));
     end;
+    Lines.Add('</tbody></table></div>');
+    EndFold(Lines);
   end;
-  Lines.Add('</tbody></table></div></section>');
+  Lines.Add('</section>');
 
   // Issue #114: third-party units the component manifest does not cover.
   if LOverview.WithoutManifestCount > 0 then
   begin
-    Lines.Add('<section id="' + cAnchorWithoutManifest + '"><h2>Third-party units without manifest</h2>');
+    Lines.Add('<section id="' + cAnchorWithoutManifest + '" class="flat">');
+    BeginFold(Lines, FoldSummary('Third-party units without manifest',
+      LOverview.WithoutManifestCount, 'unit', 'units'));
     Lines.Add(Format('<p>%d of %d third-party units have no component manifest row. ' +
       'Add a row with supplier, version and licence for each library ' +
       '(see README, section Component manifest).</p>', [LOverview.WithoutManifestCount,
@@ -293,13 +432,17 @@ begin
       Lines.Add(Format('<tr><td>%s</td><td>%d</td><td>%s</td><td>%s</td></tr>',
         [EscapeHtml(LGroup.Title), LGroup.Count, EscapeHtml(LGroup.Note), EscapeHtml(LGroup.NamesText)]));
     end;
-    Lines.Add('</tbody></table></div></section>');
+    Lines.Add('</tbody></table></div>');
+    EndFold(Lines);
+    Lines.Add('</section>');
   end;
 
   // A prefix that matched and was not applied. Omitted when there is none.
   if Length(LOverview.PrefixRejections) > 0 then
   begin
-    Lines.Add('<section id="' + cAnchorPrefixRejections + '"><h2>Prefix matches not applied</h2>');
+    Lines.Add('<section id="' + cAnchorPrefixRejections + '" class="flat">');
+    BeginFold(Lines, FoldSummary('Prefix matches not applied',
+      Length(LOverview.PrefixRejections), 'unit', 'units'));
     Lines.Add('<p>A prefix is not enough to assign these units. ' +
       'Add units_folder for the package directory, or units_exact for the unit. ' +
       'The origin below is the one that was kept.</p>');
@@ -311,8 +454,35 @@ begin
         EscapeHtml(LRejection.UnitName), EscapeHtml(LRejection.Prefix),
         EscapeHtml(LRejection.RowName), EscapeHtml(LRejection.KeptOrigin)]));
     end;
-    Lines.Add('</tbody></table></div></section>');
+    Lines.Add('</tbody></table></div>');
+    EndFold(Lines);
+    Lines.Add('</section>');
   end;
+end;
+
+procedure THtmlReportWriter.BeginFold(Lines: TStrings; const ASummaryHtml: string);
+begin
+  // No open attribute: the list starts collapsed (issue #198).
+  Lines.Add('<details class="fold"><summary>' + ASummaryHtml + '</summary>');
+end;
+
+procedure THtmlReportWriter.EndFold(Lines: TStrings);
+begin
+  Lines.Add('</details>');
+end;
+
+function THtmlReportWriter.FoldSummary(const ATitle: string; ACount: Integer;
+  const AOne, AMany: string): string;
+begin
+  Result := EscapeHtml(ATitle) + ' (' + ItemCountText(ACount, AOne, AMany) + ')';
+end;
+
+function THtmlReportWriter.ItemCountText(ACount: Integer; const AOne, AMany: string): string;
+begin
+  if ACount = 1 then
+    Result := '1 ' + AOne
+  else
+    Result := IntToStr(ACount) + ' ' + AMany;
 end;
 
 function THtmlReportWriter.EscapeHtml(const AValue: string): string;
@@ -370,6 +540,34 @@ begin
     Lines.Add('code{color:#cbd5e1;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}');
     Lines.Add('.lede{color:#cbd5e1;font-size:1.05rem;line-height:1.6;max-width:88ch}');
     Lines.Add('li{overflow-wrap:anywhere;word-break:break-word}');
+    // Issue #198: long lists are native disclosure elements. The flat section
+    // is only a heading plus those lists, so it is not a second card.
+    Lines.Add('section.flat{background:transparent;border:none;padding:0;overflow:visible;margin-bottom:0}');
+    Lines.Add('section.flat>h2{margin:8px 0}');
+    Lines.Add('section.flat>p{margin:0 0 12px;color:#cbd5e1}');
+    Lines.Add('details.fold{background:#111827;border:1px solid #334155;border-radius:12px;margin:0 0 20px;overflow:hidden}');
+    Lines.Add('details.fold>summary{cursor:pointer;padding:16px 18px;font-size:1.25rem;font-weight:600;color:#f8fafc;list-style-position:inside;overflow-wrap:anywhere}');
+    Lines.Add('details.fold>summary .hint{display:block;margin-top:6px;font-size:0.95rem;font-weight:400;color:#fbbf24}');
+    Lines.Add('details.fold>summary:hover{background:#1e293b}');
+    Lines.Add('details.fold .table-wrap{padding:0 12px 12px}');
+    Lines.Add('details.fold>p{margin:12px 16px 0;color:#cbd5e1}');
+    // Print and PDF show every list. CSS asks the browser to reveal the
+    // contents and to drop the disclosure arrow. Some browsers ignore that
+    // for a closed details element, so the script below opens them on
+    // beforeprint and restores them on afterprint. Without the script the
+    // lists still open and close on screen.
+    Lines.Add('@media print{');
+    Lines.Add('details.fold{display:block!important}');
+    Lines.Add('details.fold>summary{display:block!important;list-style:none!important}');
+    Lines.Add('details.fold>summary::-webkit-details-marker{display:none!important}');
+    Lines.Add('details.fold>summary::marker{content:none!important;display:none!important}');
+    Lines.Add('details.fold>summary~*{display:block!important}');
+    Lines.Add('details.fold table{display:table!important}');
+    Lines.Add('details.fold thead{display:table-header-group!important}');
+    Lines.Add('details.fold tbody{display:table-row-group!important}');
+    Lines.Add('details.fold tr{display:table-row!important}');
+    Lines.Add('details.fold th,details.fold td{display:table-cell!important}');
+    Lines.Add('}');
     Lines.Add('</style></head><body><main>');
     Lines.Add('<section>');
     Lines.Add('<h1>' + EscapeHtml(LTitle) + '</h1>');
@@ -439,7 +637,26 @@ begin
       AddUnitEvidence(Lines, AData, AConfig);
     if AConfig.IncludeWarnings then
       AddWarnings(Lines, AData);
-    Lines.Add('</main></body></html>');
+    Lines.Add('</main>');
+    // Opens every collapsed list for print and PDF, then puts the screen
+    // back. The lists still work when this script does not run.
+    Lines.Add('<script>');
+    Lines.Add('(function(){');
+    Lines.Add('var saved=[];');
+    Lines.Add('function expand(){');
+    Lines.Add('var nodes=document.querySelectorAll("details.fold");');
+    Lines.Add('saved=[];');
+    Lines.Add('for(var i=0;i<nodes.length;i++){saved.push(nodes[i].open);nodes[i].open=true;}');
+    Lines.Add('}');
+    Lines.Add('function restore(){');
+    Lines.Add('var nodes=document.querySelectorAll("details.fold");');
+    Lines.Add('for(var i=0;i<nodes.length&&i<saved.length;i++)nodes[i].open=saved[i];');
+    Lines.Add('}');
+    Lines.Add('window.addEventListener("beforeprint",expand);');
+    Lines.Add('window.addEventListener("afterprint",restore);');
+    Lines.Add('})();');
+    Lines.Add('</script>');
+    Lines.Add('</body></html>');
     Lines.SaveToFile(AOutputPath, TEncoding.UTF8);
     Result := True;
   finally

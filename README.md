@@ -222,12 +222,14 @@ Both reports open with three overview sections built from the same data as the S
 - **Licences.** Components grouped by the licence declared in the SBOM, plus a group for components without licence information. Embarcadero RTL, VCL and FMX units are grouped under that origin label (`Embarcadero RTL`, `Embarcadero VCL`, `Embarcadero FMX`). Units marked as the project's own code are grouped under the product licence when one is set. Each component is its own row, sorted by name without regard to case. Version and copyright are their own columns. A manifest library uses the optional `copyright` field of that row. The product, the built program, and units marked as the project's own code use `LegalCopyright` from the built binary, or the `copyright` key in `.dxcomply.json` when that key is not empty. The cell is empty when no notice is set. The built program's Version cell is its own version, or the product version from the SBOM header when the file has none. A third-party file does not inherit that version. The declared licence, the component count and the review note are shown once for the group. Copyleft licences that differ from the product licence get a review hint. The hint is not legal advice.
 - **Third-party units without manifest.** Third-party units that no component manifest row matches, grouped by unit prefix, with the fields they are missing. The section is left out when the manifest covers every third-party unit. The CLI and the IDE log print the same count as one line only when at least one unit is missing.
 
-The licence table lists one component per row. The declared licence, the component count and the note are filled on the first row of that licence. In the HTML report those three cells span the rows of the group. Later rows leave them empty:
+The licence table lists one component per row. In the Markdown report the declared licence, the component count and the note are filled on the first row of that licence. Later rows leave them empty:
 
 | Declared licence | Components | Name | Version | Copyright | Note |
 | --- | ---: | --- | --- | --- | --- |
 | Apache-2.0 | 2 | Logger Pro | 2.1.2 | 2020 | |
 | | | Spring4D | 2.0 | | |
+
+In the HTML report each licence is its own section and starts collapsed. The heading shows the licence and the file count, for example `MIT (42 files)`, and the review note when there is one. The same pattern is used for the unit lists (Embarcadero RTL, Embarcadero VCL, Embarcadero FMX, local project, and third party), the artefact list, third-party units without a manifest, and prefix matches that were not applied. The project data, the origin summary, the structural check, and the warnings stay open. Printing the page, or saving it as PDF, expands every section. The page uses the browser's own disclosure element, so the lists still open and close when JavaScript is off. The Markdown report is not collapsed.
 
 `--report-content` chooses which of these parts a report contains. It changes the HTML and Markdown reports only. The SBOM always lists every component.
 
@@ -595,7 +597,7 @@ CycloneDX 1.6 JSON, the default, unless your customer or toolchain asks for some
 
 ### The HTML report is too long. Can I leave out the unit list?
 
-Yes. `--report-content=overview` writes the origin summary, suppliers, and licences without the list of all units. `--report-content=units` writes only the unit list with SHA-256 hashes. The default `all` writes both. The SBOM always stays complete. See [Human-readable companion reports](#human-readable-companion-reports-optional-opt-in-via---reportformat).
+Yes. `--report-content=overview` writes the origin summary, suppliers, and licences without the list of all units. `--report-content=units` writes only the unit list with SHA-256 hashes. The default `all` writes both. The SBOM always stays complete. Long lists in the HTML report also start collapsed, with the file or unit count in the heading. Open the one you need. A printed copy and a PDF export show every section expanded. See [Human-readable companion reports](#human-readable-companion-reports-optional-opt-in-via---reportformat).
 
 ### A library I use has no SBOM and no component manifest. How do I add its supplier and licence?
 
