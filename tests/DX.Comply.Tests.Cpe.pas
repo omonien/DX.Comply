@@ -296,7 +296,7 @@ begin
   LParsed := ParseNvdCpeResponse(TFile.ReadAllText(LPath, TEncoding.UTF8));
   Assert.AreEqual('', LParsed.Error);
   Assert.AreEqual(2, LParsed.TotalResults);
-  Assert.AreEqual(2, Length(LParsed.Matches));
+  Assert.AreEqual<Integer>(2, Length(LParsed.Matches));
   Assert.AreEqual('cpe:2.3:a:acme:widget:1.2.3:*:*:*:*:*:*:*', LParsed.Matches[0].CpeName);
   Assert.AreEqual('Acme Widget 1.2.3', LParsed.Matches[0].Title);
   Assert.IsFalse(LParsed.Matches[0].Deprecated);
@@ -312,7 +312,7 @@ begin
   LParsed := ParseNvdCpeResponse('{');
   Assert.IsFalse(LParsed.IsSuccess);
   Assert.IsTrue(Pos('not valid JSON', LParsed.Error) > 0, LParsed.Error);
-  Assert.AreEqual(0, Length(LParsed.Matches));
+  Assert.AreEqual<Integer>(0, Length(LParsed.Matches));
 end;
 
 procedure TNvdCpeResponseTests.Parse_EmptyProducts_SucceedsWithNoMatches;
@@ -322,7 +322,7 @@ begin
   LParsed := ParseNvdCpeResponse('{"totalResults":0,"products":[]}');
   Assert.IsTrue(LParsed.IsSuccess, LParsed.Error);
   Assert.AreEqual(0, LParsed.TotalResults);
-  Assert.AreEqual(0, Length(LParsed.Matches));
+  Assert.AreEqual<Integer>(0, Length(LParsed.Matches));
 end;
 
 procedure TNvdCpeResponseTests.LookupReport_PrintsMatchesAndOmitsTheKey;

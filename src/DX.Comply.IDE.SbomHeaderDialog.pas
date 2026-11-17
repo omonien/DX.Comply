@@ -683,7 +683,7 @@ begin
   finally
     LGenerator.Free;
   end;
-  LSettings := TDXComplyIDESettings.Load;
+  LSettings := TDXComplyIDESettingsStore.Load;
   Result := TSbomConfig.ResolveSbomOutputPath('bom.json',
     TSbomConfig.ChooseOutputDirectory(LSettings.OutputDir, LFileConfig.OutputDir),
     TPath.GetDirectoryName(FProjectPath), LFileConfig.Platform, LFileConfig.Configuration,
