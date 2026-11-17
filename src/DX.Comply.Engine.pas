@@ -427,6 +427,12 @@ type
     /// </summary>
     function CollectBuildArtefacts(const AProjectInfo: TProjectInfo): TArtefactList;
     /// <summary>
+    /// When the output folder contains more than one .exe, logs one info
+    /// line that names them and points at the Output folders section.
+    /// The artefact list is not changed.
+    /// </summary>
+    procedure ReportSharedOutputExecutables(const AScanRoot: string);
+    /// <summary>
     /// Appends artefacts whose full path is not already in the target list.
     /// </summary>
     procedure MergeArtefacts(const ATarget, ASource: TArtefactList);
@@ -2821,6 +2827,53 @@ begin
   end;
 end;
 
+procedure TDxComplyGenerator.ReportSharedOutputExecutables(const AScanRoot: string);
+var
+  LFull: string;
+  LFiles: TStringDynArray;
+  LFile: string;
+  LNames: TStringList;
+  LListed: string;
+  I: Integer;
+begin
+  // The hint describes the folder on disk. Include and exclude patterns
+  // still decide the SBOM, and this line does not remove any file.
+  if Trim(AScanRoot) = '' then
+    Exit;
+
+  LFull := '';
+  try
+    LFull := TPath.GetFullPath(AScanRoot);
+  except
+    on EInOutArgumentException do
+      Exit;
+  end;
+  if (LFull = '') or not TDirectory.Exists(LFull) then
+    Exit;
+
+  LFiles := TDirectory.GetFiles(LFull, '*.exe', TSearchOption.soTopDirectoryOnly);
+  LNames := TStringList.Create;
+  try
+    LNames.CaseSensitive := False;
+    LNames.Duplicates := dupIgnore;
+    LNames.Sorted := True;
+    for LFile in LFiles do
+      if SameText(TPath.GetExtension(LFile), '.exe') then
+        LNames.Add(TPath.GetFileName(LFile));
+    if LNames.Count < 2 then
+      Exit;
+
+    LListed := LNames[0];
+    for I := 1 to LNames.Count - 1 do
+      LListed := LListed + ', ' + LNames[I];
+    DoProgress('Info: The output folder contains more than one executable (' +
+      LListed + '). See the Output folders section in the README and in ' +
+      'docs/CI-Integration.md.', 30);
+  finally
+    LNames.Free;
+  end;
+end;
+
 function TDxComplyGenerator.CollectBuildArtefacts(
   const AProjectInfo: TProjectInfo): TArtefactList;
 var
@@ -2887,6 +2940,7 @@ begin
         LScanned.Free;
       end;
       RememberPatternWarnings(LWarnings);
+      ReportSharedOutputExecutables(LScanRoot);
 
       for LScanDir in FConfig.ScanDirs do
       begin

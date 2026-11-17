@@ -40,6 +40,32 @@ dxcomply --project=src\MyApp.dproj --map-dir=build\Win32\Release --output=bom.js
 
 This is also supported in `.dxcomply.json` via the `mapDir` key.
 
+## Output folders
+
+A clean setup gives every project its own output folder and assembles the install folder in the installer, so this situation does not arise. Each project then has one output directory of its own, and the SBOM lists that project's executable and the DLLs that belong next to it.
+
+An existing setup may still build several projects into one folder, for example an install folder. DX.Comply scans that folder flat. Every `.exe`, `.dll`, `.bpl`, and `.dcp` in the folder is listed, so the SBOM of one tool also contains the executables and DLLs of the others. Subfolders are not walked. `scanDirs` adds a directory you stage on purpose. It does not separate those projects. When the output folder contains more than one `.exe`, DX.Comply writes one info line that names those executables and points at this section. The line is information. It does not change which files are listed. An include list does not hide the line, because the line names the executables in the folder.
+
+For that existing setup, limit the scan with an include list. An include list replaces the default extensions. Add each DLL you still need with another `--include`:
+
+```cmd
+dxcomply --project=src\MyTool.dproj --include=MyTool.exe --include=MyTool.dll --no-pause
+```
+
+`--include=MyTool.exe` keeps that executable and drops the other default extensions, including other executables in the same folder. Do not use `--exclude=*.exe`. An exclude list only removes matches. It does not replace the default extensions, so other projects' DLLs stay in the SBOM, and `--exclude=*.exe` also drops the executable you wanted to keep.
+
+The same list in `.dxcomply.json` is the `include` array. `dxcomply.exe` reads that file when you pass `--ci`:
+
+```json
+{
+  "include": ["MyTool.exe", "MyTool.dll"]
+}
+```
+
+```cmd
+dxcomply --project=src\MyTool.dproj --ci --no-pause
+```
+
 ---
 
 ## GitHub Actions
@@ -159,7 +185,9 @@ That switch is deprecated and will be removed in the next release.
 
 `include` and `exclude` still filter the files that were scanned. With
 `scanTree`, or a `scanDirs` value that contains `**`, patterns are relative
-to the scanned directory.
+to the scanned directory. A shared output folder is covered in
+[Output folders](#output-folders). An include list replaces the default
+extensions. Do not use `--exclude=*.exe` for that case.
 
 `configName` selects the build configuration used to read the `.dproj` (Debug, Release, or a custom name). `platform` selects the target. Both match the CLI flags `--config-name` and `--platform`.
 
