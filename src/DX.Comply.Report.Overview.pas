@@ -19,6 +19,14 @@
 /// The built program's licence row uses its own version, or the product
 /// version from the SBOM header when the file has none. A third-party file
 /// does not inherit that version.
+/// The product row is first in its licence group. It shows the product
+/// version from the SBOM header, or the project version when the header
+/// has none. When that row and the project's own binary are the same
+/// file, the file name without its extension is the product name, and
+/// the report shows one row. The version on it is the binary's version,
+/// or the product version when the file has none. A second copy of the
+/// file stays on its own row. When the names differ, the product stays
+/// first and the binary stays in the sorted list (issue #199).
 /// </remarks>
 ///
 /// <copyright>
@@ -82,19 +90,31 @@ type
   /// <summary>
   /// One component in a licence group. Version and copyright come from the
   /// component manifest and are empty when that row does not set them.
+  /// The product row carries the built program's version when that program
+  /// is the same file as the product.
   /// </summary>
   TLicenceComponent = record
     /// <summary>Component name, without the version.</summary>
     Name: string;
-    /// <summary>Manifest version. Empty for the product, files and units.</summary>
+    /// <summary>
+    /// Manifest version. The product row shows the product version, or the
+    /// project version when the header has none. When the product and the
+    /// project's own binary are the same file, that row shows the binary's
+    /// version instead. Empty when the row does not set one.
+    /// </summary>
     Version: string;
     /// <summary>Manifest copyright text. Empty when the field is not set.</summary>
     Copyright: string;
+    /// <summary>
+    /// True for the product row. That row is listed before the other rows
+    /// of its licence group.
+    /// </summary>
+    IsProduct: Boolean;
   end;
 
   /// <summary>
-  /// One declared licence and its components. Components are sorted by name,
-  /// case-insensitive, then by version.
+  /// One declared licence and its components. The product row is first.
+  /// The other components are sorted by name, case-insensitive, then by version.
   /// </summary>
   TLicenceGroup = record
     /// <summary>Declared licence, or the no-licence title.</summary>
@@ -312,7 +332,14 @@ type
   public
     constructor Create;
     destructor Destroy; override;
-    procedure Add(const ATitle, AName, AVersion, ACopyright: string);
+    procedure Add(const ATitle, AName, AVersion, ACopyright: string;
+      AIsProduct: Boolean = False);
+    /// <summary>
+    /// Copies the built program's version onto the product row. Used when
+    /// that program and the product are the same file, so the report does
+    /// not list the file again.
+    /// </summary>
+    procedure SetProductVersion(const AVersion: string);
     function ToArray: TArray<TLicenceGroup>;
   end;
 
@@ -330,6 +357,16 @@ begin
   TArray.Sort<TLicenceSortItem>(LItems, TComparer<TLicenceSortItem>.Construct(
     function(const ALeft, ARight: TLicenceSortItem): Integer
     begin
+      // The product stays at the top of its group. The other rows keep the
+      // name order, including a name that would otherwise sort first.
+      if ALeft.Component.IsProduct <> ARight.Component.IsProduct then
+      begin
+        if ALeft.Component.IsProduct then
+          Result := -1
+        else
+          Result := 1;
+        Exit;
+      end;
       Result := CompareText(ALeft.Component.Name, ARight.Component.Name);
       if Result = 0 then
         Result := CompareText(ALeft.Component.Version, ARight.Component.Version);
@@ -363,7 +400,8 @@ begin
   inherited;
 end;
 
-procedure TLicenceGroupBuilder.Add(const ATitle, AName, AVersion, ACopyright: string);
+procedure TLicenceGroupBuilder.Add(const ATitle, AName, AVersion, ACopyright: string;
+  AIsProduct: Boolean);
 var
   LKey: string;
   LList: TList<TLicenceComponent>;
@@ -381,7 +419,31 @@ begin
   LItem.Name := Trim(AName);
   LItem.Version := Trim(AVersion);
   LItem.Copyright := Trim(ACopyright);
+  LItem.IsProduct := AIsProduct;
   LList.Add(LItem);
+end;
+
+procedure TLicenceGroupBuilder.SetProductVersion(const AVersion: string);
+var
+  LList: TList<TLicenceComponent>;
+  LItem: TLicenceComponent;
+  I: Integer;
+begin
+  if Trim(AVersion) = '' then
+    Exit;
+  for LList in FGroups.Values do
+    for I := 0 to LList.Count - 1 do
+    begin
+      if not LList[I].IsProduct then
+        Continue;
+      // The combined row shows the binary's version. An empty value is
+      // rejected above, so the product version already on the row stays
+      // when the file has none.
+      LItem := LList[I];
+      LItem.Version := Trim(AVersion);
+      LList[I] := LItem;
+      Exit;
+    end;
 end;
 
 function TLicenceGroupBuilder.ToArray: TArray<TLicenceGroup>;
@@ -434,6 +496,41 @@ begin
   if SameText(Trim(ALicence), Trim(AProductLicence)) then
     Exit;
   Result := 'Copyleft licence. Check its terms for distribution with this product.';
+end;
+
+function BinaryStem(const AArtefact: TArtefactInfo): string;
+var
+  LName: string;
+  LDot: Integer;
+begin
+  // The licence row for a binary uses this file name. A unit is not a
+  // candidate: its display name is the unit, and the deliverable search
+  // already leaves units out.
+  LName := BsiComponentFileName(AArtefact.RelativePath);
+  if LName = '' then
+    LName := BsiComponentFileName(AArtefact.FilePath);
+  LDot := LastDelimiter('.', LName);
+  if LDot <= 1 then
+    Result := LName
+  else
+    Result := Copy(LName, 1, LDot - 1);
+end;
+
+function SameProductBinary(const AProductName: string;
+  const AArtefact: TArtefactInfo): Boolean;
+var
+  LStem: string;
+begin
+  // Same file: the name without the extension is the product name.
+  // Demo and Demo.exe are one row. Demo and XmlConvert.exe are not, and
+  // neither are WernigApp and libWernigApp.so or MyPkg and MyPkg290.bpl.
+  // A prefix or a numeric suffix is a different file name.
+  Result := False;
+  if SameText(AArtefact.ArtefactType, 'unit-evidence') then
+    Exit;
+  LStem := BinaryStem(AArtefact);
+  Result := (Trim(AProductName) <> '') and (LStem <> '') and
+    SameText(LStem, Trim(AProductName));
 end;
 
 function ArtefactDisplayName(const AArtefact: TArtefactInfo): string;
@@ -615,15 +712,21 @@ begin
     begin
       LProductName := AData.ProjectInfo.ProjectName;
     end;
+    // A product row with no merged binary shows the header version, or the
+    // project version when the header has none. A merged binary replaces
+    // that value with the binary's version below.
+    var LProductVersion := Trim(AData.Metadata.ProductVersion);
+    if LProductVersion = '' then
+      LProductVersion := Trim(AData.ProjectInfo.Version);
     if Trim(AData.Metadata.Licence) <> '' then
     begin
-      LLicences.Add(Trim(AData.Metadata.Licence), LProductName + ' (product)', '',
-        Trim(AData.Metadata.Copyright));
+      LLicences.Add(Trim(AData.Metadata.Licence), LProductName + ' (product)',
+        LProductVersion, Trim(AData.Metadata.Copyright), True);
     end
     else
     begin
-      LLicences.Add(cNoLicenceGroupTitle, LProductName + ' (product)', '',
-        Trim(AData.Metadata.Copyright));
+      LLicences.Add(cNoLicenceGroupTitle, LProductName + ' (product)',
+        LProductVersion, Trim(AData.Metadata.Copyright), True);
     end;
 
     // Manifest libraries carry the licence of their row. The origin summary
@@ -679,7 +782,14 @@ begin
         // A manifest library row keeps the copyright on that row, above.
         var LCopyright := ComponentCopyrightFor(LArtefact, LIsDeliverable,
           AData.Metadata.Copyright, LManifest);
-        if LComponentLicence <> '' then
+        // The primary binary and the product are one row when they name the
+        // same file. The combined row then shows the binary's version.
+        // An empty binary version leaves the product version. A second
+        // copy of that file name is a different path and stays in the list.
+        // A binary whose name is not the product stays in the list as well.
+        if (i = LDeliverable) and SameProductBinary(LProductName, LArtefact) then
+          LLicences.SetProductVersion(LVersion)
+        else if LComponentLicence <> '' then
         begin
           LLicences.Add(LComponentLicence, LName, LVersion, LCopyright);
         end
@@ -758,7 +868,7 @@ begin
     end;
 
     // Licences: sorted, the no-licence group last, with review hints.
-    // Components inside a group are already sorted by name.
+    // The product row is first in its group. The other rows are sorted by name.
     var LAll := LLicences.ToArray;
     var LList := TList<TLicenceGroup>.Create;
     try

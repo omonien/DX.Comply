@@ -133,6 +133,34 @@ type
     /// <summary>The prefix section is empty when no prefix was refused.</summary>
     [Test]
     procedure PrefixRejections_EmptyWhenNoneRefused;
+    /// <summary>
+    /// The product is the first row of the own-code list. The other rows
+    /// stay in name order. A different licence group stays in name order.
+    /// Issue #199.
+    /// </summary>
+    [Test]
+    procedure Licences_OwnCode_ProductIsFirst;
+    /// <summary>
+    /// The product and the project binary are one row when the file name
+    /// without its extension is the product name. The row keeps the binary
+    /// version. A second copy and a unit of the same name stay. Issue #199.
+    /// </summary>
+    [Test]
+    procedure Licences_ProductBinary_MergedWhenSameFile;
+    /// <summary>
+    /// A project binary whose name is not the product stays in the sorted
+    /// list. The product is still first. A lib prefix is a different name.
+    /// Issue #199.
+    /// </summary>
+    [Test]
+    procedure Licences_ProductBinary_NotMergedWhenDifferentFile;
+    /// <summary>
+    /// A product row with no merged binary shows the product version.
+    /// The project version is used when the header has none. A merged
+    /// binary still shows that binary's version. Issue #199.
+    /// </summary>
+    [Test]
+    procedure Licences_ProductWithoutBinary_ShowsProductVersion;
   end;
 
 implementation
@@ -315,8 +343,10 @@ begin
   AddFile('OtherApp.exe', 'application');
   var LOverview := BuildReportOverview(FData);
   var LProduct := FindLicence(LOverview.Licences, 'Proprietary');
-  Assert.AreEqual(3, LProduct.Count,
-    'Product entry and both copies of the output file');
+  Assert.AreEqual<Integer>(2, LProduct.Count,
+    'The primary file is the product row. The second copy stays');
+  Assert.AreEqual<string>('XmlConvert (product)', LProduct.Components[0].Name);
+  Assert.AreEqual<string>('XmlConvert.exe', LProduct.Components[1].Name);
   Assert.IsTrue(Pos('XmlConvert.exe', LicenceNames(LProduct)) > 0);
   var LNone := FindLicence(LOverview.Licences, cNoLicenceGroupTitle);
   Assert.AreEqual(1, LNone.Count);
@@ -754,7 +784,8 @@ begin
         Inc(LCopies);
       end;
   Assert.AreEqual(2, LCopies, 'Both copies of the built program use the product version');
-  Assert.AreEqual('', VersionOf(LOverview, 'WernigApp (product)'));
+  Assert.AreEqual<string>('16.0.0.7', VersionOf(LOverview, 'WernigApp (product)'),
+    'a product row without a merged binary shows the product version');
   Assert.AreEqual('', VersionOf(LOverview, 'vendor.dll'),
     'A third-party DLL does not inherit the product version');
   Assert.AreEqual('', VersionOf(LOverview, 'plugin.dll'));
@@ -869,6 +900,232 @@ procedure TReportOverviewTests.PrefixRejections_EmptyWhenNoneRefused;
 begin
   AddUnit('System.Classes', 'Embarcadero RTL');
   Assert.AreEqual(NativeInt(0), NativeInt(Length(BuildReportOverview(FData).PrefixRejections)));
+end;
+
+procedure TReportOverviewTests.Licences_OwnCode_ProductIsFirst;
+const
+  cJson = '{"components":[' +
+    '{"name":"Zulu","version":"2","licence":"Apache-2.0","units_exact":["ZuluUnit"]},' +
+    '{"name":"AlphaLib","version":"1","licence":"Apache-2.0","units_exact":["AlphaUnit"]}],' +
+    '"own_code_units":["Aardvark","Mango","Zebra"]}';
+begin
+  FData.Metadata.ProductName := 'Mango';
+  FData.Metadata.Licence := 'Proprietary';
+  FData.Metadata.ComponentManifestJson := cJson;
+  AddUnit('Aardvark', 'Local project');
+  AddUnit('Mango', 'Local project');
+  AddUnit('Zebra', 'Local project');
+  AddUnit('AlphaUnit', 'Third party');
+  AddUnit('ZuluUnit', 'Third party');
+
+  var LOverview := BuildReportOverview(FData);
+  var LOwn := FindLicence(LOverview.Licences, 'Proprietary');
+  Assert.AreEqual<Integer>(4, LOwn.Count);
+  Assert.AreEqual<string>('Mango (product)', LOwn.Components[0].Name);
+  Assert.IsTrue(LOwn.Components[0].IsProduct, 'the product row is marked');
+  Assert.AreEqual<string>('Aardvark', LOwn.Components[1].Name);
+  Assert.AreEqual<string>('Mango', LOwn.Components[2].Name);
+  Assert.AreEqual<string>('Zebra', LOwn.Components[3].Name);
+  var LApache := FindLicence(LOverview.Licences, 'Apache-2.0');
+  Assert.AreEqual<Integer>(2, LApache.Count);
+  Assert.AreEqual<string>('AlphaLib', LApache.Components[0].Name);
+  Assert.AreEqual<string>('1', LApache.Components[0].Version);
+  Assert.AreEqual<string>('Zulu', LApache.Components[1].Name);
+  Assert.IsFalse(LApache.Components[0].IsProduct);
+
+  // With no product licence the same units share the unlicensed group.
+  // The product is still first there.
+  FData.Metadata.Licence := '';
+  LOverview := BuildReportOverview(FData);
+  var LNone := FindLicence(LOverview.Licences, cNoLicenceGroupTitle);
+  Assert.AreEqual<string>('Mango (product)', LNone.Components[0].Name);
+  Assert.AreEqual<string>('Aardvark', LNone.Components[1].Name);
+  Assert.AreEqual<string>('Mango', LNone.Components[2].Name);
+  Assert.AreEqual<string>('Zebra', LNone.Components[3].Name);
+  LApache := FindLicence(LOverview.Licences, 'Apache-2.0');
+  Assert.AreEqual<string>('AlphaLib', LApache.Components[0].Name);
+  Assert.AreEqual<string>('Zulu', LApache.Components[1].Name);
+end;
+
+procedure TReportOverviewTests.Licences_ProductBinary_MergedWhenSameFile;
+
+  procedure AddBinary(const ARelative, APath, AType, AVersion: string);
+  var
+    LArtefact: TArtefactInfo;
+  begin
+    LArtefact := Default(TArtefactInfo);
+    LArtefact.RelativePath := ARelative;
+    LArtefact.FilePath := APath;
+    LArtefact.ArtefactType := AType;
+    LArtefact.Version := AVersion;
+    FArtefacts.Add(LArtefact);
+  end;
+
+begin
+  FData.Metadata.ProductName := 'Demo';
+  FData.Metadata.Licence := 'Proprietary';
+  FData.Metadata.Copyright := 'Copyright (c) 2026';
+  FData.ProjectInfo.ProjectName := 'Demo';
+  FData.ProjectInfo.OutputFilePath := 'C:\Build\Demo.exe';
+  FData.Metadata.ComponentManifestJson :=
+    '{"components":[],"own_code_units":["Alpha","Demo"]}';
+  AddBinary('Demo.exe', 'C:\Build\Demo.exe', 'application', '26.12.0.0');
+  AddBinary('copy\Demo.exe', 'C:\Build\copy\Demo.exe', 'file', '9.9.9');
+  AddUnit('Alpha', 'Local project');
+  AddUnit('Demo', 'Local project');
+  AddBinary('bit.dll', 'C:\Build\bit.dll', 'library', '1.0.0');
+
+  var LOverview := BuildReportOverview(FData);
+  var LOwn := FindLicence(LOverview.Licences, 'Proprietary');
+  Assert.AreEqual<Integer>(4, LOwn.Count);
+  Assert.AreEqual<string>('Demo (product)', LOwn.Components[0].Name);
+  Assert.AreEqual<string>('26.12.0.0', LOwn.Components[0].Version);
+  Assert.AreEqual<string>('Copyright (c) 2026', LOwn.Components[0].Copyright);
+  Assert.IsTrue(LOwn.Components[0].IsProduct);
+  Assert.AreEqual<string>('Alpha', LOwn.Components[1].Name);
+  Assert.AreEqual<string>('Demo', LOwn.Components[2].Name);
+  Assert.AreEqual<string>('', LOwn.Components[2].Version,
+    'a unit named like the product is not the binary');
+  Assert.AreEqual<string>('Demo.exe', LOwn.Components[3].Name);
+  Assert.AreEqual<string>('9.9.9', LOwn.Components[3].Version,
+    'the second copy keeps its own version');
+  Assert.AreEqual<string>('Copyright (c) 2026', LOwn.Components[3].Copyright);
+  var LNone := FindLicence(LOverview.Licences, cNoLicenceGroupTitle);
+  Assert.AreEqual<Integer>(1, LNone.Count);
+  Assert.AreEqual<string>('bit.dll', LNone.Components[0].Name);
+end;
+
+procedure TReportOverviewTests.Licences_ProductBinary_NotMergedWhenDifferentFile;
+
+  procedure AddBinary(const ARelative, AType, AVersion: string);
+  var
+    LArtefact: TArtefactInfo;
+  begin
+    LArtefact := Default(TArtefactInfo);
+    LArtefact.RelativePath := ARelative;
+    LArtefact.ArtefactType := AType;
+    LArtefact.Version := AVersion;
+    FArtefacts.Add(LArtefact);
+  end;
+
+begin
+  FData.Metadata.ProductName := 'Suite';
+  FData.Metadata.Licence := 'Proprietary';
+  FData.ProjectInfo.ProjectName := 'XmlConvert';
+  FData.Metadata.ComponentManifestJson :=
+    '{"components":[],"own_code_units":["Aardvark","Zebra"]}';
+  AddBinary('XmlConvert.exe', 'file', '1.2.0.0');
+  AddUnit('Aardvark', 'Local project');
+  AddUnit('Zebra', 'Local project');
+
+  var LOverview := BuildReportOverview(FData);
+  var LOwn := FindLicence(LOverview.Licences, 'Proprietary');
+  Assert.AreEqual<Integer>(4, LOwn.Count);
+  Assert.AreEqual<string>('Suite (product)', LOwn.Components[0].Name);
+  Assert.AreEqual<string>('', LOwn.Components[0].Version);
+  Assert.AreEqual<string>('Aardvark', LOwn.Components[1].Name);
+  Assert.AreEqual<string>('XmlConvert.exe', LOwn.Components[2].Name);
+  Assert.AreEqual<string>('1.2.0.0', LOwn.Components[2].Version);
+  Assert.AreEqual<string>('Zebra', LOwn.Components[3].Name);
+
+  // libWernigApp.so sorts before WernigApp. It is still a separate row.
+  FArtefacts.Clear;
+  FData.Metadata.ProductName := 'WernigApp';
+  FData.ProjectInfo.ProjectName := 'WernigApp';
+  FData.Metadata.ComponentManifestJson := '';
+  AddBinary('libWernigApp.so', 'file', '16.0.0.7');
+  LOverview := BuildReportOverview(FData);
+  LOwn := FindLicence(LOverview.Licences, 'Proprietary');
+  Assert.AreEqual<Integer>(2, LOwn.Count);
+  Assert.AreEqual<string>('WernigApp (product)', LOwn.Components[0].Name);
+  Assert.AreEqual<string>('', LOwn.Components[0].Version);
+  Assert.AreEqual<string>('libWernigApp.so', LOwn.Components[1].Name);
+  Assert.AreEqual<string>('16.0.0.7', LOwn.Components[1].Version);
+
+  // A numeric package suffix is a different file name.
+  FArtefacts.Clear;
+  FData.Metadata.ProductName := 'MyPkg';
+  FData.ProjectInfo.ProjectName := 'MyPkg';
+  AddBinary('MyPkg290.bpl', 'file', '1.0.0');
+  LOverview := BuildReportOverview(FData);
+  LOwn := FindLicence(LOverview.Licences, 'Proprietary');
+  Assert.AreEqual<Integer>(2, LOwn.Count);
+  Assert.AreEqual<string>('MyPkg (product)', LOwn.Components[0].Name);
+  Assert.AreEqual<string>('MyPkg290.bpl', LOwn.Components[1].Name);
+  Assert.AreEqual<string>('1.0.0', LOwn.Components[1].Version);
+end;
+
+procedure TReportOverviewTests.Licences_ProductWithoutBinary_ShowsProductVersion;
+
+  procedure AddSource(const APath, AVersion: string);
+  var
+    LArtefact: TArtefactInfo;
+  begin
+    LArtefact := Default(TArtefactInfo);
+    LArtefact.RelativePath := APath;
+    LArtefact.ArtefactType := 'file';
+    LArtefact.LibrarySourceFile := True;
+    LArtefact.Version := AVersion;
+    FArtefacts.Add(LArtefact);
+  end;
+
+begin
+  // Library mode: FixtureLib.dpk has the product's file stem, but it is
+  // source, not the built binary, so the rows stay separate.
+  FData.Metadata.ProductName := 'FixtureLib';
+  FData.Metadata.ProductVersion := '1.2.3.0';
+  FData.Metadata.Licence := 'MIT';
+  FData.ProjectInfo.ProjectName := 'FixtureLib';
+  FData.ProjectInfo.Version := '9.9.9.9';
+  AddSource('FixtureLib.dpk', '1.2.3.0');
+  AddSource('FixtureLib.Core.pas', '1.2.3.0');
+
+  var LOverview := BuildReportOverview(FData);
+  var LOwn := FindLicence(LOverview.Licences, 'MIT');
+  Assert.AreEqual<Integer>(1, LOwn.Count);
+  Assert.AreEqual<string>('FixtureLib (product)', LOwn.Components[0].Name);
+  Assert.AreEqual<string>('1.2.3.0', LOwn.Components[0].Version,
+    'the product row shows the header version');
+  var LNone := FindLicence(LOverview.Licences, cNoLicenceGroupTitle);
+  Assert.AreEqual<Integer>(2, LNone.Count);
+  Assert.AreEqual<string>('FixtureLib.Core.pas', LNone.Components[0].Name);
+  Assert.AreEqual<string>('FixtureLib.dpk', LNone.Components[1].Name);
+
+  // Header empty: the project version is the one the overview shows.
+  FData.Metadata.ProductVersion := '';
+  LOverview := BuildReportOverview(FData);
+  LOwn := FindLicence(LOverview.Licences, 'MIT');
+  Assert.AreEqual<string>('9.9.9.9', LOwn.Components[0].Version,
+    'the project version fills an empty product version');
+
+  // A merged binary replaces that version with the binary's own version.
+  FArtefacts.Clear;
+  FData.Metadata.ProductName := 'Demo';
+  FData.Metadata.ProductVersion := '2.0.0';
+  FData.ProjectInfo.ProjectName := 'Demo';
+  FData.ProjectInfo.Version := '2.0.0';
+  FData.Metadata.Licence := 'Proprietary';
+  var LExe := Default(TArtefactInfo);
+  LExe.RelativePath := 'Demo.exe';
+  LExe.ArtefactType := 'file';
+  LExe.Version := '9.8.7.6';
+  FArtefacts.Add(LExe);
+  LOverview := BuildReportOverview(FData);
+  LOwn := FindLicence(LOverview.Licences, 'Proprietary');
+  Assert.AreEqual<Integer>(1, LOwn.Count);
+  Assert.AreEqual<string>('Demo (product)', LOwn.Components[0].Name);
+  Assert.AreEqual<string>('9.8.7.6', LOwn.Components[0].Version,
+    'a merged binary keeps its own version');
+
+  // An empty binary version leaves the product version on the combined row.
+  FArtefacts.Clear;
+  LExe.Version := '';
+  FArtefacts.Add(LExe);
+  LOverview := BuildReportOverview(FData);
+  LOwn := FindLicence(LOverview.Licences, 'Proprietary');
+  Assert.AreEqual<Integer>(1, LOwn.Count);
+  Assert.AreEqual<string>('2.0.0', LOwn.Components[0].Version,
+    'an empty binary version keeps the product version');
 end;
 
 initialization

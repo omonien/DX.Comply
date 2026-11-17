@@ -411,9 +411,11 @@ begin
   Assert.IsTrue(Pos('<section id="licences" class="flat"><h2>Licences</h2>', LContent) > 0);
   Assert.IsTrue(Pos('<th>Name</th><th>Version</th><th>Copyright</th>', LContent) > 0);
   Assert.AreEqual<Integer>(0, Pos('<th>Names</th><th>Note</th>', LContent));
-  Assert.IsTrue(Pos('<summary>Proprietary (2 files)</summary>', LContent) > 0);
-  Assert.IsTrue(Pos('<td>Demo (product)</td><td></td><td></td>', LContent) > 0);
-  Assert.IsTrue(Pos('<td>Demo.dll</td><td>2.0.0.1</td><td></td>', LContent) > 0);
+  Assert.IsTrue(Pos('<details class="fold"><summary>Proprietary (1 file)</summary>', LContent) > 0);
+  Assert.IsTrue(Pos('<td>Demo (product)</td><td>2.0.0.1</td><td></td>', LContent) > 0,
+    'the product and Demo.dll are one row, with the binary version');
+  Assert.AreEqual<Integer>(0, Pos('<td>Demo.dll</td><td>2.0.0.1</td>', LContent),
+    'Demo.dll is not a second licence row');
   Assert.IsTrue(Pos('<summary>No licence information (1 file)</summary>', LContent) > 0);
   Assert.IsTrue(Pos('<td>JvComponent</td><td></td><td></td>', LContent) > 0);
   Assert.IsTrue(Pos('<section id="third-party-units-without-manifest" class="flat">', LContent) > 0);
@@ -563,7 +565,9 @@ begin
     'Check its terms for distribution with this product.</span></summary>', LContent) > 0,
     'a one-component group keeps the review note on its heading');
   Assert.IsTrue(Pos('<td>JVCL</td><td>3.5</td><td></td>', LContent) > 0);
-  Assert.IsTrue(Pos('<summary>Proprietary (2 files)</summary>', LContent) > 0);
+  Assert.IsTrue(Pos('<details class="fold"><summary>Proprietary (1 file)</summary>', LContent) > 0);
+  Assert.IsTrue(Pos('<td>Demo (product)</td><td>2.0.0.1</td><td></td>', LContent) > 0,
+    'the product and Demo.dll are one licence row');
   Assert.IsTrue(LVsoft < Pos('<summary>MPL-1.1 (1 file)', LContent), 'licence groups stay in title order');
 end;
 
@@ -673,8 +677,15 @@ begin
   Assert.AreEqual<Integer>(0, Pos('<details class="fold" open', LContent));
   Assert.AreEqual<Integer>(0, Pos('<details open', LContent));
 
-  Assert.IsTrue(Pos('<summary>MIT (3 files)</summary>', LContent) > 0,
+  Assert.IsTrue(Pos('<summary>MIT (2 files)</summary>', LContent) > 0,
     'the product licence heading shows the file count');
+  Assert.IsTrue(Pos('<summary>MIT (2 files)</summary>', LContent) <
+    Pos('<td>Demo (product)</td>', LContent),
+    'the product row is inside the collapsed licence section');
+  Assert.IsTrue(Pos('<td>Demo (product)</td>', LContent) < Pos('<td>MainForm</td>', LContent),
+    'the product is the first row of its collapsed licence list');
+  Assert.AreEqual<Integer>(0, Pos('<td>Demo.dll</td>', LContent),
+    'Demo.dll is not a second licence row');
   Assert.IsTrue(Pos('<td>MainForm</td>', LContent) > 0, 'own units stay in the licence list');
   Assert.IsTrue(Pos('<summary>Embarcadero RTL (1 file)</summary>', LContent) > 0);
   Assert.IsTrue(Pos('<td>System.SysUtils</td>', LContent) > 0);

@@ -670,12 +670,12 @@ begin
   LHtml := TFile.ReadAllText(LFixture.ReportBase + '.html', TEncoding.UTF8);
   LMarkdown := TFile.ReadAllText(LFixture.ReportBase + '.md', TEncoding.UTF8);
   AssertHtmlCopyright(LHtml, 'MyApp (product)', LNotice, 1);
-  AssertHtmlCopyright(LHtml, 'MyApp.exe', LNotice, 2);
+  AssertHtmlCopyright(LHtml, 'MyApp.exe', LNotice, 1);
   AssertHtmlCopyright(LHtml, 'MainForm', LNotice, 1);
   AssertHtmlCopyright(LHtml, 'plugin.dll', '', 1);
   AssertHtmlCopyright(LHtml, 'VendorLib', cRowCopyright, 1);
   AssertMarkdownCopyright(LMarkdown, 'MyApp (product)', LNotice, 1);
-  AssertMarkdownCopyright(LMarkdown, 'MyApp.exe', LNotice, 2);
+  AssertMarkdownCopyright(LMarkdown, 'MyApp.exe', LNotice, 1);
   AssertMarkdownCopyright(LMarkdown, 'MainForm', LNotice, 1);
   AssertMarkdownCopyright(LMarkdown, 'plugin.dll', '', 1);
   AssertMarkdownCopyright(LMarkdown, 'VendorLib', cRowCopyright, 1);
@@ -941,11 +941,22 @@ begin
   LHtml := TFile.ReadAllText(LFixture.ReportBase + '.html', TEncoding.UTF8);
   LMarkdown := TFile.ReadAllText(LFixture.ReportBase + '.md', TEncoding.UTF8);
   AssertHtmlCopyright(LHtml, 'MyApp (product)', '', 1);
-  AssertHtmlCopyright(LHtml, 'MyApp.exe', '', 1);
+  // The dproj has no version keys, so the project version is 1.0.0.0.
+  // The project's own binary carries that version. The PE file version
+  // 9.8.7.6 is used only when the project version is empty.
+  Assert.IsTrue(Pos('<td>MyApp (product)</td><td>1.0.0.0</td>', LHtml) > 0,
+    'the merged product row carries the project binary version');
+  Assert.AreEqual<Integer>(0, Pos('<td>MyApp.exe</td>',
+    Between(LHtml, '<h2>Licences</h2>', '</section>')),
+    'the only project binary is the product row');
   AssertHtmlCopyright(LHtml, 'MainForm', '', 1);
   AssertHtmlCopyright(LHtml, 'VendorLib', cRowCopyright, 1);
   AssertMarkdownCopyright(LMarkdown, 'MyApp (product)', '', 1);
-  AssertMarkdownCopyright(LMarkdown, 'MyApp.exe', '', 1);
+  Assert.IsTrue(Pos('| MyApp (product) | 1.0.0.0 |', LMarkdown) > 0,
+    'the merged product row carries the project binary version');
+  Assert.AreEqual<Integer>(0, Pos('| MyApp.exe |',
+    Between(LMarkdown, '## Licences', sLineBreak + '## ')),
+    'the only project binary is the product row');
   AssertMarkdownCopyright(LMarkdown, 'MainForm', '', 1);
   AssertMarkdownCopyright(LMarkdown, 'VendorLib', cRowCopyright, 1);
 

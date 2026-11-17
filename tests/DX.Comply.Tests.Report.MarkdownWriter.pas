@@ -342,8 +342,10 @@ begin
   Assert.IsTrue(Pos('## Licences', LContent) > 0);
   Assert.IsTrue(Pos('| Declared licence | Components | Name | Version | Copyright | Note |', LContent) > 0);
   Assert.AreEqual(0, Pos('| Declared licence | Components | Names | Note |', LContent));
-  Assert.IsTrue(Pos('| Proprietary | 2 | Demo (product) |  |  |  |', LContent) > 0);
-  Assert.IsTrue(Pos('| | | Demo.exe | 1.2.3.4 |  | |', LContent) > 0);
+  Assert.IsTrue(Pos('| Proprietary | 1 | Demo (product) | 1.2.3.4 |  |  |', LContent) > 0,
+    'the product and Demo.exe are one row, with the binary version');
+  Assert.AreEqual<Integer>(0, Pos('| | | Demo.exe |', LContent),
+    'Demo.exe is not a second licence row');
   Assert.IsTrue(Pos('| No licence information | 1 | JvComponent |  |  |  |', LContent) > 0);
   Assert.IsTrue(Pos('## Third-party units without manifest', LContent) > 0);
   Assert.IsTrue(Pos('| Jv | 1 | supplier, version, licence | JvComponent |', LContent) > 0);
@@ -401,8 +403,8 @@ begin
   LWriter := TMarkdownReportWriter.Create;
   Assert.IsTrue(LWriter.Write(FOutputPath, FData, THumanReadableReportConfig.Default));
   LContent := TFile.ReadAllText(FOutputPath, TEncoding.UTF8);
-  Assert.IsTrue(Pos('| MIT | 2 | libWernigApp.so | 16.0.0.7 |', LContent) > 0,
-    'The licence table uses the product version');
+  Assert.IsTrue(Pos('| libWernigApp.so | 16.0.0.7 |', LContent) > 0,
+    'The licence table uses the product version for the deliverable');
   Assert.IsTrue(Pos('| vendor.dll |  |', LContent) > 0,
     'A third-party DLL does not inherit the product version in the licence table');
   Assert.IsTrue(Pos('| Android\Release\libWernigApp.so | file | 16.0.0.7 |', LContent) > 0,
@@ -484,7 +486,8 @@ begin
     'components are sorted by name without regard to case');
   Assert.IsTrue(Pos('| MPL-1.1 | 1 | JVCL | 3.5 |  | Copyleft licence. Check its terms for distribution with this product. |',
     LContent) > 0, 'a one-component group keeps the review note on its row');
-  Assert.IsTrue(Pos('| Proprietary | 2 | Demo (product) |  |  |  |', LContent) > 0);
+  Assert.IsTrue(Pos('| Proprietary | 1 | Demo (product) | 1.2.3.4 |  |  |', LContent) > 0,
+    'the product and Demo.exe are one licence row');
   Assert.IsTrue(LVsoft < Pos('| MPL-1.1 | 1 | JVCL |', LContent), 'licence groups stay in title order');
 end;
 
