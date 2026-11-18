@@ -67,7 +67,8 @@ type
     /// <summary>
     /// A product deliverable with no version of its own, such as an Android
     /// shared library, uses the product version in the licence table. A
-    /// third-party file does not. A version already on the deliverable is kept.
+    /// third-party DLL shows the version stored on the file and does not
+    /// inherit the product version. A version already on the deliverable is kept.
     /// </summary>
     [Test]
     procedure Licences_DeliverableWithoutVersion_UsesProductVersion;
@@ -161,6 +162,14 @@ type
     /// </summary>
     [Test]
     procedure Licences_ProductWithoutBinary_ShowsProductVersion;
+    /// <summary>
+    /// An EXE, DLL, or BPL in the no-licence list shows the version already
+    /// stored on the file. A file with no stored version stays empty. A
+    /// source file does not show a stored version. The product stays first
+    /// in its own group. Issue #203.
+    /// </summary>
+    [Test]
+    procedure Licences_ExeAndDll_ShowStoredVersion;
   end;
 
 implementation
@@ -786,9 +795,10 @@ begin
   Assert.AreEqual(2, LCopies, 'Both copies of the built program use the product version');
   Assert.AreEqual<string>('16.0.0.7', VersionOf(LOverview, 'WernigApp (product)'),
     'a product row without a merged binary shows the product version');
-  Assert.AreEqual('', VersionOf(LOverview, 'vendor.dll'),
-    'A third-party DLL does not inherit the product version');
-  Assert.AreEqual('', VersionOf(LOverview, 'plugin.dll'));
+  Assert.AreEqual('9.9.9', VersionOf(LOverview, 'vendor.dll'),
+    'A third-party DLL shows its stored version and does not inherit the product version');
+  Assert.AreEqual('', VersionOf(LOverview, 'plugin.dll'),
+    'A DLL with no stored version stays empty');
 
   FArtefacts.Clear;
   AddVersioned('libWernigApp.so', 'file', '2026-01-01T00:00:00Z', True);
@@ -993,6 +1003,8 @@ begin
   var LNone := FindLicence(LOverview.Licences, cNoLicenceGroupTitle);
   Assert.AreEqual<Integer>(1, LNone.Count);
   Assert.AreEqual<string>('bit.dll', LNone.Components[0].Name);
+  Assert.AreEqual<string>('1.0.0', LNone.Components[0].Version,
+    'a neighboring DLL shows the version stored on the file');
 end;
 
 procedure TReportOverviewTests.Licences_ProductBinary_NotMergedWhenDifferentFile;
@@ -1126,6 +1138,88 @@ begin
   Assert.AreEqual<Integer>(1, LOwn.Count);
   Assert.AreEqual<string>('2.0.0', LOwn.Components[0].Version,
     'an empty binary version keeps the product version');
+end;
+
+procedure TReportOverviewTests.Licences_ExeAndDll_ShowStoredVersion;
+
+  procedure AddBinary(const APath, AType, AVersion: string; AFromFileDate: Boolean);
+  var
+    LArtefact: TArtefactInfo;
+  begin
+    LArtefact := Default(TArtefactInfo);
+    LArtefact.RelativePath := APath;
+    LArtefact.ArtefactType := AType;
+    LArtefact.Version := AVersion;
+    LArtefact.VersionFromFileDate := AFromFileDate;
+    FArtefacts.Add(LArtefact);
+  end;
+
+  function VersionOf(const AOverview: TReportOverview; const AName: string): string;
+  var
+    LGroup: TLicenceGroup;
+    I: Integer;
+  begin
+    for LGroup in AOverview.Licences do
+      for I := 0 to High(LGroup.Components) do
+        if SameText(LGroup.Components[I].Name, AName) then
+          Exit(LGroup.Components[I].Version);
+    Assert.Fail(AName + ' must appear in the licence table');
+  end;
+
+var
+  LOverview: TReportOverview;
+  LNone: TLicenceGroup;
+  LOwn: TLicenceGroup;
+begin
+  FData.Metadata.ProductName := 'Demo';
+  FData.Metadata.ProductVersion := '2.0.0';
+  FData.Metadata.Licence := 'MIT';
+  FData.ProjectInfo.ProjectName := 'Demo';
+  FData.ProjectInfo.OutputFilePath := 'C:\Build\Demo.exe';
+  FData.Metadata.ComponentManifestJson :=
+    '{"components":[],"own_code_units":["MainForm","Zebra"]}';
+  AddBinary('Demo.exe', 'application', '2.0.0.1', False);
+  AddUnit('MainForm', 'Local project');
+  AddUnit('Zebra', 'Local project');
+  AddBinary('tools\Helper.EXE', 'file', '1.4.2', False);
+  AddBinary('bin\Vendor.DLL', 'library', '10.0.19041.1', False);
+  AddBinary('plugin.dll', 'library', '', False);
+  AddBinary('old.dll', 'library', '2020-01-02T03:04:05Z', True);
+  AddBinary('rtl290.bpl', 'runtime-package', '29.0.0', False);
+  AddBinary('uastack.dll', 'external-reference', '1.2.3', False);
+  AddBinary('src\notes.pas', 'file', '2.0.0', False);
+  AddUnit('JvComponent', 'Third party');
+
+  LOverview := BuildReportOverview(FData);
+  LOwn := FindLicence(LOverview.Licences, 'MIT');
+  Assert.AreEqual<Integer>(3, LOwn.Count);
+  Assert.AreEqual<string>('Demo (product)', LOwn.Components[0].Name);
+  Assert.AreEqual<string>('2.0.0.1', LOwn.Components[0].Version);
+  Assert.IsTrue(LOwn.Components[0].IsProduct, 'the product row stays first');
+  Assert.AreEqual<string>('MainForm', LOwn.Components[1].Name);
+  Assert.AreEqual<string>('Zebra', LOwn.Components[2].Name);
+  Assert.AreEqual<Integer>(0, Pos('Demo.exe', LicenceNames(LOwn)),
+    'Demo.exe is not a second row of the product group');
+
+  LNone := FindLicence(LOverview.Licences, cNoLicenceGroupTitle);
+  Assert.AreEqual<Integer>(8, LNone.Count);
+  Assert.AreEqual<string>('Helper.EXE', LNone.Components[0].Name);
+  Assert.AreEqual<string>('1.4.2', VersionOf(LOverview, 'Helper.EXE'),
+    'an EXE shows the version stored on the file');
+  Assert.AreEqual<string>('10.0.19041.1', VersionOf(LOverview, 'Vendor.DLL'),
+    'a DLL shows its stored version and does not inherit the product version');
+  Assert.AreEqual<string>('', VersionOf(LOverview, 'plugin.dll'),
+    'a DLL with no stored version stays empty');
+  Assert.AreEqual<string>('2020-01-02T03:04:05Z', VersionOf(LOverview, 'old.dll'),
+    'a file-date stand-in is the stored version');
+  Assert.AreEqual<string>('29.0.0', VersionOf(LOverview, 'rtl290.bpl'),
+    'a BPL shows the version stored on the file');
+  Assert.AreEqual<string>('1.2.3', VersionOf(LOverview, 'uastack.dll'),
+    'an external DLL reference shows its stored version');
+  Assert.AreEqual<string>('', VersionOf(LOverview, 'notes.pas'),
+    'a source file does not show a stored version');
+  Assert.AreEqual<string>('', VersionOf(LOverview, 'JvComponent'),
+    'a unit without a version stays empty');
 end;
 
 initialization

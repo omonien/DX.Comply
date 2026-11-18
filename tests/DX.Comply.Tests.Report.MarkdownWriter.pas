@@ -81,8 +81,8 @@ type
     /// <summary>
     /// An Android shared library with no version resource shows the product
     /// version in the licence table and in the artefacts table. A third-party
-    /// DLL keeps its own version in the artefacts table and does not inherit
-    /// the product version in the licence table.
+    /// DLL shows its own version in both tables and does not inherit the
+    /// product version.
     /// </summary>
     [Test]
     procedure Write_DeliverableWithoutVersion_UsesProductVersion;
@@ -111,6 +111,13 @@ type
     /// </summary>
     [Test]
     procedure Write_PrefixMatchesNotApplied_Section;
+    /// <summary>
+    /// EXE and DLL files in the no-licence list show the version already
+    /// stored for the artefacts table. The product stays the first row of
+    /// its group. Issue #203.
+    /// </summary>
+    [Test]
+    procedure Write_NoLicenceList_ShowsExeAndDllVersion;
   end;
 
 implementation
@@ -405,7 +412,9 @@ begin
   LContent := TFile.ReadAllText(FOutputPath, TEncoding.UTF8);
   Assert.IsTrue(Pos('| libWernigApp.so | 16.0.0.7 |', LContent) > 0,
     'The licence table uses the product version for the deliverable');
-  Assert.IsTrue(Pos('| vendor.dll |  |', LContent) > 0,
+  Assert.IsTrue(Pos('| vendor.dll | 9.9.9 |', LContent) > 0,
+    'A third-party DLL shows its stored version in the licence table');
+  Assert.AreEqual<Integer>(0, Pos('| vendor.dll | 16.0.0.7 |', LContent),
     'A third-party DLL does not inherit the product version in the licence table');
   Assert.IsTrue(Pos('| Android\Release\libWernigApp.so | file | 16.0.0.7 |', LContent) > 0,
     'The artefacts table uses the product version');
@@ -544,6 +553,84 @@ begin
   Assert.IsTrue(Pos('## Prefix matches not applied', LContent) > 0);
   Assert.IsTrue(Pos('| Unit | Prefix | Row | Kept origin |', LContent) > 0);
   Assert.IsTrue(Pos('| Winapi.GDIPAPI | GDIP | TMS VCL UI Pack | Embarcadero RTL |', LContent) > 0);
+end;
+
+procedure TMarkdownReportWriterTests.Write_NoLicenceList_ShowsExeAndDllVersion;
+
+  procedure AddBinary(const APath, AType, AVersion: string; AFromFileDate: Boolean);
+  var
+    LArtefact: TArtefactInfo;
+  begin
+    LArtefact := Default(TArtefactInfo);
+    LArtefact.RelativePath := APath;
+    LArtefact.ArtefactType := AType;
+    LArtefact.Version := AVersion;
+    LArtefact.VersionFromFileDate := AFromFileDate;
+    LArtefact.FileSize := 100;
+    LArtefact.Hash := 'abc';
+    FArtefacts.Add(LArtefact);
+  end;
+
+var
+  LContent: string;
+  LNone: Integer;
+  LProduct: Integer;
+  LWriter: IHumanReadableReportWriter;
+begin
+  FArtefacts.Clear;
+  FData.ProjectInfo.ProjectName := 'Demo';
+  FData.ProjectInfo.OutputFilePath := 'C:\Build\Demo.exe';
+  FData.Metadata.ProductName := 'Demo';
+  FData.Metadata.ProductVersion := '2.0.0';
+  FData.Metadata.Licence := 'MIT';
+  FData.Metadata.ComponentManifestJson :=
+    '{"components":[],"own_code_units":["MainForm"]}';
+  AddBinary('build\Demo.exe', 'application', '2.0.0.1', False);
+  AddBinary('tools\Helper.EXE', 'file', '1.4.2', False);
+  AddBinary('bin\Vendor.DLL', 'library', '10.0.19041.1', False);
+  AddBinary('plugin.dll', 'library', '', False);
+  AddBinary('old.dll', 'library', '2020-01-02T03:04:05Z', True);
+  AddBinary('rtl290.bpl', 'runtime-package', '29.0.0', False);
+  AddBinary('uastack.dll', 'external-reference', '1.2.3', False);
+  AddBinary('src\notes.pas', 'file', '2.0.0', False);
+  var LUnit := Default(TArtefactInfo);
+  LUnit.RelativePath := 'MainForm.pas';
+  LUnit.ArtefactType := 'unit-evidence';
+  LUnit.Origin := 'Local project';
+  LUnit.UnitName := 'MainForm';
+  FArtefacts.Add(LUnit);
+
+  LWriter := TMarkdownReportWriter.Create;
+  Assert.IsTrue(LWriter.Write(FOutputPath, FData, THumanReadableReportConfig.Default));
+  LContent := TFile.ReadAllText(FOutputPath, TEncoding.UTF8);
+
+  Assert.IsTrue(Pos('| No licence information | 7 | Helper.EXE | 1.4.2 |  |  |', LContent) > 0,
+    'the no-licence list starts with the EXE and its stored version');
+  Assert.IsTrue(Pos('| | | Vendor.DLL | 10.0.19041.1 |  | |', LContent) > 0,
+    'a DLL shows the version stored on the file');
+  Assert.IsTrue(Pos('| | | plugin.dll |  |  | |', LContent) > 0,
+    'a DLL with no stored version stays empty');
+  Assert.IsTrue(Pos('| | | old.dll | 2020-01-02T03:04:05Z |  | |', LContent) > 0,
+    'a file-date stand-in is the stored version');
+  Assert.IsTrue(Pos('| | | rtl290.bpl | 29.0.0 |  | |', LContent) > 0,
+    'a BPL shows the version stored on the file');
+  Assert.IsTrue(Pos('| | | uastack.dll | 1.2.3 |  | |', LContent) > 0,
+    'an external DLL reference shows its stored version');
+  Assert.IsTrue(Pos('| | | notes.pas |  |  | |', LContent) > 0,
+    'a source file does not show a stored version');
+  Assert.AreEqual<Integer>(0, Pos('| Vendor.DLL | 2.0.0 |', LContent),
+    'a third-party DLL does not inherit the product version');
+  Assert.IsTrue(Pos('| bin\Vendor.DLL | library | 10.0.19041.1 |', LContent) > 0,
+    'the artefacts table still shows the same stored version');
+
+  LProduct := Pos('| MIT | 2 | Demo (product) | 2.0.0.1 |  |  |', LContent);
+  LNone := Pos('| No licence information | 7 | Helper.EXE | 1.4.2 |  |  |', LContent);
+  Assert.IsTrue((LProduct > 0) and (LProduct < LNone),
+    'the product licence stays ahead of the no-licence list');
+  Assert.IsTrue(LProduct < Pos('| | | MainForm |  |  | |', LContent),
+    'the product is the first row of its licence list');
+  Assert.AreEqual<Integer>(0, Pos('| | | Demo.exe |', LContent),
+    'Demo.exe is not a second licence row');
 end;
 
 initialization

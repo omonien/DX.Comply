@@ -19,6 +19,9 @@
 /// The built program's licence row uses its own version, or the product
 /// version from the SBOM header when the file has none. A third-party file
 /// does not inherit that version.
+/// An EXE, DLL, or BPL shows the version already stored on the artefact in
+/// every licence list, including No licence information. That is the same
+/// value as the artefacts table. No new scan is done (issue #203).
 /// The product row is first in its licence group. It shows the product
 /// version from the SBOM header, or the project version when the header
 /// has none. When that row and the project's own binary are the same
@@ -97,10 +100,11 @@ type
     /// <summary>Component name, without the version.</summary>
     Name: string;
     /// <summary>
-    /// Manifest version. The product row shows the product version, or the
-    /// project version when the header has none. When the product and the
-    /// project's own binary are the same file, that row shows the binary's
-    /// version instead. Empty when the row does not set one.
+    /// Version for this row. A manifest library uses its row. The product
+    /// row shows the product version, or the project version when the header
+    /// has none. When the product and the project's own binary are the same
+    /// file, that row shows the binary's version. An EXE, DLL, or BPL shows
+    /// the version already stored on the file. Empty when no version is stored.
     /// </summary>
     Version: string;
     /// <summary>Manifest copyright text. Empty when the field is not set.</summary>
@@ -533,6 +537,30 @@ begin
     SameText(LStem, Trim(AProductName));
 end;
 
+function IsVersionedReportBinary(const AArtefact: TArtefactInfo): Boolean;
+var
+  LExt: string;
+  LName: string;
+begin
+  // These files are listed again outside the artefacts table. The version
+  // is already on the artefact, so the licence lists can show it without
+  // reading the file. A unit and a shipped source file are not these files.
+  // Issue #203.
+  if SameText(AArtefact.ArtefactType, 'unit-evidence') then
+    Exit(False);
+  if SameText(AArtefact.ArtefactType, 'application') or
+     SameText(AArtefact.ArtefactType, 'library') or
+     SameText(AArtefact.ArtefactType, 'external-reference') or
+     SameText(AArtefact.ArtefactType, 'package') or
+     SameText(AArtefact.ArtefactType, 'runtime-package') then
+    Exit(True);
+  LName := BsiComponentFileName(AArtefact.RelativePath);
+  if LName = '' then
+    LName := BsiComponentFileName(AArtefact.FilePath);
+  LExt := LowerCase(ExtractFileExt(LName));
+  Result := (LExt = '.exe') or (LExt = '.dll') or (LExt = '.bpl');
+end;
+
 function ArtefactDisplayName(const AArtefact: TArtefactInfo): string;
 begin
   if SameText(AArtefact.ArtefactType, 'unit-evidence') then
@@ -772,11 +800,13 @@ begin
         var LComponentLicence := ComponentLicenceFor(LArtefact, LIsDeliverable,
           AData.Metadata.Licence, LManifest);
         // The built program shows its own version, or the product version
-        // from the SBOM header when it has none. A third-party file stays
-        // empty here. Its version is not the product version.
+        // from the SBOM header when it has none. An EXE, DLL, or BPL shows
+        // the version already stored on the artefact, the same value as the
+        // artefacts table, including a file-date stand-in. The product
+        // version is not copied onto those files. Issue #203.
         var LVersion := '';
-        if LIsDeliverable then
-          LVersion := ComponentVersionFor(LArtefact, True,
+        if LIsDeliverable or IsVersionedReportBinary(LArtefact) then
+          LVersion := ComponentVersionFor(LArtefact, LIsDeliverable,
             AData.Metadata.ProductVersion, AData.ProjectInfo.Version);
         // The built program and own-code units show the product notice.
         // A manifest library row keeps the copyright on that row, above.
