@@ -156,7 +156,7 @@ type
     /// </summary>
     class function UsageHint(const AModulePath: string = ''): string; static;
     /// <summary>
-    /// The version line, e.g. 'DX.Comply v2.1.0.0'. The number comes from the
+    /// The version line, e.g. 'DX.Comply v2.2.0.0'. The number comes from the
     /// version resource of the running executable, so it always matches the
     /// VerInfo keys of the build and cannot drift from a hardcoded literal.
     /// </summary>
