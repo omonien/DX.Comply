@@ -193,6 +193,18 @@ type
     /// </summary>
     [Test]
     procedure ComponentLicence_OwnCode_UsesProductLicence;
+    /// <summary>
+    /// One info line when a local-project unit stays without a licence
+    /// because a folder rule never saw a source path. Issue #207.
+    /// </summary>
+    [Test]
+    procedure UnlicensedLocalProjectHint_OneLineForOutputDcu;
+    /// <summary>
+    /// No hint when every local-project unit has a licence, or is matched
+    /// as own code or as a library. Issue #207.
+    /// </summary>
+    [Test]
+    procedure UnlicensedLocalProjectHint_MatchedOrLicensed_StaysQuiet;
 
     [Test]
     procedure Purl_EncodesSpaceAsPercent20;
@@ -3296,6 +3308,145 @@ begin
       (Pos('not applied', LManifest.Warnings[I]) > 0) then
       LFound := True;
   Assert.IsTrue(LFound, 'A prefix with no dot must say it is not applied');
+end;
+
+function LocalProjectUnit(const AUnitName, AFilePath, ASourcePath,
+  AOrigin: string): TArtefactInfo;
+begin
+  Result := Default(TArtefactInfo);
+  Result.ArtefactType := 'unit-evidence';
+  Result.Origin := AOrigin;
+  Result.UnitName := AUnitName;
+  Result.FilePath := AFilePath;
+  Result.SourcePath := ASourcePath;
+  if AFilePath <> '' then
+    Result.RelativePath := TPath.GetFileName(AFilePath)
+  else
+    Result.RelativePath := AUnitName + '.pas';
+end;
+
+procedure TComponentManifestTests.UnlicensedLocalProjectHint_OneLineForOutputDcu;
+const
+  cHint = 'Local project units stay without a licence. ' +
+    'Set own_code_folders to give them the product licence when product.licence is set. ' +
+    'Folder rules need the source path and do not match a DCU in the output folder.';
+var
+  LArtefacts: TArtefactList;
+  LHint: string;
+  LManifest: TComponentManifest;
+begin
+  LManifest := ParseManifest(
+    '{"components":[{"name":"App units","version":"1","vendor":"A","licence":"MIT",' +
+    '"type":"library","units_folder":["' + JsonPath('C:\Projects\MyApp\Source') + '"]}],' +
+    '"own_code_folders":["' + JsonPath('C:\Projects\MyApp\Source') + '"]}');
+  LArtefacts := TArtefactList.Create;
+  try
+    LArtefacts.Add(LocalProjectUnit('MainForm',
+      'C:\Projects\MyApp\Win32\Release\MainForm.dcu', '', 'Local project'));
+    LArtefacts.Add(LocalProjectUnit('Helper',
+      'C:\Projects\MyApp\Win32\Release\Helper.dcu', '', 'Local project'));
+    Assert.AreEqual('', ArtefactMatchPath(LManifest, LArtefacts[0]),
+      'An output DCU has no path for a folder rule');
+    Assert.AreEqual(Ord(mmNone), Ord(MatchManifestUnit(LManifest, 'MainForm',
+      ArtefactMatchPath(LManifest, LArtefacts[0])).Kind));
+    Assert.AreEqual('', ComponentLicenceFor(LArtefacts[0], False, 'MIT', LManifest));
+    LHint := UnlicensedLocalProjectHint(LManifest, LArtefacts, 'MIT');
+    Assert.AreEqual(cHint, LHint);
+    Assert.AreEqual(0, Pos(sLineBreak, LHint), 'One line, not one line per unit');
+    Assert.AreEqual(0, Pos('MainForm', LHint), LHint);
+    Assert.AreEqual(0, Pos('Helper', LHint), LHint);
+
+    LManifest := ParseManifest(
+      '{"components":[{"name":"App units","version":"1","vendor":"A","licence":"MIT",' +
+      '"type":"library","units_folder":["' + JsonPath('C:\Projects\MyApp\Source') + '"]}]}');
+    Assert.AreEqual(cHint, UnlicensedLocalProjectHint(LManifest, LArtefacts, 'MIT'),
+      'units_folder does not licence a DCU whose source path was not found');
+
+    LArtefacts.Clear;
+    LArtefacts.Add(LocalProjectUnit('MainForm',
+      'C:\Projects\MyApp\Win32\Release\MainForm.dcu',
+      'C:\Projects\MyApp\Source\MainForm.pas', 'Local project'));
+    LArtefacts.Add(LocalProjectUnit('Other',
+      'C:\Projects\MyApp\Win32\Release\Other.dcu', '', 'Local project'));
+    LManifest := ParseManifest(
+      '{"own_code_units":["MainForm"],' +
+      '"own_code_folders":["' + JsonPath('C:\Projects\MyApp\Source') + '"]}');
+    Assert.AreEqual(cHint, UnlicensedLocalProjectHint(LManifest, LArtefacts, 'Apache-2.0'),
+      'One unmatched local unit is enough, and the matched unit adds no second line');
+  finally
+    LArtefacts.Free;
+  end;
+end;
+
+procedure TComponentManifestTests.UnlicensedLocalProjectHint_MatchedOrLicensed_StaysQuiet;
+var
+  LArtefacts: TArtefactList;
+  LManifest: TComponentManifest;
+begin
+  LManifest := ParseManifest(
+    '{"components":[{"name":"JVCL","version":"1","vendor":"A","licence":"MPL-1.1",' +
+    '"type":"library","units_exact":["JvCore"],' +
+    '"units_folder":["' + JsonPath('C:\DXComplyFolderTest\JVCL') + '"]}],' +
+    '"own_code_units":["MainForm"],' +
+    '"own_code_prefixes":["App"],' +
+    '"own_code_folders":["' + JsonPath('C:\Projects\MyApp\Source') + '"]}');
+  LArtefacts := TArtefactList.Create;
+  try
+    LArtefacts.Add(LocalProjectUnit('Helper',
+      'C:\Projects\MyApp\Win32\Release\Helper.dcu',
+      'C:\Projects\MyApp\Source\Helper.pas', 'Local project'));
+    Assert.AreEqual('MIT', ComponentLicenceFor(LArtefacts[0], False, 'MIT', LManifest),
+      'The source path matches own_code_folders and takes the product licence');
+    Assert.AreEqual('', UnlicensedLocalProjectHint(LManifest, LArtefacts, 'MIT'),
+      'A local unit that already has a licence does not hint');
+
+    LArtefacts.Clear;
+    LArtefacts.Add(LocalProjectUnit('MainForm',
+      'C:\Projects\MyApp\Win32\Release\MainForm.dcu', '', 'Local project'));
+    Assert.AreEqual('', ComponentLicenceFor(LArtefacts[0], False, '', LManifest));
+    Assert.AreEqual('', UnlicensedLocalProjectHint(LManifest, LArtefacts, ''),
+      'Own code without a product licence is matched and does not hint');
+
+    LArtefacts.Clear;
+    LArtefacts.Add(LocalProjectUnit('AppSettings',
+      'C:\Projects\MyApp\Win32\Release\AppSettings.dcu', '', 'Local project'));
+    Assert.AreEqual('', UnlicensedLocalProjectHint(LManifest, LArtefacts, ''),
+      'An own_code_prefixes match does not hint');
+
+    LArtefacts.Clear;
+    LArtefacts.Add(LocalProjectUnit('JvCore',
+      'C:\Projects\MyApp\Win32\Release\JvCore.dcu',
+      'C:\DXComplyFolderTest\JVCL\run\JvCore.pas', 'Local project'));
+    Assert.AreEqual('', ComponentLicenceFor(LArtefacts[0], False, 'MIT', LManifest),
+      'A units_folder hit leaves the unit licence empty');
+    Assert.AreEqual('', UnlicensedLocalProjectHint(LManifest, LArtefacts, 'MIT'),
+      'A library folder match does not hint');
+
+    LArtefacts.Clear;
+    LArtefacts.Add(LocalProjectUnit('JvCore',
+      'C:\Projects\MyApp\Win32\Release\JvCore.dcu', '', 'Local project'));
+    Assert.AreEqual('', UnlicensedLocalProjectHint(LManifest, LArtefacts, 'MIT'),
+      'A library exact match does not hint');
+
+    LArtefacts.Clear;
+    LArtefacts.Add(LocalProjectUnit('Vendor.Util',
+      'C:\Libs\Vendor\Vendor.Util.pas',
+      'C:\Libs\Vendor\Vendor.Util.pas', 'Third party'));
+    Assert.AreEqual('', UnlicensedLocalProjectHint(LManifest, LArtefacts, 'MIT'),
+      'An unmatched third-party unit is not this hint');
+
+    LArtefacts.Clear;
+    Assert.AreEqual('', UnlicensedLocalProjectHint(LManifest, LArtefacts, 'MIT'));
+    Assert.AreEqual('', UnlicensedLocalProjectHint(LManifest, nil, 'MIT'));
+
+    LArtefacts.Add(LocalProjectUnit('Helper',
+      'C:\Projects\MyApp\Win32\Release\Helper.dcu', '', 'Local project'));
+    Assert.AreEqual('', UnlicensedLocalProjectHint(Default(TComponentManifest),
+      LArtefacts, 'MIT'),
+      'No manifest means there is no folder rule to explain');
+  finally
+    LArtefacts.Free;
+  end;
 end;
 
 initialization

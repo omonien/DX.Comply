@@ -482,6 +482,17 @@ function ProductFolderMatchLogLines(const AManifest: TComponentManifest;
   const AArtefacts: TArtefactList): TArray<string>;
 
 /// <summary>
+/// One log hint when a local-project unit stays without a licence and was
+/// not matched by own_code_units, own_code_prefixes, own_code_folders, or a
+/// library row. Empty when every local-project unit already has a licence,
+/// or is matched as own code or as a library. The hint names
+/// own_code_folders for the product licence and says that folder rules need
+/// the source path. One line for the run, not one line per unit.
+/// </summary>
+function UnlicensedLocalProjectHint(const AManifest: TComponentManifest;
+  const AArtefacts: TArtefactList; const AProductLicence: string): string;
+
+/// <summary>
 /// Rewrites the in-memory manifest JSON so a later parse sees the install
 /// root and, when APrefixMode is not empty, match.prefixes. The components
 /// file on disk is not changed. An empty APrefixMode leaves match.prefixes
@@ -2898,6 +2909,45 @@ begin
     Result := LLines.ToArray;
   finally
     LLines.Free;
+  end;
+end;
+
+function UnlicensedLocalProjectHint(const AManifest: TComponentManifest;
+  const AArtefacts: TArtefactList; const AProductLicence: string): string;
+const
+  cLocalProjectOrigin = 'Local project';
+  // Own code takes the product licence only from own_code_*. A units_folder
+  // hit is a library row, and a DCU in the output folder has no source path
+  // for either folder rule. One line covers every such unit.
+  cHint = 'Local project units stay without a licence. ' +
+    'Set own_code_folders to give them the product licence when product.licence is set. ' +
+    'Folder rules need the source path and do not match a DCU in the output folder.';
+var
+  I: Integer;
+  LName: string;
+  LMatch: TManifestMatch;
+begin
+  Result := '';
+  if not AManifest.Loaded or not Assigned(AArtefacts) then
+    Exit;
+
+  for I := 0 to AArtefacts.Count - 1 do
+  begin
+    if not SameText(AArtefacts[I].ArtefactType, 'unit-evidence') then
+      Continue;
+    if not SameText(Trim(AArtefacts[I].Origin), cLocalProjectOrigin) then
+      Continue;
+    LName := ArtefactUnitName(AArtefacts[I]);
+    if LName = '' then
+      Continue;
+    LMatch := MatchManifestUnit(AManifest, LName,
+      ArtefactMatchPath(AManifest, AArtefacts[I]));
+    if (LMatch.Kind = mmOwnCode) or (LMatch.Kind = mmLibrary) then
+      Continue;
+    if Trim(ComponentLicenceFor(AArtefacts[I], False, AProductLicence,
+      AManifest)) <> '' then
+      Continue;
+    Exit(cHint);
   end;
 end;
 
