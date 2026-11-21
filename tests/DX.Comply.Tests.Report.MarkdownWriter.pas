@@ -58,6 +58,13 @@ type
     /// </summary>
     [Test]
     procedure Write_ArtefactVersion_AppearsInArtefactsTable;
+    /// <summary>
+    /// Two copies of one DLL show each path and location source. A row with
+    /// no location source is unchanged. A system-directory row keeps its path.
+    /// Issue #205.
+    /// </summary>
+    [Test]
+    procedure Write_DistinctCopies_ShowPathAndLocationSource;
 
     /// <summary>
     /// SBOM header data (creator, supplier, supplier URL, licence, product)
@@ -299,6 +306,54 @@ begin
     'DLL version from the PE/version resource must appear on the report line');
   Assert.IsTrue(Pos('| build\Win64\Release\Demo.exe | application | 1.2.3.4 | 1024 |', LContent) > 0,
     'application version already stored on the artefact must appear unchanged');
+end;
+
+procedure TMarkdownReportWriterTests.Write_DistinctCopies_ShowPathAndLocationSource;
+var
+  LArtefact: TArtefactInfo;
+  LContent: string;
+  LWriter: IHumanReadableReportWriter;
+begin
+  LArtefact := Default(TArtefactInfo);
+  LArtefact.RelativePath := 'VendorLib.dll';
+  LArtefact.ArtefactType := 'library';
+  LArtefact.FileSize := 100;
+  LArtefact.Hash := StringOfChar('a', 64);
+  LArtefact.Version := '1.0.0.0';
+  LArtefact.LocationSource := 'output-directory';
+  FArtefacts.Add(LArtefact);
+
+  LArtefact := Default(TArtefactInfo);
+  LArtefact.RelativePath := 'SharedLibs\VendorLib\Distribution\VendorLib.dll';
+  LArtefact.ArtefactType := 'external-reference';
+  LArtefact.FileSize := 100;
+  LArtefact.Hash := StringOfChar('b', 64);
+  LArtefact.Version := '1.0.0.0';
+  LArtefact.LocationSource := 'project-tree';
+  FArtefacts.Add(LArtefact);
+
+  LArtefact := Default(TArtefactInfo);
+  LArtefact.RelativePath := 'ws2_32.dll';
+  LArtefact.ArtefactType := 'external-reference';
+  LArtefact.FileSize := -1;
+  LArtefact.LocationSource := 'system-directory';
+  LArtefact.Location := 'C:\Windows\SysWOW64\ws2_32.dll';
+  FArtefacts.Add(LArtefact);
+
+  LWriter := TMarkdownReportWriter.Create;
+  Assert.IsTrue(LWriter.Write(FOutputPath, FData, THumanReadableReportConfig.Default));
+  LContent := TFile.ReadAllText(FOutputPath, TEncoding.UTF8);
+  Assert.IsTrue(Pos('| build\Win64\Release\Demo.exe | application | 1.2.3.4 | 1024 |',
+    LContent) > 0,
+    'a row with no location source must stay a plain path');
+  Assert.IsTrue(Pos('| VendorLib.dll (output-directory) | library |', LContent) > 0,
+    'the output-folder copy must show its path and location source');
+  Assert.IsTrue(Pos('| SharedLibs\VendorLib\Distribution\VendorLib.dll (project-tree) | external-reference |',
+    LContent) > 0,
+    'the project-tree copy must show its path and location source');
+  Assert.IsTrue(Pos('| ws2_32.dll (system-directory) (System directory: C:\Windows\SysWOW64\ws2_32.dll) |',
+    LContent) > 0,
+    'a system-directory row must show the location source and the path');
 end;
 
 procedure TMarkdownReportWriterTests.Write_SbomHeaderData_AppearsInProjectOverview;

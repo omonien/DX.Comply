@@ -107,6 +107,14 @@ type
     /// path is accepted.
     /// </summary>
     function LibraryPathSelected(const ARelativePath: string): Boolean;
+    /// <summary>
+    /// True when ARelativePath matches an exclude glob. The path is relative
+    /// to the directory being scanned. '/' and '\' are the same. Matching
+    /// ignores letter case. An empty path or an empty pattern list is not
+    /// excluded. Does not change the include list from the last scan.
+    /// </summary>
+    function RelativePathExcluded(const ARelativePath: string;
+      const AExcludePatterns: TArray<string>): Boolean;
   end;
 
 implementation
@@ -321,6 +329,26 @@ procedure TFileScanner.BeginLibraryFilter(const AIncludePatterns,
   AExcludePatterns: TArray<string>);
 begin
   BeginFilter(AIncludePatterns, AExcludePatterns);
+end;
+
+function TFileScanner.RelativePathExcluded(const ARelativePath: string;
+  const AExcludePatterns: TArray<string>): Boolean;
+var
+  LSavedInclude, LSavedExclude: TArray<string>;
+begin
+  Result := False;
+  if (Trim(ARelativePath) = '') or (Length(AExcludePatterns) = 0) then
+    Exit;
+  LSavedInclude := FIncludePatterns;
+  LSavedExclude := FExcludePatterns;
+  FExcludePatterns := AExcludePatterns;
+  try
+    PreparePatterns(AExcludePatterns);
+    Result := IsExcluded(ARelativePath);
+  finally
+    FIncludePatterns := LSavedInclude;
+    FExcludePatterns := LSavedExclude;
+  end;
 end;
 
 function TFileScanner.LibraryPathSelected(const ARelativePath: string): Boolean;

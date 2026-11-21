@@ -192,8 +192,11 @@ Each one is scanned non-recursively unless the value contains `**`.
 `"scanTree": true` restores the old recursive walk of the output directory.
 That switch is deprecated and will be removed in the next release.
 
-`include` and `exclude` still filter the files that were scanned. With
-`scanTree`, or a `scanDirs` value that contains `**`, patterns are relative
+`include` and `exclude` filter the files that were scanned. `exclude` also
+applies to an imported DLL or runtime package found in the output folder or
+under the project tree. The pattern is relative to that folder. `*.dll`
+matches a DLL next to the exe, not `SharedLibs/VendorLib/Distribution/VendorLib.dll`.
+With `scanTree`, or a `scanDirs` value that contains `**`, patterns are relative
 to the scanned directory. A shared output folder is covered in
 [Output folders](#output-folders). An include list replaces the default
 extensions. Do not use `--exclude=*.exe` for that case.

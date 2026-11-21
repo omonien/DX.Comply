@@ -56,8 +56,22 @@ procedure TMarkdownReportWriter.AddArtefacts(Lines: TStrings; const AData: TComp
 var
   LArtefact: TArtefactInfo;
   LDeliverable: Integer;
+  LPath: string;
   LVersion: string;
   I: Integer;
+
+  function ArtefactPathText(const AArtefact: TArtefactInfo): string;
+  begin
+    // Issue #205: the location source is part of the path cell when the row
+    // has one. A system-directory hit also keeps its path (issue #59).
+    Result := SafeText(SafeText(AArtefact.RelativePath, AArtefact.ComponentName),
+      AArtefact.FilePath);
+    if AArtefact.LocationSource <> '' then
+      Result := Result + ' (' + AArtefact.LocationSource + ')';
+    if AArtefact.Location <> '' then
+      Result := Result + ' (System directory: ' + AArtefact.Location + ')';
+  end;
+
 begin
   Lines.Add('## Artefacts');
   // Issue #90: Version is already stored on the artefact. That value is the
@@ -78,16 +92,17 @@ begin
     LVersion := FormatReportUtcTimestamp(ComponentVersionFor(LArtefact,
       IsSameDeliverableFile(AData.Artefacts, I, LDeliverable),
       AData.Metadata.ProductVersion, AData.ProjectInfo.Version));
+    LPath := EscapeMarkdown(ArtefactPathText(LArtefact));
     if LArtefact.FileSize >= 0 then
       Lines.Add(Format('| %s | %s | %s | %d | %s |', [
-        EscapeMarkdown(SafeText(SafeText(LArtefact.RelativePath, LArtefact.ComponentName), LArtefact.FilePath)),
+        LPath,
         EscapeMarkdown(SafeText(LArtefact.ArtefactType)),
         EscapeMarkdown(SafeText(LVersion)),
         LArtefact.FileSize,
         EscapeMarkdown(SafeText(LArtefact.Hash))]))
     else
       Lines.Add(Format('| %s | %s | %s | n/a | %s |', [
-        EscapeMarkdown(SafeText(SafeText(LArtefact.RelativePath, LArtefact.ComponentName), LArtefact.FilePath)),
+        LPath,
         EscapeMarkdown(SafeText(LArtefact.ArtefactType)),
         EscapeMarkdown(SafeText(LVersion)),
         EscapeMarkdown(SafeText(LArtefact.Hash))]));

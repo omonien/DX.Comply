@@ -329,6 +329,44 @@ type
     /// </summary>
     [Test]
     procedure Generate_SystemDll_HasLocationButNoHash;
+    /// <summary>
+    /// A project-relative exclude drops an imported DLL found under the
+    /// project tree, including a backslash pattern, a ** pattern, and a
+    /// full path in source that points at that tree. Issue #205.
+    /// </summary>
+    [Test]
+    procedure Generate_Exclude_DropsProjectTreeImport;
+    /// <summary>
+    /// *.dll matches a DLL in the output folder, including one named in
+    /// source. It does not match a nested project-tree path. Issue #205.
+    /// </summary>
+    [Test]
+    procedure Generate_Exclude_FlatDllPattern_MatchesOutputNotProjectTree;
+    /// <summary>
+    /// The output scan and a source reference to the same file are one row.
+    /// On Windows the names may differ only by letter case. Issue #205.
+    /// </summary>
+    [Test]
+    procedure Generate_ImportedDll_SameResolvedFile_ListedOnce;
+    /// <summary>
+    /// A missing DLL name and a system-directory hit stay listed. An explicit
+    /// path outside the project is not a scan-root path, so *.dll does not
+    /// drop it. Issue #205.
+    /// </summary>
+    [Test]
+    procedure Generate_Exclude_KeepsMissingAndSystemDll;
+    /// <summary>
+    /// A runtime package found on disk is excluded by the path relative to
+    /// that folder. A package that was not found stays listed. Issue #205.
+    /// </summary>
+    [Test]
+    procedure Generate_Exclude_RuntimePackage_MatchesFoundPath;
+    /// <summary>
+    /// A DLL named only in the output binary's import table, and found under
+    /// the project tree, is dropped by a project-relative exclude. Issue #205.
+    /// </summary>
+    [Test]
+    procedure Generate_PeImport_Exclude_DropsProjectTreeDll;
     /// <summary>Non-Windows targets have no system directory.</summary>
     [Test]
     procedure SystemDirectories_NonWindowsPlatform_IsEmpty;
@@ -2495,6 +2533,404 @@ begin
         'A system DLL must not take the build machine''s file version');
     end;
     Assert.IsTrue(LFound, 'kernel32.dll must be listed');
+  finally
+    LJson.Free;
+  end;
+end;
+
+function CreateDllImportProject(const ARoot, ADprBody, AExtraProperties: string): string;
+var
+  LDproj: string;
+begin
+  TDirectory.CreateDirectory(ARoot);
+  TDirectory.CreateDirectory(TPath.Combine(ARoot, 'output'));
+  TFile.WriteAllText(TPath.Combine(ARoot, 'ImportApp.dpr'), ADprBody, TEncoding.UTF8);
+  LDproj :=
+    '<?xml version="1.0" encoding="utf-8"?>' + sLineBreak +
+    '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">' + sLineBreak +
+    '  <PropertyGroup>' + sLineBreak +
+    '    <MainSource>ImportApp.dpr</MainSource>' + sLineBreak +
+    '    <AppType>Application</AppType>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '  <PropertyGroup Condition="''$(Base)''!=''''">' + sLineBreak +
+    '    <DCC_ExeOutput>.\output</DCC_ExeOutput>' + sLineBreak +
+    AExtraProperties +
+    '  </PropertyGroup>' + sLineBreak +
+    '</Project>' + sLineBreak;
+  Result := TPath.Combine(ARoot, 'ImportApp.dproj');
+  TFile.WriteAllText(Result, LDproj, TEncoding.UTF8);
+  // Not a valid PE. A runtime-package list is kept in full. A PE import
+  // test overwrites this file with a synthetic image.
+  TFile.WriteAllBytes(TPath.Combine(ARoot, 'output', 'ImportApp.exe'),
+    TBytes.Create($4D, $5A, $01));
+  TFile.WriteAllText(TPath.Combine(ARoot, 'output', 'ImportApp.map'), 'map', TEncoding.UTF8);
+  TFile.WriteAllText(TPath.Combine(ARoot, 'ImportApp.map'), 'map', TEncoding.UTF8);
+end;
+
+procedure WriteDummyBinary(const APath: string);
+begin
+  TDirectory.CreateDirectory(TPath.GetDirectoryName(APath));
+  TFile.WriteAllBytes(APath, TBytes.Create($4D, $5A, $11));
+end;
+
+function ComponentProperty(const AJson: TJSONObject; const AName, AProperty: string): string;
+var
+  LComponents: TJSONArray;
+  LComponent: TJSONObject;
+  I: Integer;
+begin
+  Result := '';
+  if not Assigned(AJson) then
+    Exit;
+  LComponents := AJson.GetValue('components') as TJSONArray;
+  if not Assigned(LComponents) then
+    Exit;
+  for I := 0 to LComponents.Count - 1 do
+  begin
+    if not (LComponents.Items[I] is TJSONObject) then
+      Continue;
+    LComponent := TJSONObject(LComponents.Items[I]);
+    if SameText(LComponent.GetValue<string>('name', ''), AName) then
+      Exit(VendorProperty(LComponent, AProperty));
+  end;
+end;
+
+procedure TEngineTests.Generate_Exclude_DropsProjectTreeImport;
+var
+  LRoot, LProject, LExplicit, LBody: string;
+  LConfig: TSbomConfig;
+  LJson: TJSONObject;
+
+  procedure ExpectDropped(const APattern: string);
+  begin
+    LConfig := ScopeConfig;
+    LConfig.ExcludePatterns := TArray<string>.Create(APattern);
+    LJson := GenerateScope(LProject, LConfig);
+    try
+      Assert.AreEqual(NativeInt(0), CountComponents(LJson, 'VendorLib.dll'),
+        APattern + ' must drop the project-tree import');
+      Assert.AreEqual(NativeInt(0), CountComponents(LJson, 'explicit.dll'),
+        APattern + ' must drop a full path that points at the same tree');
+      Assert.AreEqual(NativeInt(1), CountComponents(LJson, 'keep.dll'),
+        APattern + ' must leave a DLL in another project folder');
+      Assert.AreEqual(NativeInt(1), CountComponents(LJson, 'ImportApp.exe'),
+        'The program must stay in the SBOM');
+      Assert.IsTrue(ComponentHasHash(LJson, 'keep.dll'),
+        'The DLL that stays must still be hashed');
+      Assert.AreEqual('project-tree', ComponentProperty(LJson, 'keep.dll',
+        'net.developer-experts.dx-comply:locationSource'),
+        'The remaining copy must say it was found in the project tree');
+    finally
+      LJson.Free;
+    end;
+  end;
+
+begin
+  LRoot := TPath.Combine(FTempDir, 'tree-exclude');
+  LExplicit := TPath.Combine(TPath.Combine(TPath.Combine(TPath.Combine(LRoot,
+    'SharedLibs'), 'VendorLib'), 'Distribution'), 'explicit.dll');
+  WriteDummyBinary(TPath.Combine(TPath.GetDirectoryName(LExplicit), 'VendorLib.dll'));
+  WriteDummyBinary(LExplicit);
+  WriteDummyBinary(TPath.Combine(TPath.Combine(LRoot, 'Other'), 'keep.dll'));
+  LBody :=
+    'program ImportApp;' + sLineBreak +
+    'procedure UseVendor; external ''VendorLib.dll'';' + sLineBreak +
+    'procedure UseKeep; external ''keep.dll'';' + sLineBreak +
+    'procedure UseExplicit; external ''' + LExplicit + ''';' + sLineBreak +
+    'begin' + sLineBreak +
+    'end.' + sLineBreak;
+  LProject := CreateDllImportProject(LRoot, LBody, '');
+
+  ExpectDropped('SharedLibs/VendorLib/Distribution/*.dll');
+  ExpectDropped('SharedLibs\VendorLib\Distribution\*.dll');
+  ExpectDropped('SharedLibs/**/*.dll');
+end;
+
+procedure TEngineTests.Generate_Exclude_FlatDllPattern_MatchesOutputNotProjectTree;
+var
+  LRoot, LProject, LBody: string;
+  LConfig: TSbomConfig;
+  LJson: TJSONObject;
+begin
+  LRoot := TPath.Combine(FTempDir, 'flat-exclude');
+  WriteDummyBinary(TPath.Combine(TPath.Combine(TPath.Combine(TPath.Combine(LRoot,
+    'SharedLibs'), 'VendorLib'), 'Distribution'), 'VendorLib.dll'));
+  WriteDummyBinary(TPath.Combine(LRoot, 'output', 'beside.dll'));
+  LBody :=
+    'program ImportApp;' + sLineBreak +
+    'procedure UseVendor; external ''VendorLib.dll'';' + sLineBreak +
+    'procedure UseBeside; external ''beside.dll'';' + sLineBreak +
+    'begin' + sLineBreak +
+    'end.' + sLineBreak;
+  LProject := CreateDllImportProject(LRoot, LBody, '');
+  LConfig := ScopeConfig;
+  LConfig.ExcludePatterns := TArray<string>.Create('*.dll');
+  LJson := GenerateScope(LProject, LConfig);
+  try
+    Assert.AreEqual(NativeInt(0), CountComponents(LJson, 'beside.dll'),
+      '*.dll must drop a DLL in the output folder, including one named in source');
+    Assert.AreEqual(NativeInt(1), CountComponents(LJson, 'VendorLib.dll'),
+      '*.dll must not drop a nested project-tree path');
+    Assert.AreEqual('project-tree', ComponentProperty(LJson, 'VendorLib.dll',
+      'net.developer-experts.dx-comply:locationSource'));
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TEngineTests.Generate_ImportedDll_SameResolvedFile_ListedOnce;
+var
+  LRoot, LProject, LBody: string;
+  LConfig: TSbomConfig;
+  LJson: TJSONObject;
+  LComponents: TJSONArray;
+  LComponent: TJSONObject;
+  LFound: NativeInt;
+  I: Integer;
+begin
+  LRoot := TPath.Combine(FTempDir, 'same-file');
+  WriteDummyBinary(TPath.Combine(LRoot, 'output', 'epMCOMLib.dll'));
+  LBody :=
+    'program ImportApp;' + sLineBreak +
+    'procedure UseDll; external ''epMCOMLib.dll'';' + sLineBreak +
+    'begin' + sLineBreak +
+    'end.' + sLineBreak;
+  LProject := CreateDllImportProject(LRoot, LBody, '');
+  LConfig := ScopeConfig;
+  LJson := GenerateScope(LProject, LConfig);
+  try
+    LComponents := LJson.GetValue('components') as TJSONArray;
+    Assert.IsNotNull(LComponents);
+    LFound := 0;
+    for I := 0 to LComponents.Count - 1 do
+    begin
+      if not (LComponents.Items[I] is TJSONObject) then
+        Continue;
+      LComponent := TJSONObject(LComponents.Items[I]);
+      if not SameText(LComponent.GetValue<string>('name', ''), 'epMCOMLib.dll') then
+        Continue;
+      Inc(LFound);
+      Assert.AreEqual('epMCOMLib.dll', LComponent.GetValue<string>('name', ''),
+        'The listed name must be the name on disk, not the lower-case source name');
+      Assert.AreEqual('', VendorProperty(LComponent,
+        'net.developer-experts.dx-comply:confidence'),
+        'The output scan row is kept, so the source-scan row is not added');
+      Assert.AreEqual('output-directory', VendorProperty(LComponent,
+        'net.developer-experts.dx-comply:locationSource'));
+      Assert.IsNotNull(LComponent.GetValue('hashes'),
+        'The one row must still carry the file hash');
+    end;
+    Assert.AreEqual(NativeInt(1), LFound,
+      'epMCOMLib.dll and epmcomlib.dll are one file and must be one component');
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TEngineTests.Generate_Exclude_KeepsMissingAndSystemDll;
+var
+  LRoot, LProject, LOutside, LBody: string;
+  LConfig: TSbomConfig;
+  LJson: TJSONObject;
+begin
+  LRoot := TPath.Combine(FTempDir, 'keep-unresolved');
+  LOutside := TPath.Combine(FTempDir, 'outside.dll');
+  WriteDummyBinary(LOutside);
+  LBody :=
+    'program ImportApp;' + sLineBreak +
+    'procedure Missing; external ''notshipped.dll'';' + sLineBreak +
+    'procedure Sys; external ''kernel32.dll'';' + sLineBreak +
+    'procedure Outs; external ''' + LOutside + ''';' + sLineBreak +
+    'begin' + sLineBreak +
+    'end.' + sLineBreak;
+  LProject := CreateDllImportProject(LRoot, LBody, '');
+  LConfig := ScopeConfig;
+  LConfig.ExcludePatterns := TArray<string>.Create('*.dll');
+  LJson := GenerateScope(LProject, LConfig);
+  try
+    Assert.AreEqual(NativeInt(1), CountComponents(LJson, 'notshipped.dll'),
+      'A DLL name that was not found is not a scan-root path');
+    Assert.IsFalse(ComponentHasHash(LJson, 'notshipped.dll'),
+      'A missing DLL still has no hash');
+    Assert.AreEqual(NativeInt(1), CountComponents(LJson, 'kernel32.dll'),
+      'A system-directory hit is not removed by an output-folder pattern');
+    Assert.IsFalse(ComponentHasHash(LJson, 'kernel32.dll'),
+      'A system DLL must not be hashed');
+    Assert.AreEqual('system-directory', ComponentProperty(LJson, 'kernel32.dll',
+      'net.developer-experts.dx-comply:locationSource'));
+    Assert.AreEqual('', ComponentProperty(LJson, 'kernel32.dll', 'file:size'),
+      'A system DLL must not record the build machine size');
+    Assert.AreEqual(NativeInt(1), CountComponents(LJson, 'outside.dll'),
+      'An explicit path outside the project has no scan root');
+    Assert.IsTrue(ComponentHasHash(LJson, 'outside.dll'),
+      'That explicit file is what the source named, so it is hashed');
+    Assert.AreEqual('explicit-path', ComponentProperty(LJson, 'outside.dll',
+      'net.developer-experts.dx-comply:locationSource'));
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure TEngineTests.Generate_Exclude_RuntimePackage_MatchesFoundPath;
+var
+  LRoot, LProject, LBody: string;
+  LConfig: TSbomConfig;
+  LJson: TJSONObject;
+  LPackages: string;
+begin
+  LRoot := TPath.Combine(FTempDir, 'bpl-exclude');
+  WriteDummyBinary(TPath.Combine(TPath.Combine(TPath.Combine(LRoot, 'SharedLibs'),
+    'Pkgs'), 'vendor.bpl'));
+  WriteDummyBinary(TPath.Combine(LRoot, 'output', 'extra.bpl'));
+  LBody :=
+    'program ImportApp;' + sLineBreak +
+    'begin' + sLineBreak +
+    'end.' + sLineBreak;
+  LPackages :=
+    '    <UsePackages>true</UsePackages>' + sLineBreak +
+    '    <DCC_UsePackage>rtl;vendor;extra</DCC_UsePackage>' + sLineBreak;
+  LProject := CreateDllImportProject(LRoot, LBody, LPackages);
+
+  LConfig := ScopeConfig;
+  LConfig.ExcludePatterns := TArray<string>.Create('SharedLibs/Pkgs/*.bpl');
+  LJson := GenerateScope(LProject, LConfig);
+  try
+    Assert.AreEqual(NativeInt(0), CountComponents(LJson, 'vendor.bpl'),
+      'A project-relative pattern must drop the runtime package found there');
+    Assert.IsTrue(CountComponents(LJson, 'extra.bpl') >= 1,
+      'A package in the output folder does not match a project-tree pattern');
+    Assert.AreEqual(NativeInt(1), CountComponents(LJson, 'rtl.bpl'),
+      'A runtime package that was not found stays listed');
+    Assert.IsFalse(ComponentHasHash(LJson, 'rtl.bpl'),
+      'An unresolved runtime package has no hash');
+  finally
+    LJson.Free;
+  end;
+
+  LConfig.ExcludePatterns := TArray<string>.Create('*.bpl');
+  LJson := GenerateScope(LProject, LConfig);
+  try
+    Assert.AreEqual(NativeInt(0), CountComponents(LJson, 'extra.bpl'),
+      '*.bpl must drop a package in the output folder and must not add it back');
+    Assert.AreEqual(NativeInt(1), CountComponents(LJson, 'vendor.bpl'),
+      '*.bpl must not drop a nested project-tree package');
+    Assert.AreEqual('project-tree', ComponentProperty(LJson, 'vendor.bpl',
+      'net.developer-experts.dx-comply:locationSource'));
+    Assert.AreEqual(NativeInt(1), CountComponents(LJson, 'rtl.bpl'),
+      '*.bpl must not drop a package name that was not found');
+  finally
+    LJson.Free;
+  end;
+end;
+
+procedure WritePeU16(var ABytes: TBytes; AOffset: Integer; AValue: Word);
+begin
+  ABytes[AOffset] := Byte(AValue and $00FF);
+  ABytes[AOffset + 1] := Byte(AValue shr 8);
+end;
+
+procedure WritePeU32(var ABytes: TBytes; AOffset: Integer; AValue: Cardinal);
+begin
+  ABytes[AOffset] := Byte(AValue and $FF);
+  ABytes[AOffset + 1] := Byte((AValue shr 8) and $FF);
+  ABytes[AOffset + 2] := Byte((AValue shr 16) and $FF);
+  ABytes[AOffset + 3] := Byte((AValue shr 24) and $FF);
+end;
+
+procedure WritePeAsciiZ(var ABytes: TBytes; AOffset: Integer; const AText: string);
+var
+  I: Integer;
+begin
+  for I := 1 to Length(AText) do
+    ABytes[AOffset + I - 1] := Byte(Ord(AText[I]));
+  ABytes[AOffset + Length(AText)] := 0;
+end;
+
+function BuildImportPe32(const ADllNames: array of string): TBytes;
+const
+  cFileSize = $400;
+  cSectionVa = $1000;
+  cSectionRaw = $200;
+var
+  LDescAt, LFilePos, LImportSize, LNameRva, LSectionAt: Integer;
+  I: Integer;
+begin
+  // Same layout as the project-scanner fixture: one PE32 section and an
+  // import directory whose DLL names follow the descriptor table.
+  SetLength(Result, cFileSize);
+  WritePeU16(Result, 0, $5A4D);
+  WritePeU32(Result, $3C, $80);
+  WritePeU32(Result, $80, $4550);
+  WritePeU16(Result, $84, $014C);
+  WritePeU16(Result, $86, 1);
+  WritePeU16(Result, $94, 224);
+  WritePeU16(Result, $98, $010B);
+  WritePeU32(Result, $98 + 92, 16);
+  LImportSize := 20 * (Length(ADllNames) + 1);
+  WritePeU32(Result, $98 + 96 + 8, cSectionVa);
+  WritePeU32(Result, $98 + 96 + 12, Cardinal(LImportSize));
+  LSectionAt := $98 + 224;
+  WritePeU32(Result, LSectionAt + 8, $200);
+  WritePeU32(Result, LSectionAt + 12, cSectionVa);
+  WritePeU32(Result, LSectionAt + 16, $200);
+  WritePeU32(Result, LSectionAt + 20, cSectionRaw);
+  LNameRva := cSectionVa + LImportSize;
+  LFilePos := cSectionRaw + LImportSize;
+  for I := 0 to High(ADllNames) do
+  begin
+    LDescAt := cSectionRaw + (I * 20);
+    WritePeU32(Result, LDescAt, $2000);
+    WritePeU32(Result, LDescAt + 12, Cardinal(LNameRva));
+    WritePeU32(Result, LDescAt + 16, $2100);
+    WritePeAsciiZ(Result, LFilePos, ADllNames[I]);
+    Inc(LNameRva, Length(ADllNames[I]) + 1);
+    Inc(LFilePos, Length(ADllNames[I]) + 1);
+  end;
+end;
+
+procedure TEngineTests.Generate_PeImport_Exclude_DropsProjectTreeDll;
+var
+  LRoot, LProject, LBody: string;
+  LConfig: TSbomConfig;
+  LJson: TJSONObject;
+begin
+  LRoot := TPath.Combine(FTempDir, 'pe-exclude');
+  LBody :=
+    'program ImportApp;' + sLineBreak +
+    'begin' + sLineBreak +
+    'end.' + sLineBreak;
+  LProject := CreateDllImportProject(LRoot, LBody, '');
+  WriteDummyBinary(TPath.Combine(TPath.Combine(TPath.Combine(TPath.Combine(LRoot,
+    'SharedLibs'), 'VendorLib'), 'Distribution'), 'vendor.dll'));
+  WriteDummyBinary(TPath.Combine(TPath.Combine(LRoot, 'Other'), 'other.dll'));
+  TFile.WriteAllBytes(TPath.Combine(LRoot, 'output', 'ImportApp.exe'),
+    BuildImportPe32(['vendor.dll', 'other.dll']));
+
+  LConfig := ScopeConfig;
+  LJson := GenerateScope(LProject, LConfig);
+  try
+    Assert.AreEqual(NativeInt(1), CountComponents(LJson, 'vendor.dll'),
+      'A project-tree DLL named in the import table must be listed');
+    Assert.AreEqual('project-tree', ComponentProperty(LJson, 'vendor.dll',
+      'net.developer-experts.dx-comply:locationSource'));
+    Assert.AreEqual('', ComponentProperty(LJson, 'vendor.dll',
+      'net.developer-experts.dx-comply:confidence'),
+      'The import-table row is not a source scan');
+    Assert.AreEqual(NativeInt(1), CountComponents(LJson, 'other.dll'));
+  finally
+    LJson.Free;
+  end;
+
+  LConfig.ExcludePatterns := TArray<string>.Create(
+    'SharedLibs/VendorLib/Distribution/*.dll');
+  LJson := GenerateScope(LProject, LConfig);
+  try
+    Assert.AreEqual(NativeInt(0), CountComponents(LJson, 'vendor.dll'),
+      'The import-table DLL must follow the same project-relative exclude');
+    Assert.AreEqual(NativeInt(1), CountComponents(LJson, 'other.dll'),
+      'A DLL in another project folder must stay');
+    Assert.AreEqual('project-tree', ComponentProperty(LJson, 'other.dll',
+      'net.developer-experts.dx-comply:locationSource'));
   finally
     LJson.Free;
   end;
