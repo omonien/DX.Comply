@@ -854,8 +854,10 @@ begin
   Assert.AreEqual<Integer>(0, Pos('2026-03-07T13:00:00Z', LContent),
     'the report does not leave the trailing Z');
 
+  // Composition evidence is a record copied onto FData. The writer reads
+  // that copy, so the fallback time has to be set there.
   FData.Metadata.Timestamp := '';
-  FCompositionEvidence.GeneratedAt := '2026-11-20T21:11:57Z';
+  FData.CompositionEvidence.GeneratedAt := '2026-11-20T21:11:57Z';
   Assert.IsTrue(LWriter.Write(FOutputPath, FData, THumanReadableReportConfig.Default));
   LContent := TFile.ReadAllText(FOutputPath, TEncoding.UTF8);
   Assert.IsTrue(Pos('<th>Generated At</th><td>2026-11-20 21:11:57 UTC</td>', LContent) > 0,
