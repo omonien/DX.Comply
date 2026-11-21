@@ -101,8 +101,12 @@ begin
         IsSameDeliverableFile(AData.Artefacts, I, LDeliverable),
         AData.Metadata.ProductVersion, AData.ProjectInfo.Version));
       LPathCell := EscapeHtml(SafeText(SafeText(LArtefact.RelativePath, LArtefact.ComponentName), LArtefact.FilePath));
-      // Issue #59: a DLL found only in a system directory has no hash. Show
-      // where it was found instead.
+      // Issue #205: every row that has a location source shows it, so two
+      // copies of one DLL can be told apart. Issue #59: a system-directory
+      // hit also shows the path, and still has no hash.
+      if LArtefact.LocationSource <> '' then
+        LPathCell := LPathCell + '<br><small>' +
+          EscapeHtml(LArtefact.LocationSource) + '</small>';
       if LArtefact.Location <> '' then
         LPathCell := LPathCell + '<br><small>System directory: ' +
           EscapeHtml(LArtefact.Location) + '</small>';

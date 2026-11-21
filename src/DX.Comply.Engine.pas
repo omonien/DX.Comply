@@ -455,6 +455,20 @@ type
     /// </summary>
     procedure RememberPatternWarnings(const AWarnings: TList<string>);
     /// <summary>
+    /// True when ARelativePath matches an exclude pattern. The path is
+    /// relative to the output folder or the project directory, the same
+    /// rule as the file scan. Issue #205.
+    /// </summary>
+    function ImportedPathExcluded(const ARelativePath: string): Boolean;
+    /// <summary>
+    /// True when AResolvedPath is already in AArtefacts. On Windows the
+    /// comparison ignores letter case, so a source name in lower case does
+    /// not add a second row for the file the output scan already listed.
+    /// An existing row with no location source receives ASource.
+    /// </summary>
+    function AbsorbDuplicateImportedFile(const AResolvedPath: string;
+      ASource: TDllLocationSource; const AArtefacts: TArtefactList): Boolean;
+    /// <summary>
     /// Loads the component manifest for this run, expands path variables,
     /// and logs each variable that was used. An empty manifest path succeeds
     /// with an unloaded manifest. Build mode and library mode both use this.
@@ -1162,6 +1176,124 @@ begin
   end;
 end;
 
+function NormalizeComparablePath(const APath: string): string;
+begin
+  Result := ExcludeTrailingPathDelimiter(
+    StringReplace(Trim(APath), '/', '\', [rfReplaceAll]));
+end;
+
+function SameResolvedPath(const ALeft, ARight: string): Boolean;
+var
+  LLeft, LRight: string;
+begin
+  // The output scan keeps the name on disk. A source scan stores the DLL
+  // name in lower case. On Windows those are one file (issue #205).
+  LLeft := NormalizeComparablePath(ALeft);
+  LRight := NormalizeComparablePath(ARight);
+  if (LLeft = '') or (LRight = '') then
+    Exit(False);
+  {$IFDEF MSWINDOWS}
+  Result := SameText(LLeft, LRight);
+  {$ELSE}
+  Result := LLeft = LRight;
+  {$ENDIF}
+end;
+
+function PathIsUnderDirectory(const AFilePath, ADirectory: string): Boolean;
+var
+  LFile, LDir: string;
+begin
+  LFile := NormalizeComparablePath(AFilePath);
+  LDir := NormalizeComparablePath(ADirectory);
+  if (LFile = '') or (LDir = '') then
+    Exit(False);
+  {$IFDEF MSWINDOWS}
+  Result := SameText(LFile, LDir) or LFile.StartsWith(LDir + '\', True);
+  {$ELSE}
+  Result := (LFile = LDir) or LFile.StartsWith(LDir + '\');
+  {$ENDIF}
+end;
+
+function RelativePathFromDirectory(const AFilePath, ADirectory: string): string;
+var
+  LFile, LDir: string;
+begin
+  LFile := NormalizeComparablePath(AFilePath);
+  LDir := NormalizeComparablePath(ADirectory);
+  if PathIsUnderDirectory(LFile, LDir) and (Length(LFile) > Length(LDir)) then
+    Result := Copy(LFile, Length(LDir) + 2, MaxInt)
+  else
+    Result := TPath.GetFileName(LFile);
+end;
+
+function ImportedExcludePath(const AResolvedPath, AOutputDir, AProjectDir: string;
+  ASource: TDllLocationSource): string;
+begin
+  // The pattern is relative to the folder where the file was found. An
+  // explicit path uses the output folder when the file sits there, then the
+  // project directory. A path outside both has no scan root.
+  Result := '';
+  case ASource of
+    dlsOutputDirectory:
+      Result := RelativePathFromDirectory(AResolvedPath, AOutputDir);
+    dlsProjectTree:
+      Result := RelativePathFromDirectory(AResolvedPath, AProjectDir);
+    dlsExplicitPath:
+      if PathIsUnderDirectory(AResolvedPath, AOutputDir) then
+        Result := RelativePathFromDirectory(AResolvedPath, AOutputDir)
+      else if PathIsUnderDirectory(AResolvedPath, AProjectDir) then
+        Result := RelativePathFromDirectory(AResolvedPath, AProjectDir);
+  end;
+end;
+
+procedure RememberImportedPath(var AArtefact: TArtefactInfo;
+  const AResolvedPath, AMatchPath: string; ASource: TDllLocationSource);
+begin
+  AArtefact.LocationSource := TDxComplyGenerator.DllLocationSourceText(ASource);
+  if AMatchPath <> '' then
+    AArtefact.RelativePath := AMatchPath;
+  if AResolvedPath <> '' then
+    AArtefact.ComponentName := TPath.GetFileName(NormalizeComparablePath(AResolvedPath));
+end;
+
+function TDxComplyGenerator.ImportedPathExcluded(const ARelativePath: string): Boolean;
+var
+  LScanner: TFileScanner;
+begin
+  Result := False;
+  if (Trim(ARelativePath) = '') or (Length(FConfig.ExcludePatterns) = 0) then
+    Exit;
+  if not Assigned(FFileScanner) then
+    Exit;
+  if not ((FFileScanner as TObject) is TFileScanner) then
+    Exit;
+  LScanner := TFileScanner(FFileScanner as TObject);
+  Result := LScanner.RelativePathExcluded(ARelativePath, FConfig.ExcludePatterns);
+end;
+
+function TDxComplyGenerator.AbsorbDuplicateImportedFile(const AResolvedPath: string;
+  ASource: TDllLocationSource; const AArtefacts: TArtefactList): Boolean;
+var
+  I: Integer;
+  LExisting: TArtefactInfo;
+begin
+  Result := False;
+  if not Assigned(AArtefacts) or (Trim(AResolvedPath) = '') then
+    Exit;
+  for I := 0 to AArtefacts.Count - 1 do
+  begin
+    if not SameResolvedPath(AArtefacts[I].FilePath, AResolvedPath) then
+      Continue;
+    LExisting := AArtefacts[I];
+    if LExisting.LocationSource = '' then
+    begin
+      LExisting.LocationSource := DllLocationSourceText(ASource);
+      AArtefacts[I] := LExisting;
+    end;
+    Exit(True);
+  end;
+end;
+
 procedure TDxComplyGenerator.AddRuntimePackagesToArtefacts(
   const AProjectInfo: TProjectInfo;
   const AArtefacts: TArtefactList);
@@ -1173,6 +1305,7 @@ var
   LResolved: string;
   LSystemDirs: TArray<string>;
   LSource: TDllLocationSource;
+  LMatchPath: string;
 begin
   if not Assigned(AProjectInfo.RuntimePackages) then
     Exit;
@@ -1205,11 +1338,17 @@ begin
 
     // A BPL staged under the project is the copy that ships. A file found
     // only in a system directory is not hashed, same as an external DLL.
+    // Issue #205: exclude uses the path relative to the folder where the
+    // file was found. A package that was not found stays listed.
     LResolved := ResolveKnownBinary(LBplFileName, LOutputDir,
       AProjectInfo.ProjectDir, AProjectInfo.Platform, LSystemDirs, LSource);
     if LSource in [dlsExplicitPath, dlsOutputDirectory, dlsProjectTree] then
     begin
-      LArtefact.LocationSource := DllLocationSourceText(LSource);
+      LMatchPath := ImportedExcludePath(LResolved, LOutputDir,
+        AProjectInfo.ProjectDir, LSource);
+      if ImportedPathExcluded(LMatchPath) then
+        Continue;
+      RememberImportedPath(LArtefact, LResolved, LMatchPath, LSource);
       CaptureBinaryFile(LArtefact, LResolved, AArtefacts);
     end;
 
@@ -1232,6 +1371,7 @@ var
   LOutputDir, LResolvedPath: string;
   LSystemDirs: TArray<string>;
   LSource: TDllLocationSource;
+  LMatchPath: string;
   I: Integer;
 begin
   LPasFiles := TList<string>.Create;
@@ -1308,12 +1448,24 @@ begin
       case LSource of
         dlsExplicitPath, dlsOutputDirectory, dlsProjectTree:
           begin
-            LArtefact.LocationSource := DllLocationSourceText(LSource);
-            // The output directory scan may already have hashed this file.
+            // Issue #205: the same exclude list as the file scan, using the
+            // path relative to the output folder or the project directory.
+            // The same resolved file is not listed again. On Windows the
+            // path compare ignores letter case.
+            LMatchPath := ImportedExcludePath(LResolvedPath, LOutputDir,
+              AProjectInfo.ProjectDir, LSource);
+            if ImportedPathExcluded(LMatchPath) then
+              Continue;
+            if AbsorbDuplicateImportedFile(LResolvedPath, LSource, AArtefacts) then
+              Continue;
+            RememberImportedPath(LArtefact, LResolvedPath, LMatchPath, LSource);
             CaptureBinaryFile(LArtefact, LResolvedPath, AArtefacts);
           end;
         dlsSystemDirectory:
           begin
+            // A system-directory hit stays location-only. Exclude does not
+            // apply: the pattern is relative to a scan root, and this file
+            // was not found in one.
             LArtefact.LocationSource := DllLocationSourceText(LSource);
             LArtefact.Location := LResolvedPath;
           end;
@@ -1950,6 +2102,7 @@ var
   LName, LExt, LOutputDir, LResolved: string;
   LSystemDirs: TArray<string>;
   LSource: TDllLocationSource;
+  LMatchPath: string;
   LArtefact: TArtefactInfo;
 
   function ListsFile(const AFileName: string): Boolean;
@@ -1992,15 +2145,23 @@ begin
     // The output directory is already scanned. A system DLL stays out.
     if LSource <> dlsProjectTree then
       Continue;
+    // Issue #205: a project-tree import is excluded the same way as a DLL
+    // named in source. The path is relative to the project directory.
+    LMatchPath := ImportedExcludePath(LResolved, LOutputDir,
+      AProjectInfo.ProjectDir, LSource);
+    if ImportedPathExcluded(LMatchPath) then
+      Continue;
+    if AbsorbDuplicateImportedFile(LResolved, LSource, AArtefacts) then
+      Continue;
 
     LArtefact := Default(TArtefactInfo);
     LArtefact.RelativePath := TPath.GetFileName(LName);
     LArtefact.FileSize := -1;
-    LArtefact.LocationSource := DllLocationSourceText(LSource);
     if LExt = '.bpl' then
       LArtefact.ArtefactType := 'package'
     else
       LArtefact.ArtefactType := 'library';
+    RememberImportedPath(LArtefact, LResolved, LMatchPath, LSource);
     CaptureBinaryFile(LArtefact, LResolved, AArtefacts);
     AArtefacts.Add(LArtefact);
   end;

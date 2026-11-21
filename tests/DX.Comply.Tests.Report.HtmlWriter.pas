@@ -66,6 +66,13 @@ type
     /// </summary>
     [Test]
     procedure Write_ExternalDll_ShowsSizeHashAndSystemLocation;
+    /// <summary>
+    /// Two copies of one DLL show each path and location source. A row with
+    /// no location source is unchanged. A system-directory row keeps its path.
+    /// Issue #205.
+    /// </summary>
+    [Test]
+    procedure Write_DistinctCopies_ShowPathAndLocationSource;
 
     /// <summary>
     /// EXE/DLL artefact versions appear in the Artefacts table. Issue #90.
@@ -345,6 +352,54 @@ begin
   Assert.IsTrue(Pos(StringOfChar('c', 64), LContent) > 0, 'SHA-256 of a shipped DLL must be shown');
   Assert.IsTrue(Pos('System directory: C:\Windows\SysWOW64\ws2_32.dll', LContent) > 0,
     'the system directory location must be shown');
+end;
+
+procedure THtmlReportWriterTests.Write_DistinctCopies_ShowPathAndLocationSource;
+var
+  LArtefact: TArtefactInfo;
+  LContent: string;
+  LWriter: IHumanReadableReportWriter;
+begin
+  LArtefact := Default(TArtefactInfo);
+  LArtefact.RelativePath := 'VendorLib.dll';
+  LArtefact.ArtefactType := 'library';
+  LArtefact.FileSize := 100;
+  LArtefact.Hash := StringOfChar('a', 64);
+  LArtefact.Version := '1.0.0.0';
+  LArtefact.LocationSource := 'output-directory';
+  FArtefacts.Add(LArtefact);
+
+  LArtefact := Default(TArtefactInfo);
+  LArtefact.RelativePath := 'SharedLibs\VendorLib\Distribution\VendorLib.dll';
+  LArtefact.ArtefactType := 'external-reference';
+  LArtefact.FileSize := 100;
+  LArtefact.Hash := StringOfChar('b', 64);
+  LArtefact.Version := '1.0.0.0';
+  LArtefact.LocationSource := 'project-tree';
+  FArtefacts.Add(LArtefact);
+
+  LArtefact := Default(TArtefactInfo);
+  LArtefact.RelativePath := 'ws2_32.dll';
+  LArtefact.ArtefactType := 'external-reference';
+  LArtefact.FileSize := -1;
+  LArtefact.LocationSource := 'system-directory';
+  LArtefact.Location := 'C:\Windows\SysWOW64\ws2_32.dll';
+  FArtefacts.Add(LArtefact);
+
+  LWriter := THtmlReportWriter.Create;
+  Assert.IsTrue(LWriter.Write(FOutputPath, FData, THumanReadableReportConfig.Default));
+  LContent := TFile.ReadAllText(FOutputPath, TEncoding.UTF8);
+  Assert.IsTrue(Pos('build\Win32\Debug\Demo.dll</td>', LContent) > 0,
+    'a row with no location source must stay a plain path');
+  Assert.IsTrue(Pos('VendorLib.dll<br><small>output-directory</small>', LContent) > 0,
+    'the output-folder copy must show its path and location source');
+  Assert.IsTrue(Pos('SharedLibs\VendorLib\Distribution\VendorLib.dll<br><small>project-tree</small>',
+    LContent) > 0,
+    'the project-tree copy must show its path and location source');
+  Assert.IsTrue(Pos('ws2_32.dll<br><small>system-directory</small>', LContent) > 0,
+    'a system-directory row must show the location source');
+  Assert.IsTrue(Pos('System directory: C:\Windows\SysWOW64\ws2_32.dll', LContent) > 0,
+    'a system-directory row must still show the path');
 end;
 
 procedure THtmlReportWriterTests.Write_ArtefactVersion_AppearsInArtefactsTable;

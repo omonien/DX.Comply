@@ -102,10 +102,10 @@ type
     /// </summary>
     LibrarySourceFile: Boolean;
     /// <summary>
-    /// Where a source-scanned DLL was found: explicit-path, output-directory,
-    /// project-tree or system-directory. Empty when the file was not found
-    /// or the artefact is not a DLL reference. Writers emit this as
-    /// net.developer-experts.dx-comply:locationSource.
+    /// Where this file was found: explicit-path, output-directory,
+    /// project-tree or system-directory. Empty when the file was not found.
+    /// Writers emit this as net.developer-experts.dx-comply:locationSource.
+    /// The HTML and Markdown artefact tables show it on every row that has one.
     /// </summary>
     LocationSource: string;
     /// <summary>
