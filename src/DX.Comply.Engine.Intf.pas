@@ -217,6 +217,11 @@ type
     DllSuffix: string;
     /// <summary>Expected or resolved map file path for the selected build.</summary>
     MapFilePath: string;
+    /// <summary>
+    /// DCC_MapFile for the active configuration after CfgParent inheritance.
+    /// 3 is Detailed. Empty when the .dproj does not set it.
+    /// </summary>
+    MapFileSetting: string;
     /// <summary>Project version (if specified).</summary>
     Version: string;
     /// <summary>

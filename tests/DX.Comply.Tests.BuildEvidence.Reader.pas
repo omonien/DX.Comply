@@ -119,6 +119,20 @@ type
     /// </summary>
     [Test]
     procedure BuildEvidenceItemLogLine_NamesWhatWasFound;
+
+    /// <summary>
+    /// A missing detailed MAP file names the configuration, the platform,
+    /// the expected path, and DCC_MapFile 3. Issue #206.
+    /// </summary>
+    [Test]
+    procedure Read_MissingMap_NamesConfigurationPlatformAndDetailedSetting;
+
+    /// <summary>
+    /// When DCC_MapFile is not 3, or is not set, the missing-MAP message
+    /// says so and still names the configuration, platform, and path.
+    /// </summary>
+    [Test]
+    procedure Read_MissingMap_NamesMapFileSettingWhenNotDetailed;
   end;
 
 implementation
@@ -711,6 +725,81 @@ begin
   LItem.Detail := 'LineNumbersSection';
   Assert.IsTrue(Pos('System.SysUtils', BuildEvidenceItemLogLine(LItem)) > 0);
   Assert.IsTrue(Pos('App.map', BuildEvidenceItemLogLine(LItem)) > 0);
+end;
+
+procedure TBuildEvidenceReaderTests.Read_MissingMap_NamesConfigurationPlatformAndDetailedSetting;
+var
+  LBuildEvidence: TBuildEvidence;
+  LPath: string;
+  LProjectInfo: TProjectInfo;
+  LWarning: string;
+begin
+  LPath := TPath.Combine(TPath.GetTempPath, TPath.GetRandomFileName + '.map');
+  LProjectInfo := TProjectInfo.Create;
+  try
+    LProjectInfo.Configuration := 'ReleaseCustom';
+    LProjectInfo.Platform := 'Win32';
+    LProjectInfo.MapFilePath := LPath;
+    LProjectInfo.MapFileSetting := '3';
+    LBuildEvidence := FReader.Read(LProjectInfo);
+    try
+      Assert.IsTrue(LBuildEvidence.Warnings.Count >= 1);
+      LWarning := LBuildEvidence.Warnings[0];
+      Assert.IsTrue(Pos('configuration ReleaseCustom', LWarning) > 0, LWarning);
+      Assert.IsTrue(Pos('platform Win32', LWarning) > 0, LWarning);
+      Assert.IsTrue(Pos('Expected path: ' + LPath, LWarning) > 0, LWarning);
+      Assert.IsTrue(Pos('DCC_MapFile for this configuration is 3 (Detailed)', LWarning) > 0,
+        LWarning);
+      Assert.IsTrue(Pos('output directory of this configuration', LWarning) > 0, LWarning);
+      Assert.AreEqual(0, Pos('must already', LowerCase(LWarning)), LWarning);
+    finally
+      LBuildEvidence.Free;
+    end;
+  finally
+    LProjectInfo.Free;
+  end;
+end;
+
+procedure TBuildEvidenceReaderTests.Read_MissingMap_NamesMapFileSettingWhenNotDetailed;
+var
+  LBuildEvidence: TBuildEvidence;
+  LPath: string;
+  LProjectInfo: TProjectInfo;
+  LWarning: string;
+begin
+  LPath := TPath.Combine(TPath.GetTempPath, TPath.GetRandomFileName + '.map');
+  LProjectInfo := TProjectInfo.Create;
+  try
+    LProjectInfo.Configuration := 'ReleaseCustom';
+    LProjectInfo.Platform := 'Win32';
+    LProjectInfo.MapFilePath := LPath;
+    LProjectInfo.MapFileSetting := '0';
+    LBuildEvidence := FReader.Read(LProjectInfo);
+    try
+      LWarning := LBuildEvidence.Warnings[0];
+      Assert.IsTrue(Pos('configuration ReleaseCustom', LWarning) > 0, LWarning);
+      Assert.IsTrue(Pos('platform Win32', LWarning) > 0, LWarning);
+      Assert.IsTrue(Pos(LPath, LWarning) > 0, LWarning);
+      Assert.IsTrue(Pos('DCC_MapFile for this configuration is 0, not 3', LWarning) > 0,
+        LWarning);
+      Assert.IsTrue(Pos('Map file > Detailed', LWarning) > 0, LWarning);
+    finally
+      LBuildEvidence.Free;
+    end;
+
+    LProjectInfo.MapFileSetting := '';
+    LBuildEvidence := FReader.Read(LProjectInfo);
+    try
+      LWarning := LBuildEvidence.Warnings[0];
+      Assert.IsTrue(Pos('DCC_MapFile is not set for this configuration', LWarning) > 0,
+        LWarning);
+      Assert.IsTrue(Pos('Expected path: ' + LPath, LWarning) > 0, LWarning);
+    finally
+      LBuildEvidence.Free;
+    end;
+  finally
+    LProjectInfo.Free;
+  end;
 end;
 
 initialization

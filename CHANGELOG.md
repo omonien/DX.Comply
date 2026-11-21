@@ -17,4 +17,5 @@ Released notes for shipped versions are in `docs/releases/`.
 
 ### Fixed
 
+- A custom build configuration inherits values from its `CfgParent` chain down to Base. The output directory, `DCC_MapFile`, version info, and unit search path set on Release are used for a configuration based on Release when that configuration does not repeat them. A value on the child replaces the inherited one, and an empty element clears it. `$(Config)` and `$(Platform)` in an inherited path expand to the configuration and platform being scanned. The expected MAP file is in that output directory. When the file is missing, the message names the configuration, the platform, the expected path, and the `DCC_MapFile` value for that configuration (#191, #206).
 - The version of a binary in the SBOM and in the HTML and Markdown reports is the numeric file version (a.b.c.d from the fixed file info). The FileVersion string, then the ProductVersion string, is used only when that fixed file info is absent. A string such as "6, 10, 5, 0" no longer replaces 6.10.5.0 (#188).

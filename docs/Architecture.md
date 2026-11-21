@@ -50,7 +50,7 @@ Every SBOM generation follows the same pipeline, regardless of whether it was tr
 | `DX.Comply.Engine.pas` | `TDxComplyGenerator` facade. Orchestrates the full pipeline |
 | `DX.Comply.Engine.Intf.pas` | Shared types: `TProjectInfo`, `TArtefactInfo`, `TSbomMetadata` |
 | `DX.Comply.ComponentManifest.pas` | Optional components.json: match units to libraries, licences, package URLs, copyright, and CPE |
-| `DX.Comply.ProjectScanner.pas` | Regex-based `.dproj` parser. Extracts paths, toolchain, version, DllSuffix. The 32-bit Android folder is Android. Android versionName is used when FileVersion is absent |
+| `DX.Comply.ProjectScanner.pas` | Regex-based `.dproj` parser. Extracts paths, toolchain, version, DllSuffix. A custom configuration inherits `CfgParent` down to Base. The 32-bit Android folder is Android. Android versionName is used when FileVersion is absent |
 | `DX.Comply.BuildOrchestrator.pas` | Plan construction and script-based build execution (used by CLI fallback) |
 | `DX.Comply.BuildEvidence.Reader.pas` | Reads MAP files, compiler CFG/RSP files; collects evidence items |
 | `DX.Comply.MapFile.Reader.pas` | Extracts unit names from MAP segment entries (`M=Unit`) and line-number sections |
@@ -82,7 +82,7 @@ Every SBOM generation follows the same pipeline, regardless of whether it was tr
 
 DX.Comply always performs a **Deep-Evidence analysis**, using the compiler-generated MAP file to resolve linked units (PAS/DCU) with their dependencies, SHA-256 hashes where the file could be opened, and origin classification. The MAP file is the source of truth for dependency resolution.
 
-Windows targets write the classic Delphi MAP (`DCC_MapFile=3`, Detailed). ARM and LLVM targets (Android, iOS, Linux, macOS ARM) link with LLD and write an LLD map instead. Those targets have no Detailed setting; the map is turned on with Project Options > Linker > Map file ARM > On. Android writes `lib<Project>.so.map`. DX.Comply recognises an LLD map by its header and reads it with `TLldMapReader`.
+Windows targets write the classic Delphi MAP (`DCC_MapFile=3`, Detailed). The expected path is the output directory of the selected configuration, including a directory inherited through `CfgParent`. ARM and LLVM targets (Android, iOS, Linux, macOS ARM) link with LLD and write an LLD map instead. Those targets have no Detailed setting; the map is turned on with Project Options > Linker > Map file ARM > On. Android writes `lib<Project>.so.map`. DX.Comply recognises an LLD map by its header and reads it with `TLldMapReader`.
 
 When a MAP file does not yet exist, DX.Comply can optionally trigger a build with `DCC_MapFile=3` (detailed MAP) to generate one. This is an implementation detail. The analysis quality is the same regardless of how the MAP file was produced.
 
