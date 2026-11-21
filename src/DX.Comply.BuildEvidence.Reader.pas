@@ -150,6 +150,10 @@ begin
 end;
 
 function MapFileMissingWarning(const AProjectInfo: TProjectInfo): string;
+var
+  LConfig: string;
+  LPlatform: string;
+  LSetting: string;
 begin
   if AProjectInfo.IsLegacyProject then
     Exit(LegacyMapFileMissingMessage(AProjectInfo.MapFilePath));
@@ -161,7 +165,35 @@ begin
     Exit('No MAP file found: ' + AProjectInfo.MapFilePath + '. ' +
       'DX.Comply does not know which IDE option writes a Linux map file.');
 
-  Result := 'No detailed MAP file found: ' + AProjectInfo.MapFilePath;
+  LConfig := Trim(AProjectInfo.Configuration);
+  LPlatform := Trim(AProjectInfo.Platform);
+  Result := 'No detailed MAP file found';
+  if (LConfig <> '') and (LPlatform <> '') then
+    Result := Result + ' for configuration ' + LConfig + ', platform ' + LPlatform
+  else if LConfig <> '' then
+    Result := Result + ' for configuration ' + LConfig
+  else if LPlatform <> '' then
+    Result := Result + ' for platform ' + LPlatform;
+  if Trim(AProjectInfo.MapFilePath) <> '' then
+    Result := Result + '. Expected path: ' + AProjectInfo.MapFilePath;
+  Result := Result + '.';
+
+  // A reader call that only sets the path must not claim a map setting.
+  if LConfig = '' then
+    Exit;
+
+  LSetting := Trim(AProjectInfo.MapFileSetting);
+  if LSetting = '3' then
+    Result := Result + ' DCC_MapFile for this configuration is 3 (Detailed). ' +
+      'The linker writes the MAP file in the output directory of this configuration.'
+  else if LSetting = '' then
+    Result := Result +
+      ' DCC_MapFile is not set for this configuration, so the linker may not write a detailed MAP file. ' +
+      ClassicDetailedMapHint
+  else
+    Result := Result + ' DCC_MapFile for this configuration is ' + LSetting +
+      ', not 3, so the linker does not write a detailed MAP file. ' +
+      ClassicDetailedMapHint;
 end;
 
 function BuildEvidenceItemLogLine(const AItem: TBuildEvidenceItem): string;

@@ -16,7 +16,7 @@
 /// Edge cases handled:
 /// - UTF-8 BOM in .dproj files
 /// - Multi-platform projects (Win32, Win64, macOS, etc.)
-/// - Config hierarchy mapping (Debug/Release to Cfg_N)
+/// - Config hierarchy mapping (Debug/Release to Cfg_N, and CfgParent down to Base)
 /// - .dproj, .groupproj, .dpk, .dpr, and .bdsproj file extensions
 /// - MSBuild variable replacement ($(Platform), $(Config), $(ProductVersion), $(MSBuildProjectName))
 /// - Missing/empty PropertyGroups with defensive fallbacks
@@ -134,9 +134,27 @@ type
     /// </summary>
     function TryGetElementValue(const AXmlBlock, AName: string; out AValue: string): Boolean;
     /// <summary>
-    /// Reads AName from property groups matching Base, platform, and config
-    /// (later groups override earlier ones). A $(AName) in a later value is
-    /// replaced with the value of the earlier groups, as MSBuild does.
+    /// CfgParent of the BuildConfiguration whose Key is AConfigKey.
+    /// Empty when that item has no parent. Base is returned as Base.
+    /// </summary>
+    function ConfigParentKey(const AConfigKey: string): string;
+    /// <summary>
+    /// Parent keys of FConfigKey, from the one under Base to the immediate
+    /// parent. Base is not included. A repeated key stops the walk.
+    /// </summary>
+    function AncestorConfigKeys: TArray<string>;
+    /// <summary>
+    /// Applies the configuration property group for AConfigKey, then the
+    /// group for the active platform. Later groups override earlier ones.
+    /// </summary>
+    procedure ApplyConfigPropertyGroups(const AConfigKey, AName: string;
+      var AValueSoFar: string; var AFound: Boolean);
+    /// <summary>
+    /// Reads AName from property groups matching Base, platform, each
+    /// CfgParent from Base toward the selected configuration, and that
+    /// configuration (later groups override earlier ones). A $(AName) in a
+    /// later value is replaced with the value of the earlier groups, as
+    /// MSBuild does.
     /// </summary>
     function GetPropertyValue(const AName: string; const ADefault: string = ''): string;
     /// <summary>
@@ -1812,12 +1830,117 @@ begin
   AFound := True;
 end;
 
-function TProjectScanner.GetPropertyValue(const AName, ADefault: string): string;
+function TProjectScanner.ConfigParentKey(const AConfigKey: string): string;
 var
-  LBlock: string;
+  LInner: string;
+  LKey: string;
+  LMatch: TMatch;
+  LMatches: TMatchCollection;
+  LParent: string;
+begin
+  Result := '';
+  if Trim(AConfigKey) = '' then
+    Exit;
+
+  // One BuildConfiguration item per configuration. CfgParent stores the
+  // parent Key (Cfg_2), or Base. The name (Release) is the Include.
+  LMatches := TRegEx.Matches(FXmlText,
+    '<BuildConfiguration\s+Include="[^"]*"[^>]*>(.*?)</BuildConfiguration>',
+    [roIgnoreCase, roSingleLine]);
+  for LMatch in LMatches do
+  begin
+    if LMatch.Groups.Count < 2 then
+      Continue;
+    LInner := LMatch.Groups[1].Value;
+    if not TryGetElementValue(LInner, 'Key', LKey) then
+      Continue;
+    if not SameText(Trim(LKey), AConfigKey) then
+      Continue;
+    if TryGetElementValue(LInner, 'CfgParent', LParent) then
+      Result := Trim(LParent);
+    Exit;
+  end;
+end;
+
+function TProjectScanner.AncestorConfigKeys: TArray<string>;
+const
+  cMaxDepth = 32;
+var
+  I: Integer;
+  LKey: string;
+  LNearestFirst: TList<string>;
+  LParent: string;
+  LSeen: TDictionary<string, Boolean>;
+begin
+  // Nearest parent first, then reverse so the ancestor under Base is applied
+  // before the immediate parent. The selected key is already in LSeen, so a
+  // cycle (Cfg_3 -> Cfg_4 -> Cfg_3) stops instead of applying a key twice.
+  LNearestFirst := TList<string>.Create;
+  LSeen := TDictionary<string, Boolean>.Create;
+  try
+    if FConfigKey <> '' then
+      LSeen.Add(UpperCase(FConfigKey), True);
+    LKey := FConfigKey;
+    while (LKey <> '') and (LNearestFirst.Count < cMaxDepth) do
+    begin
+      LParent := ConfigParentKey(LKey);
+      if (LParent = '') or SameText(LParent, 'Base') then
+        Break;
+      if LSeen.ContainsKey(UpperCase(LParent)) then
+        Break;
+      LSeen.Add(UpperCase(LParent), True);
+      LNearestFirst.Add(LParent);
+      LKey := LParent;
+    end;
+
+    SetLength(Result, LNearestFirst.Count);
+    for I := 0 to LNearestFirst.Count - 1 do
+      Result[I] := LNearestFirst[LNearestFirst.Count - 1 - I];
+  finally
+    LSeen.Free;
+    LNearestFirst.Free;
+  end;
+end;
+
+procedure TProjectScanner.ApplyConfigPropertyGroups(const AConfigKey, AName: string;
+  var AValueSoFar: string; var AFound: Boolean);
+var
+  I: Integer;
   LBlocks: TArray<string>;
   LConfigPlatformPrefix: string;
   LConfigToken: string;
+begin
+  if AConfigKey = '' then
+    Exit;
+
+  LConfigToken := '$(' + AConfigKey + ')';
+  // A platform group such as $(Cfg_2_Win32) is the next step, and only for
+  // the active platform. Skip it here when the block also names that prefix.
+  LConfigPlatformPrefix := '$(' + AConfigKey + '_';
+  LBlocks := GetPropertyGroupContents(LConfigToken);
+  for I := 0 to High(LBlocks) do
+  begin
+    if Pos(UpperCase(LConfigPlatformPrefix), UpperCase(LBlocks[I])) > 0 then
+      Continue;
+    TakeValue(AName, LBlocks[I], AValueSoFar, AFound);
+  end;
+
+  if PlatformToken <> '' then
+  begin
+    // The closing parenthesis keeps Cfg_1_Android from also matching the
+    // Cfg_1_Android64 group, and Cfg_1_Win64 from matching Cfg_1_Win64x.
+    LBlocks := GetPropertyGroupContents('$(' + AConfigKey + '_' + PlatformToken + ')');
+    for I := 0 to High(LBlocks) do
+      TakeValue(AName, LBlocks[I], AValueSoFar, AFound);
+  end;
+end;
+
+function TProjectScanner.GetPropertyValue(const AName, ADefault: string): string;
+var
+  LAncestor: string;
+  LAncestors: TArray<string>;
+  LBlock: string;
+  LBlocks: TArray<string>;
   LFound: Boolean;
   LValueSoFar: string;
   I: Integer;
@@ -1855,35 +1978,19 @@ begin
     end;
   end;
 
-  // 3. Config-specific — use the detected Cfg_N key
-  if FConfigKey <> '' then
+  // 3. Each CfgParent from the one under Base toward the selected
+  // configuration, then the selected configuration. A child value replaces
+  // the parent. Base and Base_<platform> were applied above, so a key of
+  // Base is not applied again. A cycle applies each key once.
+  if (FConfigKey <> '') and not SameText(FConfigKey, 'Base') then
   begin
-    LConfigToken := '$(' + FConfigKey + ')';
-    // Cfg_2_Android contains "'$(Cfg_2)'=='true'" as well as $(Cfg_2_Android).
-    // The platform group is step 4, and only for the active platform.
-    LConfigPlatformPrefix := '$(' + FConfigKey + '_';
-    LBlocks := GetPropertyGroupContents(LConfigToken);
-    for I := 0 to High(LBlocks) do
-    begin
-      if Pos(UpperCase(LConfigPlatformPrefix), UpperCase(LBlocks[I])) > 0 then
-        Continue;
-      TakeValue(AName, LBlocks[I], LValueSoFar, LFound);
-    end;
+    LAncestors := AncestorConfigKeys;
+    for LAncestor in LAncestors do
+      ApplyConfigPropertyGroups(LAncestor, AName, LValueSoFar, LFound);
+    ApplyConfigPropertyGroups(FConfigKey, AName, LValueSoFar, LFound);
   end;
 
-  // 4. Platform+Config specific (e.g., Cfg_2_Android)
-  if (PlatformToken <> '') and (FConfigKey <> '') then
-  begin
-    // The closing parenthesis keeps Cfg_1_Android from also matching the
-    // Cfg_1_Android64 group, and Cfg_1_Win64 from matching Cfg_1_Win64x.
-    LBlocks := GetPropertyGroupContents('$(' + FConfigKey + '_' + PlatformToken + ')');
-    for I := 0 to High(LBlocks) do
-    begin
-      TakeValue(AName, LBlocks[I], LValueSoFar, LFound);
-    end;
-  end;
-
-  // 5. Legacy format (Delphi 2007): $(Configuration)|$(Platform) conditions
+  // 4. Legacy format (Delphi 2007): $(Configuration)|$(Platform) conditions
   //    e.g. Condition="'$(Configuration)|$(Platform)'=='Release|Win32'"
   if FCurrentConfig <> '' then
   begin
@@ -3022,6 +3129,9 @@ begin
     end;
 
     Result.DllSuffix := GetPropertyValue('DllSuffix', '');
+    // 3 is Detailed. A child configuration inherits the parent's setting
+    // when it does not repeat DCC_MapFile (issue #191, #206).
+    Result.MapFileSetting := GetPropertyValue('DCC_MapFile', '');
     ResolveOutputFile(Result);
     Result.MapFilePath := BuildExpectedMapFilePath(Result);
 

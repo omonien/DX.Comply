@@ -530,6 +530,50 @@ type
     /// <summary>The running test executable imports no BPL.</summary>
     [Test]
     procedure TryReadPeImportNames_TestExecutable_HasNoBplImports;
+
+    /// <summary>
+    /// ReleaseCustom is derived from Release and does not repeat output,
+    /// map, version, or search path. Those values come from Release.
+    /// The expected MAP path is that output directory, including when a
+    /// different MAP file sits in the project directory. Issue #191, #206.
+    /// </summary>
+    [Test]
+    procedure Scan_DerivedConfig_InheritsParentValues;
+
+    /// <summary>
+    /// A value on the child replaces the parent. Release itself keeps its
+    /// own output, version, and search path.
+    /// </summary>
+    [Test]
+    procedure Scan_DerivedConfig_ChildOverridesParent;
+
+    /// <summary>
+    /// ReleaseNightly derives from ReleaseCustom, which derives from Release.
+    /// Output and DCC_MapFile come from Release. Version and the extended
+    /// search path come from ReleaseCustom. Issue #191.
+    /// </summary>
+    [Test]
+    procedure Scan_DerivedConfig_FullChainToBase;
+
+    /// <summary>
+    /// DCC_ExeOutput that exists only on the parent platform group is used
+    /// for the child on that platform.
+    /// </summary>
+    [Test]
+    procedure Scan_DerivedConfig_InheritsPlatformParentGroup;
+
+    /// <summary>
+    /// An empty DCC_ExeOutput on the child clears the inherited output.
+    /// DCC_MapFile and version info from the parent stay.
+    /// </summary>
+    [Test]
+    procedure Scan_DerivedConfig_EmptyElementClearsParent;
+
+    /// <summary>
+    /// A CfgParent cycle is applied once and the scan returns.
+    /// </summary>
+    [Test]
+    procedure Scan_DerivedConfig_CycleStops;
   end;
 
 implementation
@@ -3519,6 +3563,449 @@ begin
   for LName in LNames do
     Assert.IsFalse(SameText(TPath.GetExtension(LName), '.bpl'),
       'The test executable imports a BPL: ' + LName);
+end;
+
+const
+  cDerivedProject = 'DerivedApp';
+
+function DerivedPropGroup(const ACondition, ABody: string): string;
+begin
+  Result :=
+    '  <PropertyGroup Condition="' + ACondition + '">' + sLineBreak +
+    ABody +
+    '  </PropertyGroup>' + sLineBreak;
+end;
+
+function DerivedConfigItem(const AName, AKey, AParent: string): string;
+begin
+  Result :=
+    '    <BuildConfiguration Include="' + AName + '">' + sLineBreak +
+    '      <Key>' + AKey + '</Key>' + sLineBreak;
+  if AParent <> '' then
+    Result := Result +
+      '      <CfgParent>' + AParent + '</CfgParent>' + sLineBreak;
+  Result := Result +
+    '    </BuildConfiguration>' + sLineBreak;
+end;
+
+function DerivedBaseBody: string;
+begin
+  Result :=
+    '    <DCC_BplOutput>.\bpl\$(Platform)</DCC_BplOutput>' + sLineBreak +
+    '    <VerInfo_MajorVer>1</VerInfo_MajorVer>' + sLineBreak +
+    '    <VerInfo_MinorVer>0</VerInfo_MinorVer>' + sLineBreak +
+    '    <VerInfo_Release>0</VerInfo_Release>' + sLineBreak +
+    '    <VerInfo_Build>0</VerInfo_Build>' + sLineBreak +
+    '    <VerInfo_Keys>CompanyName=Base Co;FileVersion=1.0.0.0;ProductName=DerivedApp</VerInfo_Keys>' + sLineBreak;
+end;
+
+function DerivedDebugBody: string;
+begin
+  Result :=
+    '    <DCC_ExeOutput>.\debugout\$(Platform)\$(Config)</DCC_ExeOutput>' + sLineBreak;
+end;
+
+function DerivedReleaseBody(AIncludeOutput: Boolean): string;
+begin
+  Result := '';
+  if AIncludeOutput then
+    Result :=
+      '    <DCC_ExeOutput>.\ship\$(Platform)\$(Config)</DCC_ExeOutput>' + sLineBreak;
+  Result := Result +
+    '    <DCC_MapFile>3</DCC_MapFile>' + sLineBreak +
+    '    <DCC_UnitSearchPath>.\releaseunits</DCC_UnitSearchPath>' + sLineBreak +
+    '    <VerInfo_MajorVer>2</VerInfo_MajorVer>' + sLineBreak +
+    '    <VerInfo_MinorVer>1</VerInfo_MinorVer>' + sLineBreak +
+    '    <VerInfo_Release>0</VerInfo_Release>' + sLineBreak +
+    '    <VerInfo_Build>5</VerInfo_Build>' + sLineBreak +
+    '    <VerInfo_Keys>CompanyName=Release Co;FileVersion=2.1.0.5;ProductName=DerivedApp</VerInfo_Keys>' + sLineBreak;
+end;
+
+function DerivedDefine(const ASymbol: string): string;
+begin
+  Result := '    <DCC_Define>' + ASymbol + '</DCC_Define>' + sLineBreak;
+end;
+
+function WrapDerivedDproj(const AConfigs, AGroups: string): string;
+begin
+  Result :=
+    '<?xml version="1.0" encoding="utf-8"?>' + sLineBreak +
+    '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">' + sLineBreak +
+    '  <PropertyGroup>' + sLineBreak +
+    '    <MainSource>DerivedApp.dpr</MainSource>' + sLineBreak +
+    '    <AppType>Application</AppType>' + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '  <ItemGroup>' + sLineBreak +
+         AConfigs +
+    '  </ItemGroup>' + sLineBreak +
+         AGroups +
+    '  <ProjectExtensions>' + sLineBreak +
+    '    <BorlandProject>' + sLineBreak +
+    '      <Platforms>' + sLineBreak +
+    '        <Platform value="Win32">True</Platform>' + sLineBreak +
+    '        <Platform value="Win64">True</Platform>' + sLineBreak +
+    '      </Platforms>' + sLineBreak +
+    '    </BorlandProject>' + sLineBreak +
+    '  </ProjectExtensions>' + sLineBreak +
+    '</Project>';
+end;
+
+function StandardDerivedConfigs: string;
+begin
+  Result :=
+    DerivedConfigItem('Base', 'Base', '') +
+    DerivedConfigItem('Debug', 'Cfg_1', 'Base') +
+    DerivedConfigItem('Release', 'Cfg_2', 'Base') +
+    DerivedConfigItem('ReleaseCustom', 'Cfg_3', 'Cfg_2');
+end;
+
+function StandardDerivedGroups(const AChildBody: string; AReleaseOutput: Boolean): string;
+begin
+  Result :=
+    DerivedPropGroup('''$(Base)''!=''''', DerivedBaseBody) +
+    DerivedPropGroup('''$(Cfg_1)''!=''''', DerivedDebugBody) +
+    DerivedPropGroup('''$(Cfg_2)''!=''''', DerivedReleaseBody(AReleaseOutput)) +
+    DerivedPropGroup('''$(Cfg_2_Win32)''!=''''',
+      '    <DCC_RemoteDebug>false</DCC_RemoteDebug>' + sLineBreak) +
+    DerivedPropGroup('''$(Cfg_3)''!=''''', AChildBody);
+end;
+
+function WriteDerivedProject(const ADir, AXml: string): string;
+begin
+  if TDirectory.Exists(ADir) then
+    TDirectory.Delete(ADir, True);
+  ForceDirectories(ADir);
+  Result := TPath.Combine(ADir, cDerivedProject + '.dproj');
+  TFile.WriteAllText(Result, AXml, TEncoding.UTF8);
+end;
+
+function ScanDerived(const AProjectPath, APlatform, AConfiguration: string): TProjectInfo;
+var
+  LScanner: IProjectScanner;
+begin
+  LScanner := TProjectScanner.Create;
+  Result := LScanner.Scan(AProjectPath, APlatform, AConfiguration);
+end;
+
+function CountPathsEnding(const APaths: TList<string>; const AEnding: string): Integer;
+var
+  LPath: string;
+begin
+  Result := 0;
+  if not Assigned(APaths) then
+    Exit;
+  for LPath in APaths do
+    if SameText(LPath, AEnding) or
+       LPath.EndsWith('\' + AEnding) or
+       LPath.EndsWith('/' + AEnding) then
+      Inc(Result);
+end;
+
+function ShipMapPath(const ARoot, AConfiguration: string): string;
+begin
+  Result := TPath.GetFullPath(TPath.Combine(
+    TPath.Combine(TPath.Combine(TPath.Combine(ARoot, 'ship'), 'Win32'), AConfiguration),
+    cDerivedProject + '.map'));
+end;
+
+procedure TProjectScannerTests.Scan_DerivedConfig_InheritsParentValues;
+var
+  LChild: TProjectInfo;
+  LDebug: TProjectInfo;
+  LDecoy: string;
+  LProjectPath: string;
+  LRealMap: string;
+  LRelease: TProjectInfo;
+  LTempDir: string;
+begin
+  // Release owns the output directory, detailed MAP setting, version info,
+  // and search path. ReleaseCustom only adds a define. Base still has the
+  // older version, so a scanner that stops at Base reports 1.0.0.0.
+  LTempDir := TPath.Combine(TPath.GetTempPath, 'DXComplyTest_CfgParent191_Inherit');
+  LProjectPath := WriteDerivedProject(LTempDir,
+    WrapDerivedDproj(StandardDerivedConfigs,
+      StandardDerivedGroups(DerivedDefine('RELEASE;CUSTOM'), True)));
+  try
+    LChild := ScanDerived(LProjectPath, 'Win32', 'ReleaseCustom');
+    try
+      Assert.AreEqual('2.1.0.5', LChild.Version,
+        'Version info must come from Release, but was ' + LChild.Version);
+      Assert.AreEqual('Release Co', LChild.CompanyName);
+      Assert.AreEqual('3', LChild.MapFileSetting,
+        'DCC_MapFile=3 on Release must apply to ReleaseCustom');
+      Assert.AreEqual(ShipMapPath(LTempDir, 'ReleaseCustom'), LChild.MapFilePath,
+        'The expected MAP path must use the inherited output directory');
+      Assert.IsTrue(LChild.BplOutputDir.Contains(TPath.Combine('bpl', 'Win32')),
+        'Base DCC_BplOutput must still apply: ' + LChild.BplOutputDir);
+      Assert.AreEqual(1, CountPathsEnding(LChild.ProjectSearchPaths, 'releaseunits'),
+        'The Release search path must be inherited once');
+      Assert.IsFalse(HasWarningText(LChild, 'not found in BuildConfiguration'),
+        'ReleaseCustom is a BuildConfiguration item');
+    finally
+      LChild.Free;
+    end;
+
+    LRelease := ScanDerived(LProjectPath, 'Win32', 'Release');
+    try
+      Assert.AreEqual(ShipMapPath(LTempDir, 'Release'), LRelease.MapFilePath);
+      Assert.AreEqual('2.1.0.5', LRelease.Version);
+      Assert.AreEqual('3', LRelease.MapFileSetting);
+    finally
+      LRelease.Free;
+    end;
+
+    LDebug := ScanDerived(LProjectPath, 'Win32', 'Debug');
+    try
+      Assert.AreEqual('1.0.0.0', LDebug.Version,
+        'Debug must keep the Base version and not read Release');
+      Assert.AreEqual('Base Co', LDebug.CompanyName);
+      Assert.AreEqual('', LDebug.MapFileSetting);
+      Assert.IsTrue(LDebug.OutputDir.Contains(
+        TPath.Combine('debugout', TPath.Combine('Win32', 'Debug'))),
+        LDebug.OutputDir);
+      Assert.IsFalse(LDebug.OutputDir.Contains('ship'), LDebug.OutputDir);
+      Assert.AreEqual(0, CountPathsEnding(LDebug.ProjectSearchPaths, 'releaseunits'));
+    finally
+      LDebug.Free;
+    end;
+
+    // A MAP file in the project directory must not hide the one the linker
+    // writes in the inherited output directory.
+    LRealMap := ShipMapPath(LTempDir, 'ReleaseCustom');
+    ForceDirectories(TPath.GetDirectoryName(LRealMap));
+    TFile.WriteAllText(LRealMap, 'detailed map' + sLineBreak, TEncoding.UTF8);
+    LDecoy := TPath.Combine(LTempDir, cDerivedProject + '.map');
+    TFile.WriteAllText(LDecoy, 'decoy', TEncoding.UTF8);
+    LChild := ScanDerived(LProjectPath, 'Win32', 'ReleaseCustom');
+    try
+      Assert.AreEqual(LRealMap, LChild.MapFilePath,
+        'The MAP file in the inherited output directory must be the one that is used');
+    finally
+      LChild.Free;
+    end;
+  finally
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_DerivedConfig_ChildOverridesParent;
+const
+  cChildBody =
+    '    <DCC_ExeOutput>.\customout</DCC_ExeOutput>' + sLineBreak +
+    '    <VerInfo_MajorVer>9</VerInfo_MajorVer>' + sLineBreak +
+    '    <VerInfo_MinorVer>8</VerInfo_MinorVer>' + sLineBreak +
+    '    <VerInfo_Release>7</VerInfo_Release>' + sLineBreak +
+    '    <VerInfo_Build>6</VerInfo_Build>' + sLineBreak +
+    '    <VerInfo_Keys>CompanyName=Custom Co;FileVersion=9.8.7.6;ProductName=DerivedApp</VerInfo_Keys>' + sLineBreak +
+    '    <DCC_UnitSearchPath>.\customunits;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>' + sLineBreak;
+var
+  LChild: TProjectInfo;
+  LProjectPath: string;
+  LRelease: TProjectInfo;
+  LTempDir: string;
+begin
+  LTempDir := TPath.Combine(TPath.GetTempPath, 'DXComplyTest_CfgParent191_Override');
+  LProjectPath := WriteDerivedProject(LTempDir,
+    WrapDerivedDproj(StandardDerivedConfigs, StandardDerivedGroups(cChildBody, True)));
+  try
+    LChild := ScanDerived(LProjectPath, 'Win32', 'ReleaseCustom');
+    try
+      Assert.IsTrue(LChild.OutputDir.EndsWith('customout'), LChild.OutputDir);
+      Assert.IsFalse(LChild.OutputDir.Contains('ship'), LChild.OutputDir);
+      Assert.AreEqual('9.8.7.6', LChild.Version);
+      Assert.AreEqual('Custom Co', LChild.CompanyName);
+      Assert.AreEqual('3', LChild.MapFileSetting,
+        'DCC_MapFile stays inherited when the child does not set it');
+      Assert.AreEqual(1, CountPathsEnding(LChild.ProjectSearchPaths, 'customunits'));
+      Assert.AreEqual(1, CountPathsEnding(LChild.ProjectSearchPaths, 'releaseunits'),
+        '$(DCC_UnitSearchPath) must extend the parent path once');
+    finally
+      LChild.Free;
+    end;
+
+    LRelease := ScanDerived(LProjectPath, 'Win32', 'Release');
+    try
+      Assert.AreEqual(ShipMapPath(LTempDir, 'Release'), LRelease.MapFilePath);
+      Assert.AreEqual('2.1.0.5', LRelease.Version);
+      Assert.AreEqual('Release Co', LRelease.CompanyName);
+      Assert.AreEqual(0, CountPathsEnding(LRelease.ProjectSearchPaths, 'customunits'),
+        'Release must not read values that exist only on the child');
+      Assert.AreEqual(1, CountPathsEnding(LRelease.ProjectSearchPaths, 'releaseunits'));
+    finally
+      LRelease.Free;
+    end;
+  finally
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_DerivedConfig_FullChainToBase;
+const
+  cMidBody =
+    '    <VerInfo_MajorVer>3</VerInfo_MajorVer>' + sLineBreak +
+    '    <VerInfo_MinorVer>1</VerInfo_MinorVer>' + sLineBreak +
+    '    <VerInfo_Release>0</VerInfo_Release>' + sLineBreak +
+    '    <VerInfo_Build>0</VerInfo_Build>' + sLineBreak +
+    '    <VerInfo_Keys>CompanyName=Mid Co;FileVersion=3.1.0.0;ProductName=DerivedApp</VerInfo_Keys>' + sLineBreak +
+    '    <DCC_UnitSearchPath>.\midunits;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>' + sLineBreak;
+var
+  LConfigs: string;
+  LGroups: string;
+  LNightly: TProjectInfo;
+  LProjectPath: string;
+  LRelease: TProjectInfo;
+  LTempDir: string;
+begin
+  LTempDir := TPath.Combine(TPath.GetTempPath, 'DXComplyTest_CfgParent191_Chain');
+  LConfigs := StandardDerivedConfigs +
+    DerivedConfigItem('ReleaseNightly', 'Cfg_4', 'Cfg_3');
+  LGroups := StandardDerivedGroups(cMidBody, True) +
+    DerivedPropGroup('''$(Cfg_4)''!=''''', DerivedDefine('NIGHTLY'));
+  LProjectPath := WriteDerivedProject(LTempDir, WrapDerivedDproj(LConfigs, LGroups));
+  try
+    LNightly := ScanDerived(LProjectPath, 'Win32', 'ReleaseNightly');
+    try
+      Assert.AreEqual(ShipMapPath(LTempDir, 'ReleaseNightly'), LNightly.MapFilePath,
+        'Output directory must come from Release through ReleaseCustom');
+      Assert.AreEqual('3', LNightly.MapFileSetting);
+      Assert.AreEqual('3.1.0.0', LNightly.Version,
+        'Version must come from the middle configuration, not from Release');
+      Assert.AreEqual('Mid Co', LNightly.CompanyName);
+      Assert.AreEqual(1, CountPathsEnding(LNightly.ProjectSearchPaths, 'releaseunits'));
+      Assert.AreEqual(1, CountPathsEnding(LNightly.ProjectSearchPaths, 'midunits'));
+    finally
+      LNightly.Free;
+    end;
+
+    LRelease := ScanDerived(LProjectPath, 'Win32', 'Release');
+    try
+      Assert.AreEqual('2.1.0.5', LRelease.Version);
+      Assert.AreEqual(0, CountPathsEnding(LRelease.ProjectSearchPaths, 'midunits'));
+    finally
+      LRelease.Free;
+    end;
+  finally
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_DerivedConfig_InheritsPlatformParentGroup;
+var
+  LGroups: string;
+  LProjectPath: string;
+  LTempDir: string;
+  LWin32: TProjectInfo;
+  LWin64: TProjectInfo;
+begin
+  LTempDir := TPath.Combine(TPath.GetTempPath, 'DXComplyTest_CfgParent191_Platform');
+  LGroups := StandardDerivedGroups(DerivedDefine('CUSTOM'), False) +
+    DerivedPropGroup('''$(Cfg_2_Win32)''!=''''',
+      '    <DCC_ExeOutput>.\win32ship</DCC_ExeOutput>' + sLineBreak) +
+    DerivedPropGroup('''$(Cfg_2_Win64)''!=''''',
+      '    <DCC_ExeOutput>.\win64ship</DCC_ExeOutput>' + sLineBreak);
+  // StandardDerivedGroups already writes an empty-ish Cfg_2_Win32 group
+  // (DCC_RemoteDebug). A second Win32 group must still be read.
+  LProjectPath := WriteDerivedProject(LTempDir,
+    WrapDerivedDproj(StandardDerivedConfigs, LGroups));
+  try
+    LWin32 := ScanDerived(LProjectPath, 'Win32', 'ReleaseCustom');
+    try
+      Assert.IsTrue(LWin32.OutputDir.EndsWith('win32ship'), LWin32.OutputDir);
+      Assert.AreEqual('2.1.0.5', LWin32.Version);
+      Assert.AreEqual('3', LWin32.MapFileSetting);
+    finally
+      LWin32.Free;
+    end;
+
+    LWin64 := ScanDerived(LProjectPath, 'Win64', 'ReleaseCustom');
+    try
+      Assert.IsTrue(LWin64.OutputDir.EndsWith('win64ship'), LWin64.OutputDir);
+      Assert.IsFalse(LWin64.OutputDir.Contains('win32ship'), LWin64.OutputDir);
+    finally
+      LWin64.Free;
+    end;
+  finally
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_DerivedConfig_EmptyElementClearsParent;
+const
+  cChildBody = '    <DCC_ExeOutput></DCC_ExeOutput>' + sLineBreak;
+var
+  LChild: TProjectInfo;
+  LProjectPath: string;
+  LTempDir: string;
+begin
+  LTempDir := TPath.Combine(TPath.GetTempPath, 'DXComplyTest_CfgParent191_Clear');
+  LProjectPath := WriteDerivedProject(LTempDir,
+    WrapDerivedDproj(StandardDerivedConfigs, StandardDerivedGroups(cChildBody, True)));
+  try
+    LChild := ScanDerived(LProjectPath, 'Win32', 'ReleaseCustom');
+    try
+      Assert.IsFalse(LChild.OutputDir.Contains('ship'),
+        'An empty DCC_ExeOutput must clear the inherited directory: ' + LChild.OutputDir);
+      Assert.IsTrue(LChild.OutputDir.Contains(TPath.Combine('bpl', 'Win32')),
+        'The BPL directory from Base must remain: ' + LChild.OutputDir);
+      Assert.AreEqual('3', LChild.MapFileSetting);
+      Assert.AreEqual('2.1.0.5', LChild.Version);
+      Assert.AreEqual('Release Co', LChild.CompanyName);
+    finally
+      LChild.Free;
+    end;
+  finally
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_DerivedConfig_CycleStops;
+var
+  LConfigs: string;
+  LGroups: string;
+  LLoop: TProjectInfo;
+  LProjectPath: string;
+  LTempDir: string;
+begin
+  LTempDir := TPath.Combine(TPath.GetTempPath, 'DXComplyTest_CfgParent191_Cycle');
+  LConfigs :=
+    DerivedConfigItem('Base', 'Base', '') +
+    DerivedConfigItem('ReleaseCustom', 'Cfg_3', 'Cfg_4') +
+    DerivedConfigItem('ReleaseLoop', 'Cfg_4', 'Cfg_3');
+  LGroups :=
+    DerivedPropGroup('''$(Base)''!=''''', DerivedBaseBody) +
+    DerivedPropGroup('''$(Cfg_3)''!=''''',
+      '    <DCC_ExeOutput>.\fromcustom</DCC_ExeOutput>' + sLineBreak +
+      '    <DCC_UnitSearchPath>.\customunits</DCC_UnitSearchPath>' + sLineBreak) +
+    DerivedPropGroup('''$(Cfg_4)''!=''''',
+      '    <VerInfo_MajorVer>4</VerInfo_MajorVer>' + sLineBreak +
+      '    <VerInfo_MinorVer>4</VerInfo_MinorVer>' + sLineBreak +
+      '    <VerInfo_Release>4</VerInfo_Release>' + sLineBreak +
+      '    <VerInfo_Build>4</VerInfo_Build>' + sLineBreak +
+      '    <VerInfo_Keys>CompanyName=Loop Co;FileVersion=4.4.4.4;ProductName=DerivedApp</VerInfo_Keys>' + sLineBreak +
+      '    <DCC_UnitSearchPath>.\loopunits;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>' + sLineBreak);
+  LProjectPath := WriteDerivedProject(LTempDir, WrapDerivedDproj(LConfigs, LGroups));
+  try
+    LLoop := ScanDerived(LProjectPath, 'Win32', 'ReleaseLoop');
+    try
+      Assert.IsTrue(LLoop.OutputDir.EndsWith('fromcustom'), LLoop.OutputDir);
+      Assert.AreEqual('4.4.4.4', LLoop.Version,
+        'The parent in the cycle must be read, and the scan must return');
+      Assert.AreEqual('Loop Co', LLoop.CompanyName);
+      Assert.AreEqual(1, CountPathsEnding(LLoop.ProjectSearchPaths, 'loopunits'),
+        'The selected configuration keeps its own search path');
+      Assert.AreEqual(1, CountPathsEnding(LLoop.ProjectSearchPaths, 'customunits'));
+    finally
+      LLoop.Free;
+    end;
+  finally
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir, True);
+  end;
 end;
 
 initialization
