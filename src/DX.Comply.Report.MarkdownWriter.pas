@@ -73,9 +73,11 @@ begin
     LArtefact := AData.Artefacts[I];
     if LArtefact.ArtefactType = 'unit-evidence' then
       Continue;
-    LVersion := ComponentVersionFor(LArtefact,
+    // Issue #208: a file-date version is an RFC 3339 timestamp. The report
+    // spells out UTC. Any other version text stays as stored.
+    LVersion := FormatReportUtcTimestamp(ComponentVersionFor(LArtefact,
       IsSameDeliverableFile(AData.Artefacts, I, LDeliverable),
-      AData.Metadata.ProductVersion, AData.ProjectInfo.Version);
+      AData.Metadata.ProductVersion, AData.ProjectInfo.Version));
     if LArtefact.FileSize >= 0 then
       Lines.Add(Format('| %s | %s | %s | %d | %s |', [
         EscapeMarkdown(SafeText(SafeText(LArtefact.RelativePath, LArtefact.ComponentName), LArtefact.FilePath)),
@@ -255,11 +257,13 @@ begin
       if i = 0 then
         Lines.Add(Format('| %s | %d | %s | %s | %s | %s |', [
           EscapeMarkdown(LGroup.Title), LGroup.Count,
-          EscapeMarkdown(LComponent.Name), EscapeMarkdown(LComponent.Version),
+          EscapeMarkdown(LComponent.Name),
+          EscapeMarkdown(FormatReportUtcTimestamp(LComponent.Version)),
           EscapeMarkdown(LComponent.Copyright), EscapeMarkdown(LGroup.Note)]))
       else
         Lines.Add(Format('| | | %s | %s | %s | |', [
-          EscapeMarkdown(LComponent.Name), EscapeMarkdown(LComponent.Version),
+          EscapeMarkdown(LComponent.Name),
+          EscapeMarkdown(FormatReportUtcTimestamp(LComponent.Version)),
           EscapeMarkdown(LComponent.Copyright)]));
     end;
   end;
@@ -344,7 +348,9 @@ begin
     AddKeyValue(Lines, 'Formal SBOM', Format('[%s](%s)', [
       EscapeMarkdown(LFormalSbomReference),
       EscapeMarkdown(LFormalSbomReference)]));
-    AddKeyValue(Lines, 'Generated At', SafeText(AData.Metadata.Timestamp, AData.CompositionEvidence.GeneratedAt));
+    // Issue #208: the row label stays Generated At. The value names UTC.
+    AddKeyValue(Lines, 'Generated At', FormatReportUtcTimestamp(
+      SafeText(AData.Metadata.Timestamp, AData.CompositionEvidence.GeneratedAt)));
     Lines.Add('');
     Lines.Add('## Project Overview');
     Lines.Add('| Field | Value |');

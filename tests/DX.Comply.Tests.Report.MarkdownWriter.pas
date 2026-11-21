@@ -118,6 +118,12 @@ type
     /// </summary>
     [Test]
     procedure Write_NoLicenceList_ShowsExeAndDllVersion;
+    /// <summary>
+    /// Generated At names UTC. An empty header time uses the composition
+    /// time. A value that is not a timestamp is printed unchanged. Issue #208.
+    /// </summary>
+    [Test]
+    procedure Write_GeneratedAt_ShowsUtcLabel;
   end;
 
 implementation
@@ -610,8 +616,12 @@ begin
     'a DLL shows the version stored on the file');
   Assert.IsTrue(Pos('| | | plugin.dll |  |  | |', LContent) > 0,
     'a DLL with no stored version stays empty');
-  Assert.IsTrue(Pos('| | | old.dll | 2020-01-02T03:04:05Z |  | |', LContent) > 0,
-    'a file-date stand-in is the stored version');
+  Assert.IsTrue(Pos('| | | old.dll | 2020-01-02 03:04:05 UTC |  | |', LContent) > 0,
+    'a file-date stand-in is shown with a UTC label');
+  Assert.AreEqual<Integer>(0, Pos('2020-01-02T03:04:05Z', LContent),
+    'the file-date stand-in is not left with a trailing Z');
+  Assert.IsTrue(Pos('| old.dll | library | 2020-01-02 03:04:05 UTC |', LContent) > 0,
+    'the artefacts table shows the same UTC label');
   Assert.IsTrue(Pos('| | | rtl290.bpl | 29.0.0 |  | |', LContent) > 0,
     'a BPL shows the version stored on the file');
   Assert.IsTrue(Pos('| | | uastack.dll | 1.2.3 |  | |', LContent) > 0,
@@ -631,6 +641,35 @@ begin
     'the product is the first row of its licence list');
   Assert.AreEqual<Integer>(0, Pos('| | | Demo.exe |', LContent),
     'Demo.exe is not a second licence row');
+end;
+
+procedure TMarkdownReportWriterTests.Write_GeneratedAt_ShowsUtcLabel;
+var
+  LContent: string;
+  LWriter: IHumanReadableReportWriter;
+begin
+  LWriter := TMarkdownReportWriter.Create;
+  Assert.IsTrue(LWriter.Write(FOutputPath, FData, THumanReadableReportConfig.Default));
+  LContent := TFile.ReadAllText(FOutputPath, TEncoding.UTF8);
+  Assert.IsTrue(Pos('| Generated At | 2026-03-07 12:00:00 UTC |', LContent) > 0,
+    'Generated At shows the UTC label');
+  Assert.AreEqual<Integer>(0, Pos('2026-03-07T12:00:00Z', LContent),
+    'the report does not leave the trailing Z');
+
+  FData.Metadata.Timestamp := '';
+  FCompositionEvidence.GeneratedAt := '2026-11-20T21:11:57Z';
+  Assert.IsTrue(LWriter.Write(FOutputPath, FData, THumanReadableReportConfig.Default));
+  LContent := TFile.ReadAllText(FOutputPath, TEncoding.UTF8);
+  Assert.IsTrue(Pos('| Generated At | 2026-11-20 21:11:57 UTC |', LContent) > 0,
+    'an empty header time uses the composition time, still labelled UTC');
+
+  FData.Metadata.Timestamp := 'not a timestamp';
+  Assert.IsTrue(LWriter.Write(FOutputPath, FData, THumanReadableReportConfig.Default));
+  LContent := TFile.ReadAllText(FOutputPath, TEncoding.UTF8);
+  Assert.IsTrue(Pos('| Generated At | not a timestamp |', LContent) > 0,
+    'a value that is not a UTC timestamp is printed unchanged');
+  Assert.AreEqual<Integer>(0, Pos('| Generated At | not a timestamp UTC |', LContent),
+    'an unparsed generation time is not labelled UTC');
 end;
 
 initialization
