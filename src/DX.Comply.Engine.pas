@@ -3446,6 +3446,10 @@ begin
         DoProgress('Warning: ' + LManifestPath + ': ' + LPrefixLine, 68);
       for var LFolderLine in ProductFolderMatchLogLines(LManifest, LArtefacts) do
         DoProgress('Warning: ' + LManifestPath + ': ' + LFolderLine, 68);
+      var LLocalHint := UnlicensedLocalProjectHint(LManifest, LArtefacts,
+        LMetadata.Licence);
+      if LLocalHint <> '' then
+        DoProgress('Info: ' + LLocalHint, 68);
       ApplyManifestPublisher(LManifest, LMetadata);
       LMetadata.ComponentManifestJson := LManifestJson;
     end;
@@ -3824,6 +3828,10 @@ begin
           DoProgress('Warning: ' + LManifestPath + ': ' + LPrefixLine, 68);
         for var LFolderLine in ProductFolderMatchLogLines(LManifest, LArtefacts) do
           DoProgress('Warning: ' + LManifestPath + ': ' + LFolderLine, 68);
+        var LLocalHint := UnlicensedLocalProjectHint(LManifest, LArtefacts,
+          LMetadata.Licence);
+        if LLocalHint <> '' then
+          DoProgress('Info: ' + LLocalHint, 68);
         ApplyManifestPublisher(LManifest, LMetadata);
         LMetadata.ComponentManifestJson := LManifestJson;
       end;
