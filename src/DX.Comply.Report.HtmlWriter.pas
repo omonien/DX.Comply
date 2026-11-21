@@ -95,9 +95,11 @@ begin
       if LArtefact.ArtefactType = 'unit-evidence' then
         Continue;
       Inc(LCount);
-      LVersion := ComponentVersionFor(LArtefact,
+      // Issue #208: a file-date version is an RFC 3339 timestamp. The report
+      // spells out UTC. Any other version text stays as stored.
+      LVersion := FormatReportUtcTimestamp(ComponentVersionFor(LArtefact,
         IsSameDeliverableFile(AData.Artefacts, I, LDeliverable),
-        AData.Metadata.ProductVersion, AData.ProjectInfo.Version);
+        AData.Metadata.ProductVersion, AData.ProjectInfo.Version));
       LPathCell := EscapeHtml(SafeText(SafeText(LArtefact.RelativePath, LArtefact.ComponentName), LArtefact.FilePath));
       // Issue #59: a DLL found only in a system directory has no hash. Show
       // where it was found instead.
@@ -407,7 +409,8 @@ begin
     begin
       var LComponent := LGroup.Components[i];
       Lines.Add(Format('<tr><td>%s</td><td>%s</td><td>%s</td></tr>', [
-        EscapeHtml(LComponent.Name), EscapeHtml(LComponent.Version),
+        EscapeHtml(LComponent.Name),
+        EscapeHtml(FormatReportUtcTimestamp(LComponent.Version)),
         EscapeHtml(LComponent.Copyright)]));
     end;
     Lines.Add('</tbody></table></div>');
@@ -578,7 +581,9 @@ begin
     Lines.Add('<tr><th>Project File</th><td><code>' + EscapeHtml(SafeText(AData.ProjectInfo.ProjectPath)) + '</code></td></tr>');
     Lines.Add('<tr><th>Formal SBOM</th><td><a href="' + EscapeHtml(LFormalSbomReference) + '"><code>' +
       EscapeHtml(LFormalSbomReference) + '</code></a></td></tr>');
-    Lines.Add('<tr><th>Generated At</th><td>' + EscapeHtml(SafeText(AData.Metadata.Timestamp, AData.CompositionEvidence.GeneratedAt)) + '</td></tr>');
+    // Issue #208: the row label stays Generated At. The value names UTC.
+    Lines.Add('<tr><th>Generated At</th><td>' + EscapeHtml(FormatReportUtcTimestamp(
+      SafeText(AData.Metadata.Timestamp, AData.CompositionEvidence.GeneratedAt))) + '</td></tr>');
     Lines.Add('</tbody></table></div>');
     Lines.Add('</section>');
     Lines.Add('<div class="cards">');

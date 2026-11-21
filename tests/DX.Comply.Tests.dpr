@@ -41,6 +41,7 @@ uses
   DX.Comply.Tests.Report.MarkdownWriter in 'DX.Comply.Tests.Report.MarkdownWriter.pas',
   DX.Comply.Tests.Report.HtmlWriter in 'DX.Comply.Tests.Report.HtmlWriter.pas',
   DX.Comply.Tests.Report.Overview in 'DX.Comply.Tests.Report.Overview.pas',
+  DX.Comply.Tests.Report.Support in 'DX.Comply.Tests.Report.Support.pas',
   DX.Comply.Tests.Spdx.Writer in 'DX.Comply.Tests.Spdx.Writer.pas',
   DX.Comply.Tests.Spdx3.Writer in 'DX.Comply.Tests.Spdx3.Writer.pas',
   DX.Comply.Tests.Schema.Validator in 'DX.Comply.Tests.Schema.Validator.pas',

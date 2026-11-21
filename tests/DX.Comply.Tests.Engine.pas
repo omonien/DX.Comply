@@ -671,6 +671,7 @@ uses
   System.DateUtils,
   System.RegularExpressions,
   DX.Comply.BuildEvidence.Intf,
+  DX.Comply.Report.Support,
   DX.Comply.Tests.Paths;
 
 type
@@ -3970,12 +3971,14 @@ begin
   Assert.IsTrue(Pos('| MyApp.exe | application | ' + cProjectVersion + ' |',
     LReportText) > 0, 'the report shows the project version on the primary EXE');
   Assert.IsTrue(Pos('| ThirdParty.exe | application | ' +
-    FileDateVersion(TPath.Combine(LOutput, 'ThirdParty.exe')) + ' |', LReportText) > 0,
+    FormatReportUtcTimestamp(FileDateVersion(TPath.Combine(LOutput, 'ThirdParty.exe'))) + ' |',
+    LReportText) > 0,
     'the report shows the file date for a neighboring EXE without version info');
   Assert.IsTrue(Pos('| Vendor.exe | application | ' + cVendorVersion + ' |',
     LReportText) > 0, 'the report shows the neighboring EXE''s own version');
   Assert.IsTrue(Pos('| plugin.dll | library | ' +
-    FileDateVersion(TPath.Combine(LOutput, 'plugin.dll')) + ' |', LReportText) > 0,
+    FormatReportUtcTimestamp(FileDateVersion(TPath.Combine(LOutput, 'plugin.dll'))) + ' |',
+    LReportText) > 0,
     'the report shows the file date for a DLL without version info');
 end;
 

@@ -255,14 +255,14 @@ SPDX 3.0.1 output is built from the same data as SPDX 2.3: the same packages, ID
 
 ### Generation time
 
-DX.Comply writes the generation time inside the SBOM and inside the HTML and Markdown reports. The value is UTC, `YYYY-MM-DDThh:mm:ssZ` (for example `2026-10-10T08:31:18Z`). Build mode and library mode both set it when they generate the file. The checked-in example was written by an older version and still shows a local offset.
+DX.Comply writes the generation time inside the SBOM and inside the HTML and Markdown reports. The SBOM value is UTC, `YYYY-MM-DDThh:mm:ssZ` (for example `2026-10-10T08:31:18Z`). CycloneDX, SPDX 2.3 and SPDX 3.0.1 require that form. The HTML and Markdown reports show the same instant on the **Generated At** row with a UTC label, for example `2026-10-10 08:31:18 UTC`. A value that is not a UTC timestamp is printed unchanged. Build mode and library mode both set the time when they generate the file. The checked-in example was written by an older version and still shows a local offset.
 
 | File | Where to look |
 |---|---|
-| CycloneDX JSON and XML | `metadata.timestamp` |
-| SPDX 2.3 JSON | `creationInfo.created` |
-| SPDX 3.0.1 JSON-LD | `created` on the CreationInfo element |
-| HTML and Markdown reports | **Generated At**, in the opening table |
+| CycloneDX JSON and XML | `metadata.timestamp`, `YYYY-MM-DDThh:mm:ssZ` |
+| SPDX 2.3 JSON | `creationInfo.created`, `YYYY-MM-DDThh:mm:ssZ` |
+| SPDX 3.0.1 JSON-LD | `created` on the CreationInfo element, `YYYY-MM-DDThh:mm:ssZ` |
+| HTML and Markdown reports | **Generated At**, in the opening table, `YYYY-MM-DD hh:mm:ss UTC` |
 
 That report row is part of the header, so it stays when `--report-content` is `overview` or `units`. The file name stays the path from `--output` (default `bom.json`). Use that option when an archive name should include a date, for example `--output=bom-2026-11-05.json`.
 
@@ -332,7 +332,7 @@ dxcomply --project=MyApp.dproj --scan-dir=redist --scan-dir=plugins\** --no-paus
 
 `--scan-tree` (or `"scanTree": true`) restores the previous recursive walk of the output directory. It is deprecated and will be removed in the next release. Prefer `--scan-dir`.
 
-Each listed file gets a version. The binary the project builds gets the product version from the SBOM header (or the project version when the header is empty). That includes a file with no version resource, such as an Android `lib<Project>.so`. A file-date stamp is not used for that file when a product version is known. CycloneDX JSON and XML, SPDX 2.3, SPDX 3.0.1, and the HTML and Markdown reports write the same value. Any other `.exe`, DLL, or `.bpl` gets the numeric file version from its own version resource (a.b.c.d). The FileVersion string, then the ProductVersion string, is used only when that fixed file info is absent. It does not inherit the product version. A file that still has no version, such as a `.res`, a `.map`, a third-party DLL with no version resource, or a third-party `.dcp`, gets its last modification time in UTC as an RFC 3339 timestamp, as BSI TR-03183-2 section 5.2.2 allows. Such a component carries the property `net.developer-experts.dx-comply:versionSource` = `file-modification-time`.
+Each listed file gets a version. The binary the project builds gets the product version from the SBOM header (or the project version when the header is empty). That includes a file with no version resource, such as an Android `lib<Project>.so`. A file-date stamp is not used for that file when a product version is known. CycloneDX JSON and XML, SPDX 2.3, SPDX 3.0.1, and the HTML and Markdown reports write the same value. Any other `.exe`, DLL, or `.bpl` gets the numeric file version from its own version resource (a.b.c.d). The FileVersion string, then the ProductVersion string, is used only when that fixed file info is absent. It does not inherit the product version. A file that still has no version, such as a `.res`, a `.map`, a third-party DLL with no version resource, or a third-party `.dcp`, gets its last modification time in UTC as an RFC 3339 timestamp, as BSI TR-03183-2 section 5.2.2 allows. Such a component carries the property `net.developer-experts.dx-comply:versionSource` = `file-modification-time`. The SBOM keeps that RFC 3339 timestamp. The HTML and Markdown reports show it as `YYYY-MM-DD hh:mm:ss UTC`, the same way as Generated At.
 
 `include` and `exclude` still filter what was scanned. Patterns match the path relative to the directory being scanned. `*.dll` matches a DLL next to the exe. Patterns such as `build/**` matter when the scanned directory itself contains a `build` folder, which is the case for `--scan-tree` when the project has no output directory, and for a `--scan-dir` value that contains `**`.
 
@@ -589,7 +589,7 @@ No. The manufacturer archives a machine-readable SBOM per product version with t
 
 ### Where is the time an SBOM was generated?
 
-Inside the file. See [Generation time](#generation-time). CycloneDX JSON and XML use `metadata.timestamp`. SPDX 2.3 uses `creationInfo.created`. SPDX 3.0.1 uses `created` on the CreationInfo element. The HTML and Markdown reports show the same value as **Generated At**. Pass `--output` when the archive file name should include a date, for example `--output=bom-2026-11-05.json`.
+Inside the file. See [Generation time](#generation-time). CycloneDX JSON and XML use `metadata.timestamp`. SPDX 2.3 uses `creationInfo.created`. SPDX 3.0.1 uses `created` on the CreationInfo element. The HTML and Markdown reports show that time on **Generated At** with a UTC label. Pass `--output` when the archive file name should include a date, for example `--output=bom-2026-11-05.json`.
 
 ### Which SBOM format should I pick?
 

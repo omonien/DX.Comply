@@ -54,6 +54,14 @@ function ResolutionConfidenceToString(AValue: TResolutionConfidence): string;
 function ValidationStatusText(const AData: TComplianceReportData): string;
 function SafeText(const AValue: string; const AFallback: string = 'n/a'): string;
 /// <summary>
+/// Timestamp text for the HTML and Markdown reports. A value that
+/// TryParseUtcTimestamp accepts is written as YYYY-MM-DD hh:mm:ss UTC
+/// (for example 2026-11-20 21:11:57 UTC). Any other text, including an
+/// empty string and a version such as 2.0.0, is returned unchanged.
+/// SBOM writers keep FormatUtcTimestamp (YYYY-MM-DDThh:mm:ssZ).
+/// </summary>
+function FormatReportUtcTimestamp(const AValue: string): string;
+/// <summary>
 /// True when AValue starts with http:// or https://. The reports only make
 /// such a value a link, so a value like "javascript:..." stays plain text.
 /// </summary>
@@ -184,6 +192,18 @@ begin
   if Trim(AValue) = '' then
     Exit(AFallback);
   Result := AValue;
+end;
+
+function FormatReportUtcTimestamp(const AValue: string): string;
+var
+  LUtc: TDateTime;
+begin
+  // Readers miss that a trailing Z means UTC. The reports spell the zone
+  // out. FormatUtcTimestamp stays the machine-readable SBOM form, and an
+  // empty or unreadable value must not become the current time here.
+  if not TryParseUtcTimestamp(AValue, LUtc) then
+    Exit(AValue);
+  Result := FormatDateTime('yyyy-mm-dd hh:nn:ss', LUtc, TFormatSettings.Invariant) + ' UTC';
 end;
 
 function RepositoryReferenceText(const AProjectInfo: TProjectInfo): string;

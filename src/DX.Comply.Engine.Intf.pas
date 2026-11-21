@@ -561,7 +561,8 @@ function TryParseUtcTimestamp(const ATimestamp: string; out AUtc: TDateTime): Bo
 /// <summary>
 /// ATimestamp converted to UTC as YYYY-MM-DDThh:mm:ssZ. An empty or
 /// unreadable value gives the current UTC time. Used for CycloneDX
-/// metadata.timestamp, SPDX creationInfo.created and the reports.
+/// metadata.timestamp and SPDX creationInfo.created. The HTML and
+/// Markdown reports show that instant with a UTC label.
 /// </summary>
 function FormatUtcTimestamp(const ATimestamp: string): string;
 
