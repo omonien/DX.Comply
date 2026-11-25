@@ -50,7 +50,9 @@ type
       const ABuildEvidence: TBuildEvidence;
       var ACompositionEvidence: TCompositionEvidence);
     /// <summary>
-    /// Builds candidate filenames for a unit name.
+    /// Builds candidate filenames for a unit name. A dotted name is not
+    /// shortened: the compiler does not accept a file whose name differs from
+    /// the unit name (E1038), so Search.pas is never System.Bindings.Search.
     /// </summary>
     function BuildCandidateFileNames(const AUnitName: string): TArray<string>;
     /// <summary>
@@ -66,14 +68,12 @@ type
     /// Finds the first direct candidate inside the supplied search paths.
     /// </summary>
     function FindExistingDirectCandidate(const ASearchPaths: TList<string>;
-      const ACandidateFileNames: TArray<string>; out AResolvedPath: string;
-      out AUsedFallbackName: Boolean): Boolean;
+      const ACandidateFileNames: TArray<string>; out AResolvedPath: string): Boolean;
     /// <summary>
     /// Finds the first recursive candidate inside the supplied search roots.
     /// </summary>
     function FindExistingRecursiveCandidate(const ASearchPaths: TList<string>;
-      const ACandidateFileNames: TArray<string>; out AResolvedPath: string;
-      out AUsedFallbackName: Boolean): Boolean;
+      const ACandidateFileNames: TArray<string>; out AResolvedPath: string): Boolean;
     /// <summary>
     /// Infers the origin kind from the unit name namespace when no file can be resolved.
     /// </summary>
@@ -254,7 +254,6 @@ end;
 function TUnitResolver.BuildCandidateFileNames(const AUnitName: string): TArray<string>;
 var
   LFileNames: TList<string>;
-  LShortUnitName: string;
   procedure AddUniqueCandidate(const AFileName: string);
   begin
     if (Trim(AFileName) <> '') and not LFileNames.Contains(AFileName) then
@@ -267,15 +266,6 @@ begin
     AddUniqueCandidate(AUnitName + '.dcu');
     AddUniqueCandidate(AUnitName + '.dcp');
     AddUniqueCandidate(AUnitName + '.bpl');
-
-    LShortUnitName := AUnitName;
-    if Pos('.', LShortUnitName) > 0 then
-      LShortUnitName := LShortUnitName.Split(['.'])[High(LShortUnitName.Split(['.']))];
-
-    AddUniqueCandidate(LShortUnitName + '.pas');
-    AddUniqueCandidate(LShortUnitName + '.dcu');
-    AddUniqueCandidate(LShortUnitName + '.dcp');
-    AddUniqueCandidate(LShortUnitName + '.bpl');
     Result := LFileNames.ToArray;
   finally
     LFileNames.Free;
@@ -336,8 +326,7 @@ begin
 end;
 
 function TUnitResolver.FindExistingDirectCandidate(const ASearchPaths: TList<string>;
-  const ACandidateFileNames: TArray<string>; out AResolvedPath: string;
-  out AUsedFallbackName: Boolean): Boolean;
+  const ACandidateFileNames: TArray<string>; out AResolvedPath: string): Boolean;
 var
   I: Integer;
   LCandidatePath: string;
@@ -345,7 +334,6 @@ var
 begin
   Result := False;
   AResolvedPath := '';
-  AUsedFallbackName := False;
   if not Assigned(ASearchPaths) then
     Exit;
 
@@ -361,15 +349,13 @@ begin
         Continue;
 
       AResolvedPath := TPath.GetFullPath(LCandidatePath);
-      AUsedFallbackName := I >= 4;
       Exit(True);
     end;
   end;
 end;
 
 function TUnitResolver.FindExistingRecursiveCandidate(const ASearchPaths: TList<string>;
-  const ACandidateFileNames: TArray<string>; out AResolvedPath: string;
-  out AUsedFallbackName: Boolean): Boolean;
+  const ACandidateFileNames: TArray<string>; out AResolvedPath: string): Boolean;
 var
   I: Integer;
   LCacheKey: string;
@@ -378,7 +364,6 @@ var
 begin
   Result := False;
   AResolvedPath := '';
-  AUsedFallbackName := False;
   if not Assigned(ASearchPaths) then
     Exit;
 
@@ -393,10 +378,7 @@ begin
       if FRecursiveSearchCache.TryGetValue(LCacheKey, AResolvedPath) then
       begin
         if AResolvedPath <> '' then
-        begin
-          AUsedFallbackName := I >= 4;
           Exit(True);
-        end;
         Continue;
       end;
 
@@ -409,7 +391,6 @@ begin
 
       AResolvedPath := TPath.GetFullPath(LFiles[0]);
       FRecursiveSearchCache.AddOrSetValue(LCacheKey, AResolvedPath);
-      AUsedFallbackName := I >= 4;
       Exit(True);
     end;
   end;
@@ -604,7 +585,6 @@ var
   LPasPath: string;
   LResolvedPath: string;
   LSourcePath: string;
-  LUsedFallbackName: Boolean;
 
   function IsOutputPath(const APath: string): Boolean;
   begin
@@ -664,7 +644,7 @@ begin
         LDirectSearchPaths.Add(LResolvedPath);
 
     if FindExistingDirectCandidate(LDirectSearchPaths, LCandidateFileNames,
-      LResolvedPath, LUsedFallbackName) then
+      LResolvedPath) then
     begin
       Result.ResolvedPath := LResolvedPath;
       Result.EvidenceKind := DetermineEvidenceKind(Result.ResolvedPath);
@@ -684,25 +664,17 @@ begin
         end;
       end;
       RememberSourcePath(LPasPath);
-      if LUsedFallbackName then
-        Result.Confidence := rcHeuristic
-      else
-        Result.Confidence := rcStrong;
       Result.EvidenceSources := [AEvidenceSource, besSearchPathFallback];
       Exit;
     end;
 
     if FindExistingRecursiveCandidate(AProjectInfo.GlobalSearchPaths, LCandidateFileNames,
-      LResolvedPath, LUsedFallbackName) then
+      LResolvedPath) then
     begin
       Result.ResolvedPath := LResolvedPath;
       Result.EvidenceKind := DetermineEvidenceKind(Result.ResolvedPath);
       Result.OriginKind := DetermineOriginKind(AProjectInfo, AUnitName, Result.ResolvedPath);
       RememberSourcePath('');
-      if LUsedFallbackName then
-        Result.Confidence := rcHeuristic
-      else
-        Result.Confidence := rcStrong;
       Result.EvidenceSources := [AEvidenceSource, besSearchPathFallback];
       Exit;
     end;

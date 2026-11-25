@@ -1,4 +1,4 @@
-/// <summary>
+﻿/// <summary>
 /// DX.Comply.Tests.UsesClauseParser
 /// DUnitX tests for TUsesClauseParser and TUsesClauseWalker.
 /// </summary>
@@ -150,9 +150,19 @@ type
     /// </summary>
     [Test]
     procedure WalkDependencies_SkipsDcuOnlyUnits;
+
+    /// <summary>
+    /// A source that only has the last part of a dotted unit name is another
+    /// unit, so its uses clause is not followed.
+    /// </summary>
+    [Test]
+    procedure WalkDependencies_ShortFileNameIsNotTheDottedUnit;
   end;
 
 implementation
+
+uses
+  System.StrUtils;
 
 { TUsesClauseParserTests }
 
@@ -581,6 +591,32 @@ begin
 
   Assert.IsTrue(LFoundDcuOnly,
     'DCU-only units must appear in the result even without .pas source');
+end;
+
+procedure TUsesClauseWalkerTests.WalkDependencies_ShortFileNameIsNotTheDottedUnit;
+var
+  LGlobalDir: string;
+  LRootPath: string;
+  LUnits: TArray<string>;
+begin
+  LGlobalDir := TPath.Combine(FTempDir, 'global');
+  TDirectory.CreateDirectory(LGlobalDir);
+  FGlobalSearchPaths.Add(LGlobalDir);
+  LRootPath := TPath.Combine(FTempDir, 'Demo.dpr');
+  TFile.WriteAllText(LRootPath, 'program Demo; uses System.Bindings.Search, Other.Tools; begin end.');
+  TFile.WriteAllText(TPath.Combine(FTempDir, 'Search.pas'),
+    'unit Search; interface uses ProjectOnly; implementation end.');
+  TFile.WriteAllText(TPath.Combine(LGlobalDir, 'Tools.pas'),
+    'unit Tools; interface uses GlobalOnly; implementation end.');
+  TFile.WriteAllText(TPath.Combine(LGlobalDir, 'System.Bindings.Search.pas'),
+    'unit System.Bindings.Search; interface uses RealDependency; implementation end.');
+
+  LUnits := TUsesClauseWalker.WalkDependencies(LRootPath,
+    FSearchPaths, FGlobalSearchPaths, FUnitScopeNames);
+  Assert.IsTrue(MatchText('RealDependency', LUnits),
+    'The uses clause of the unit with the full name is followed');
+  Assert.IsFalse(MatchText('ProjectOnly', LUnits), 'Search.pas is not System.Bindings.Search');
+  Assert.IsFalse(MatchText('GlobalOnly', LUnits), 'Tools.pas is not Other.Tools');
 end;
 
 initialization

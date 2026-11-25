@@ -368,8 +368,7 @@ end;
 class function TUsesClauseWalker.ResolveUnitSourcePath(const AUnitName: string;
   const ASearchPaths, AGlobalSearchPaths, AUnitScopeNames: TList<string>): string;
 var
-  LPasFileName, LShortName, LScopeName: string;
-  LDotPos: Integer;
+  LPasFileName, LScopeName: string;
 begin
   Result := '';
   if AUnitName = '' then
@@ -382,17 +381,7 @@ begin
   if Result <> '' then
     Exit;
 
-  // 2. Try short name (last dot-segment) in project search paths
-  LDotPos := LastDelimiter('.', AUnitName);
-  if LDotPos > 0 then
-  begin
-    LShortName := Copy(AUnitName, LDotPos + 1, MaxInt) + '.pas';
-    Result := TryFindPasFile(LShortName, ASearchPaths);
-    if Result <> '' then
-      Exit;
-  end;
-
-  // 3. Try with unit scope name prefixes in project search paths
+  // 2. Try with unit scope name prefixes in project search paths
   if Assigned(AUnitScopeNames) then
   begin
     for LScopeName in AUnitScopeNames do
@@ -405,17 +394,10 @@ begin
     end;
   end;
 
-  // 4. Repeat all strategies in global search paths
+  // 3. Repeat all strategies in global search paths
   Result := TryFindPasFile(LPasFileName, AGlobalSearchPaths);
   if Result <> '' then
     Exit;
-
-  if LDotPos > 0 then
-  begin
-    Result := TryFindPasFile(LShortName, AGlobalSearchPaths);
-    if Result <> '' then
-      Exit;
-  end;
 
   if Assigned(AUnitScopeNames) then
   begin
