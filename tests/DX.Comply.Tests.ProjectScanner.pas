@@ -463,6 +463,44 @@ type
     procedure Scan_PackageDproj_UsesBplOutputDir;
 
     /// <summary>
+    /// With no DCC_ExeOutput the compiler writes the program next to the
+    /// project. The DCU folder is never the output folder.
+    /// </summary>
+    [Test]
+    procedure Scan_NoExeOutput_DcuOutputIsNotTheOutputDir;
+
+    /// <summary>
+    /// The platform folder that exists because of the DCUs is used only when
+    /// the program is in it.
+    /// </summary>
+    [Test]
+    procedure Scan_NoExeOutput_DcuInPlatformFolder_UsesProjectDirectory;
+
+    /// <summary>The same when the DCUs are in a folder below the platform folder.</summary>
+    [Test]
+    procedure Scan_NoExeOutput_DcuBelowPlatformFolder_UsesProjectDirectory;
+
+    /// <summary>
+    /// A library with DllSuffix in the platform folder is the built file.
+    /// </summary>
+    [Test]
+    procedure Scan_NoExeOutput_LibraryInPlatformFolder_IsUsed;
+
+    /// <summary>
+    /// A program that an option set or a build property put next to the DCUs
+    /// is found. A program in the project directory wins.
+    /// </summary>
+    [Test]
+    procedure Scan_NoExeOutput_ProgramInDcuFolder_IsUsed;
+
+    /// <summary>
+    /// A package is not written to the project directory, so the fallback is
+    /// reported.
+    /// </summary>
+    [Test]
+    procedure Scan_NoExeOutput_PackageWithDcuOutputOnly_IsReported;
+
+    /// <summary>
     /// When AppType is absent, a source file that starts with library is a dll.
     /// </summary>
     [Test]
@@ -2953,6 +2991,203 @@ begin
       TFile.Delete(LTempDproj);
     if TDirectory.Exists(LTempDir) then
       TDirectory.Delete(LTempDir);
+  end;
+end;
+
+function NoExeOutputDproj(const AMainSource, AAppType, AOutputs: string): string;
+begin
+  Result :=
+    '<?xml version="1.0" encoding="utf-8"?>' + sLineBreak +
+    '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">' + sLineBreak +
+    '  <PropertyGroup>' + sLineBreak +
+    '    <MainSource>' + AMainSource + '</MainSource>' + sLineBreak +
+    '    <AppType>' + AAppType + '</AppType>' + sLineBreak +
+         AOutputs + sLineBreak +
+    '  </PropertyGroup>' + sLineBreak +
+    '</Project>';
+end;
+
+procedure TProjectScannerTests.Scan_NoExeOutput_DcuOutputIsNotTheOutputDir;
+var
+  LInfo: TProjectInfo;
+  LScanner: IProjectScanner;
+  LTempDir: string;
+begin
+  LTempDir := MakeTempDir;
+  try
+    LScanner := TProjectScanner.Create;
+    LInfo := LScanner.Scan(WriteProject(LTempDir, NoExeOutputDproj('MyApp.dpr', 'Application',
+      '<DCC_DcuOutput>.\DCU64</DCC_DcuOutput>')), 'Win64', 'Release');
+    try
+      Assert.AreEqual(LInfo.ProjectDir, LInfo.OutputDir,
+        'With no DCC_ExeOutput the program is next to the project, not in the DCU folder');
+      Assert.AreEqual(TPath.Combine(LInfo.ProjectDir, 'MyApp.exe'), LInfo.OutputFilePath);
+      Assert.IsTrue(LInfo.DcuOutputDir.EndsWith('\DCU64', True),
+        'The DCU folder itself does not change, but was: ' + LInfo.DcuOutputDir);
+      Assert.IsFalse(HasWarningText(LInfo, 'project directory'),
+        'The project directory is what the compiler uses here, so it is not reported');
+    finally
+      LInfo.Free;
+    end;
+  finally
+    TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_NoExeOutput_DcuInPlatformFolder_UsesProjectDirectory;
+var
+  LDproj: string;
+  LInfo: TProjectInfo;
+  LPlatformDir: string;
+  LScanner: IProjectScanner;
+  LTempDir: string;
+begin
+  LTempDir := MakeTempDir;
+  try
+    LDproj := WriteProject(LTempDir, NoExeOutputDproj('MyApp.dpr', 'Application',
+      '<DCC_DcuOutput>.\$(Platform)\$(Config)</DCC_DcuOutput>'));
+    LPlatformDir := TPath.Combine(LTempDir, 'Win64\Release');
+    ForceDirectories(LPlatformDir);
+    LScanner := TProjectScanner.Create;
+    LInfo := LScanner.Scan(LDproj, 'Win64', 'Release');
+    try
+      Assert.AreEqual(LInfo.ProjectDir, LInfo.OutputDir,
+        'The folder exists because of the DCUs, so it does not show where the program is');
+    finally
+      LInfo.Free;
+    end;
+
+    // An option set can put the program there. The file then decides.
+    TFile.WriteAllText(TPath.Combine(LPlatformDir, 'MyApp.exe'), 'exe', TEncoding.UTF8);
+    LInfo := LScanner.Scan(LDproj, 'Win64', 'Release');
+    try
+      Assert.IsTrue(SameText(LPlatformDir, LInfo.OutputDir),
+        'A built program in the platform folder is used, but was: ' + LInfo.OutputDir);
+    finally
+      LInfo.Free;
+    end;
+
+    // A program in the project directory is the one the compiler writes.
+    TFile.WriteAllText(TPath.Combine(LTempDir, 'MyApp.exe'), 'exe', TEncoding.UTF8);
+    LInfo := LScanner.Scan(LDproj, 'Win64', 'Release');
+    try
+      Assert.AreEqual(LInfo.ProjectDir, LInfo.OutputDir,
+        'An older program in the platform folder does not win over the one in the project directory');
+    finally
+      LInfo.Free;
+    end;
+  finally
+    TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_NoExeOutput_DcuBelowPlatformFolder_UsesProjectDirectory;
+var
+  LInfo: TProjectInfo;
+  LScanner: IProjectScanner;
+  LTempDir: string;
+begin
+  LTempDir := MakeTempDir;
+  try
+    ForceDirectories(TPath.Combine(LTempDir, 'Win64\Release\dcu'));
+    LScanner := TProjectScanner.Create;
+    LInfo := LScanner.Scan(WriteProject(LTempDir, NoExeOutputDproj('MyApp.dpr', 'Application',
+      '<DCC_DcuOutput>.\$(Platform)\$(Config)\dcu</DCC_DcuOutput>')), 'Win64', 'Release');
+    try
+      Assert.AreEqual(LInfo.ProjectDir, LInfo.OutputDir,
+        'The platform folder is only the parent of the DCU folder');
+    finally
+      LInfo.Free;
+    end;
+  finally
+    TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_NoExeOutput_LibraryInPlatformFolder_IsUsed;
+var
+  LInfo: TProjectInfo;
+  LPlatformDir: string;
+  LScanner: IProjectScanner;
+  LTempDir: string;
+begin
+  LTempDir := MakeTempDir;
+  try
+    LPlatformDir := TPath.Combine(LTempDir, 'Win64\Release');
+    ForceDirectories(LPlatformDir);
+    TFile.WriteAllText(TPath.Combine(LPlatformDir, 'MyApp290.dll'), 'dll', TEncoding.UTF8);
+    LScanner := TProjectScanner.Create;
+    LInfo := LScanner.Scan(WriteProject(LTempDir, NoExeOutputDproj('MyApp.dpr', 'Library',
+      '<DllSuffix>290</DllSuffix><DCC_DcuOutput>.\$(Platform)\$(Config)</DCC_DcuOutput>')),
+      'Win64', 'Release');
+    try
+      Assert.IsTrue(SameText(TPath.Combine(LPlatformDir, 'MyApp290.dll'), LInfo.OutputFilePath),
+        'The library in the platform folder is used, but was: ' + LInfo.OutputFilePath);
+    finally
+      LInfo.Free;
+    end;
+  finally
+    TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_NoExeOutput_ProgramInDcuFolder_IsUsed;
+var
+  LDcuDir: string;
+  LDproj: string;
+  LInfo: TProjectInfo;
+  LScanner: IProjectScanner;
+  LTempDir: string;
+begin
+  LTempDir := MakeTempDir;
+  try
+    LDproj := WriteProject(LTempDir, NoExeOutputDproj('MyApp.dpr', 'Application',
+      '<DCC_DcuOutput>.\bin</DCC_DcuOutput>'));
+    LDcuDir := TPath.Combine(LTempDir, 'bin');
+    ForceDirectories(LDcuDir);
+    TFile.WriteAllText(TPath.Combine(LDcuDir, 'MyApp.exe'), 'exe', TEncoding.UTF8);
+    LScanner := TProjectScanner.Create;
+    LInfo := LScanner.Scan(LDproj, 'Win64', 'Release');
+    try
+      Assert.IsTrue(SameText(LDcuDir, LInfo.OutputDir),
+        'The program is in the DCU folder, but OutputDir was: ' + LInfo.OutputDir);
+    finally
+      LInfo.Free;
+    end;
+
+    TFile.WriteAllText(TPath.Combine(LTempDir, 'MyApp.exe'), 'exe', TEncoding.UTF8);
+    LInfo := LScanner.Scan(LDproj, 'Win64', 'Release');
+    try
+      Assert.AreEqual(LInfo.ProjectDir, LInfo.OutputDir,
+        'The program in the project directory is the one the compiler writes');
+    finally
+      LInfo.Free;
+    end;
+  finally
+    TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_NoExeOutput_PackageWithDcuOutputOnly_IsReported;
+var
+  LInfo: TProjectInfo;
+  LScanner: IProjectScanner;
+  LTempDir: string;
+begin
+  LTempDir := MakeTempDir;
+  try
+    LScanner := TProjectScanner.Create;
+    LInfo := LScanner.Scan(WriteProject(LTempDir, NoExeOutputDproj('MyApp.dpk', 'Package',
+      '<DCC_DcuOutput>.\dcu</DCC_DcuOutput>')), 'Win64', 'Release');
+    try
+      Assert.AreEqual(LInfo.ProjectDir, LInfo.OutputDir);
+      Assert.IsTrue(HasWarningText(LInfo, 'project directory'),
+        'A package goes to the BPL folder of the IDE, so the guess is reported');
+    finally
+      LInfo.Free;
+    end;
+  finally
+    TDirectory.Delete(LTempDir, True);
   end;
 end;
 

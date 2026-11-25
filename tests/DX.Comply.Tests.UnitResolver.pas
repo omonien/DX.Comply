@@ -152,6 +152,14 @@ type
     procedure Resolve_DcuInOutputDir_UsesOriginOfSource;
 
     /// <summary>
+    /// When the program is written to the project directory, a library folder
+    /// below it is still a source folder. A unit of the project itself is
+    /// found by its source, as before.
+    /// </summary>
+    [Test]
+    procedure Resolve_OutputDirIsProjectDir_KeepsLibrarySourcePath;
+
+    /// <summary>
     /// A unit under the install Extras folder that a manifest row names
     /// (units_exact, units_folder, or units_prefix) is that component.
     /// </summary>
@@ -1098,6 +1106,83 @@ begin
               'A DCU with no source outside the output folder has no source path');
           end;
         end;
+      finally
+        LCompositionEvidence.Free;
+      end;
+    finally
+      LBuildEvidence.Free;
+      LProjectInfo.Free;
+    end;
+  finally
+    if TDirectory.Exists(LTempDir) then
+      TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+procedure TUnitResolverTests.Resolve_OutputDirIsProjectDir_KeepsLibrarySourcePath;
+var
+  LBuildEvidence: TBuildEvidence;
+  LCompositionEvidence: TCompositionEvidence;
+  LDcuDir: string;
+  LEvidenceItem: TBuildEvidenceItem;
+  LLibDir: string;
+  LProjectDir: string;
+  LProjectInfo: TProjectInfo;
+  LTempDir: string;
+begin
+  LTempDir := TPath.Combine(TPath.GetTempPath, TPath.GetRandomFileName);
+  LProjectDir := TPath.Combine(LTempDir, 'Project');
+  LDcuDir := TPath.Combine(LProjectDir, 'dcu');
+  LLibDir := TPath.Combine(LProjectDir, 'libs\Vend');
+  TDirectory.CreateDirectory(LDcuDir);
+  TDirectory.CreateDirectory(LLibDir);
+  try
+    TFile.WriteAllBytes(TPath.Combine(LDcuDir, 'Vend.Utils.dcu'), TBytes.Create($01, $02));
+    TFile.WriteAllBytes(TPath.Combine(LDcuDir, 'Main.dcu'), TBytes.Create($01, $02));
+    TFile.WriteAllText(TPath.Combine(LLibDir, 'Vend.Utils.pas'),
+      'unit Vend.Utils;' + sLineBreak + 'interface' + sLineBreak +
+      'implementation' + sLineBreak + 'end.');
+    TFile.WriteAllBytes(TPath.Combine(LLibDir, 'Vend.Closed.dcu'), TBytes.Create($01, $02));
+    TFile.WriteAllText(TPath.Combine(LProjectDir, 'Main.pas'),
+      'unit Main;' + sLineBreak + 'interface' + sLineBreak +
+      'implementation' + sLineBreak + 'end.');
+
+    LProjectInfo := TProjectInfo.Create;
+    LBuildEvidence := TBuildEvidence.Create;
+    try
+      LProjectInfo.ProjectDir := LProjectDir;
+      LBuildEvidence.Paths.OutputDir := LProjectDir + '\';
+      LBuildEvidence.Paths.DcuOutputDir := LDcuDir;
+      LBuildEvidence.SearchPaths.Add(LProjectDir);
+      LBuildEvidence.SearchPaths.Add(LLibDir);
+
+      LEvidenceItem := Default(TBuildEvidenceItem);
+      LEvidenceItem.SourceKind := besMapFile;
+      LEvidenceItem.FilePath := TPath.Combine(LProjectDir, 'Demo.map');
+      LEvidenceItem.UnitName := 'Vend.Utils';
+      LBuildEvidence.EvidenceItems.Add(LEvidenceItem);
+      LEvidenceItem.UnitName := 'Main';
+      LBuildEvidence.EvidenceItems.Add(LEvidenceItem);
+      LEvidenceItem.UnitName := 'Vend.Closed';
+      LBuildEvidence.EvidenceItems.Add(LEvidenceItem);
+
+      LCompositionEvidence := FResolver.Resolve(LProjectInfo, LBuildEvidence);
+      try
+        Assert.AreEqual(NativeInt(3), NativeInt(LCompositionEvidence.Units.Count));
+        Assert.AreEqual(TPath.Combine(LDcuDir, 'Vend.Utils.dcu'),
+          LCompositionEvidence.Units[0].ResolvedPath);
+        Assert.AreEqual(TPath.Combine(LLibDir, 'Vend.Utils.pas'),
+          LCompositionEvidence.Units[0].SourcePath,
+          'The source path is what a manifest folder matches');
+        Assert.AreEqual(TPath.Combine(LProjectDir, 'Main.pas'),
+          LCompositionEvidence.Units[1].ResolvedPath,
+          'A source in the project directory keeps its uses edges');
+        Assert.AreEqual(TPath.Combine(LProjectDir, 'Main.pas'),
+          LCompositionEvidence.Units[1].SourcePath);
+        Assert.AreEqual(uokLocalProject, LCompositionEvidence.Units[1].OriginKind);
+        Assert.AreEqual(TPath.Combine(LLibDir, 'Vend.Closed.dcu'),
+          LCompositionEvidence.Units[2].SourcePath,
+          'A library that comes only as DCU is matched by the folder of the DCU');
       finally
         LCompositionEvidence.Free;
       end;

@@ -90,11 +90,19 @@ type
     /// </summary>
     function IsEmbarcaderoShippedPath(const APath, ARootDir: string): Boolean;
     /// <summary>
+    /// Output folder of the build for unit files. Empty when the binary is
+    /// written to the project directory: the sources of the project are there
+    /// too, so it is not an output folder for units.
+    /// </summary>
+    function UnitOutputDir(const AProjectInfo: TProjectInfo;
+      const ABuildEvidence: TBuildEvidence): string;
+    /// <summary>
     /// Finds AUnitName.pas in a build search path that is not an output
     /// folder. Used to classify a DCU found in the DCU output folder.
     /// </summary>
-    function FindSourceOutsideOutputDirs(const ABuildEvidence: TBuildEvidence;
-      const AUnitName: string; out ASourcePath: string): Boolean;
+    function FindSourceOutsideOutputDirs(const AProjectInfo: TProjectInfo;
+      const ABuildEvidence: TBuildEvidence; const AUnitName: string;
+      out ASourcePath: string): Boolean;
     /// <summary>
     /// Resolves a unit by searching build output, project and global paths.
     /// Shared resolution logic used by both MAP-derived and uses-clause-derived evidence.
@@ -568,8 +576,19 @@ begin
   end;
 end;
 
-function TUnitResolver.FindSourceOutsideOutputDirs(const ABuildEvidence: TBuildEvidence;
-  const AUnitName: string; out ASourcePath: string): Boolean;
+function TUnitResolver.UnitOutputDir(const AProjectInfo: TProjectInfo;
+  const ABuildEvidence: TBuildEvidence): string;
+begin
+  Result := ABuildEvidence.Paths.OutputDir;
+  if (Result <> '') and (AProjectInfo.ProjectDir <> '') and
+     SameText(ExcludeTrailingPathDelimiter(TPath.GetFullPath(Result)),
+       ExcludeTrailingPathDelimiter(TPath.GetFullPath(AProjectInfo.ProjectDir))) then
+    Result := '';
+end;
+
+function TUnitResolver.FindSourceOutsideOutputDirs(const AProjectInfo: TProjectInfo;
+  const ABuildEvidence: TBuildEvidence; const AUnitName: string;
+  out ASourcePath: string): Boolean;
 var
   LCandidate: string;
   LSearchPath: string;
@@ -580,7 +599,7 @@ begin
   begin
     if Trim(LSearchPath) = '' then
       Continue;
-    if IsPathUnderDirectory(LSearchPath, ABuildEvidence.Paths.OutputDir) or
+    if IsPathUnderDirectory(LSearchPath, UnitOutputDir(AProjectInfo, ABuildEvidence)) or
        IsPathUnderDirectory(LSearchPath, ABuildEvidence.Paths.DcuOutputDir) or
        IsPathUnderDirectory(LSearchPath, ABuildEvidence.Paths.DcpOutputDir) or
        IsPathUnderDirectory(LSearchPath, ABuildEvidence.Paths.BplOutputDir) then
@@ -608,7 +627,7 @@ var
 
   function IsOutputPath(const APath: string): Boolean;
   begin
-    Result := IsPathUnderDirectory(APath, ABuildEvidence.Paths.OutputDir) or
+    Result := IsPathUnderDirectory(APath, UnitOutputDir(AProjectInfo, ABuildEvidence)) or
       IsPathUnderDirectory(APath, ABuildEvidence.Paths.DcuOutputDir) or
       IsPathUnderDirectory(APath, ABuildEvidence.Paths.DcpOutputDir) or
       IsPathUnderDirectory(APath, ABuildEvidence.Paths.BplOutputDir);
@@ -677,7 +696,7 @@ begin
         // unit compiled into the project's DCU folder stays third party
         // (issue #133). Without a source the unit counts as project code.
         Result.OriginKind := uokLocalProject;
-        if FindSourceOutsideOutputDirs(ABuildEvidence, AUnitName, LSourcePath) then
+        if FindSourceOutsideOutputDirs(AProjectInfo, ABuildEvidence, AUnitName, LSourcePath) then
         begin
           Result.OriginKind := DetermineOriginKind(AProjectInfo, AUnitName, LSourcePath);
           LPasPath := LSourcePath;
