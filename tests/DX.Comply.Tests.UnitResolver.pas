@@ -199,6 +199,24 @@ type
     /// </summary>
     [Test]
     procedure Resolve_UnmatchedInstallUnit_IsNamedUnknownSupplier;
+
+    /// <summary>
+    /// The full unit name in a later search path wins over a file that only
+    /// has the last part of the name in an earlier one.
+    /// </summary>
+    [Test]
+    procedure Resolve_DottedUnit_FullNameWinsOverProjectUnitWithShortName;
+
+    /// <summary>The same when the full name is only below the Delphi source root.</summary>
+    [Test]
+    procedure Resolve_DottedUnit_FullNameInSourceTreeWinsOverShortName;
+
+    /// <summary>
+    /// A source or a DCU that only has the last part of the name is another
+    /// unit, also when the full name is found nowhere.
+    /// </summary>
+    [Test]
+    procedure Resolve_DottedUnit_ShortFileNameIsNotUsed;
   end;
 
 implementation
@@ -1734,6 +1752,137 @@ begin
     LArtefacts.Free;
     if TDirectory.Exists(LTemp) then
       TDirectory.Delete(LTemp, True);
+  end;
+end;
+
+type
+  /// <summary>Folders of a project with a Search.pas and an unrelated toolchain.</summary>
+  TShortNameFolders = record
+    Root: string;
+    ProjectDir: string;
+    DelphiRoot: string;
+    LibDir: string;
+    SourceDir: string;
+  end;
+
+function MakeShortNameFolders: TShortNameFolders;
+begin
+  Result.Root := TPath.Combine(TPath.GetTempPath, TPath.GetRandomFileName);
+  Result.ProjectDir := TPath.Combine(Result.Root, 'Project');
+  Result.DelphiRoot := TPath.Combine(Result.Root, 'Delphi');
+  Result.LibDir := TPath.Combine(Result.DelphiRoot, 'lib\win64\release');
+  Result.SourceDir := TPath.Combine(Result.DelphiRoot, 'source');
+  TDirectory.CreateDirectory(Result.ProjectDir);
+  TDirectory.CreateDirectory(Result.LibDir);
+  TDirectory.CreateDirectory(TPath.Combine(Result.SourceDir, 'data'));
+  TFile.WriteAllText(TPath.Combine(Result.ProjectDir, 'Search.pas'),
+    'unit Search;' + sLineBreak + 'interface' + sLineBreak +
+    'implementation' + sLineBreak + 'end.');
+end;
+
+/// <summary>
+/// Resolves System.Bindings.Search with the project folder as output folder
+/// and the Delphi lib and source folders as global search paths.
+/// </summary>
+function ResolveBindingsSearch(const AResolver: IUnitResolver;
+  const AFolders: TShortNameFolders): TResolvedUnitInfo;
+var
+  LComposition: TCompositionEvidence;
+  LEvidence: TBuildEvidence;
+  LInfo: TProjectInfo;
+  LItem: TBuildEvidenceItem;
+begin
+  LInfo := TProjectInfo.Create;
+  LEvidence := TBuildEvidence.Create;
+  try
+    LInfo.ProjectDir := AFolders.ProjectDir;
+    LInfo.Toolchain.RootDir := AFolders.DelphiRoot;
+    LInfo.GlobalSearchPaths.Add(AFolders.LibDir);
+    LInfo.GlobalSearchPaths.Add(AFolders.SourceDir);
+    LEvidence.Paths.OutputDir := AFolders.ProjectDir;
+    LEvidence.SearchPaths.Add(AFolders.ProjectDir);
+    LEvidence.SearchPaths.Add(AFolders.LibDir);
+    LEvidence.SearchPaths.Add(AFolders.SourceDir);
+
+    LItem := Default(TBuildEvidenceItem);
+    LItem.SourceKind := besMapFile;
+    LItem.FilePath := TPath.Combine(AFolders.ProjectDir, 'Demo.map');
+    LItem.UnitName := 'System.Bindings.Search';
+    LEvidence.EvidenceItems.Add(LItem);
+
+    LComposition := AResolver.Resolve(LInfo, LEvidence);
+    try
+      Assert.AreEqual(NativeInt(1), NativeInt(LComposition.Units.Count));
+      Result := LComposition.Units[0];
+    finally
+      LComposition.Free;
+    end;
+  finally
+    LEvidence.Free;
+    LInfo.Free;
+  end;
+end;
+
+procedure TUnitResolverTests.Resolve_DottedUnit_FullNameWinsOverProjectUnitWithShortName;
+var
+  LDcu: string;
+  LFolders: TShortNameFolders;
+  LUnit: TResolvedUnitInfo;
+begin
+  LFolders := MakeShortNameFolders;
+  try
+    LDcu := TPath.Combine(LFolders.LibDir, 'System.Bindings.Search.dcu');
+    TFile.WriteAllBytes(LDcu, TBytes.Create($01, $02));
+    LUnit := ResolveBindingsSearch(FResolver, LFolders);
+    Assert.AreEqual(LDcu, LUnit.ResolvedPath,
+      'The unit is the DCU with its full name, not the Search.pas of the project');
+    Assert.AreEqual(uokEmbarcaderoRtl, LUnit.OriginKind);
+    Assert.AreEqual(rcStrong, LUnit.Confidence);
+  finally
+    TDirectory.Delete(LFolders.Root, True);
+  end;
+end;
+
+procedure TUnitResolverTests.Resolve_DottedUnit_FullNameInSourceTreeWinsOverShortName;
+var
+  LFolders: TShortNameFolders;
+  LPas: string;
+  LUnit: TResolvedUnitInfo;
+begin
+  LFolders := MakeShortNameFolders;
+  try
+    LPas := TPath.Combine(LFolders.SourceDir, 'data\System.Bindings.Search.pas');
+    TFile.WriteAllText(LPas, 'unit System.Bindings.Search;' + sLineBreak +
+      'interface' + sLineBreak + 'implementation' + sLineBreak + 'end.');
+    // The short name in the project's DCU folder is another unit as well.
+    TFile.WriteAllBytes(TPath.Combine(LFolders.ProjectDir, 'Search.dcu'), TBytes.Create($01, $02));
+    LUnit := ResolveBindingsSearch(FResolver, LFolders);
+    Assert.AreEqual(LPas, LUnit.ResolvedPath,
+      'The full name below the Delphi source root wins over a short name');
+    Assert.AreEqual(uokEmbarcaderoRtl, LUnit.OriginKind);
+  finally
+    TDirectory.Delete(LFolders.Root, True);
+  end;
+end;
+
+procedure TUnitResolverTests.Resolve_DottedUnit_ShortFileNameIsNotUsed;
+var
+  LFolders: TShortNameFolders;
+  LUnit: TResolvedUnitInfo;
+begin
+  LFolders := MakeShortNameFolders;
+  try
+    TFile.WriteAllBytes(TPath.Combine(LFolders.ProjectDir, 'Search.dcu'), TBytes.Create($01, $02));
+    TFile.WriteAllBytes(TPath.Combine(LFolders.LibDir, 'Search.dcu'), TBytes.Create($01, $02));
+    TFile.WriteAllText(TPath.Combine(LFolders.SourceDir, 'data\Search.pas'), 'unit Search;');
+    LUnit := ResolveBindingsSearch(FResolver, LFolders);
+    Assert.AreEqual('', LUnit.ResolvedPath,
+      'A file named Search is not System.Bindings.Search');
+    Assert.AreEqual(uokEmbarcaderoRtl, LUnit.OriginKind,
+      'An unresolved System.* unit is classified by its name');
+    Assert.AreEqual(rcHeuristic, LUnit.Confidence);
+  finally
+    TDirectory.Delete(LFolders.Root, True);
   end;
 end;
 
