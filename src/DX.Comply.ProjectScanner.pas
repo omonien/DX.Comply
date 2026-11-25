@@ -92,6 +92,10 @@ type
     /// </summary>
     FIdeOverrideLookup: TEnvironmentLookup;
     /// <summary>
+    /// Replaces the IDE library path from the registry. Set by tests.
+    /// </summary>
+    FIdeLibrarySearchPath: string;
+    /// <summary>
     /// BDS version passed in with SetBdsVersion, for example 23.0. Empty
     /// means the BDS environment variable, then the newest installed Delphi.
     /// </summary>
@@ -178,8 +182,21 @@ type
     /// </summary>
     function LinksWithRuntimePackages: Boolean;
     /// <summary>
+    /// True when a version is set by SetBdsVersion and the BDS environment
+    /// variable names another one.
+    /// </summary>
+    function EnvironmentIsOtherBdsVersion: Boolean;
+    /// <summary>
+    /// Value of a variable the IDE defines itself, for example BDSLIB or
+    /// BDSUSERDIR. rsvars.bat does not set all of them.
+    /// </summary>
+    function TryGetIdeVariable(const AName: string; out AValue: string): Boolean;
+    /// <summary>
     /// Looks up AName in the process environment first, then in the IDE
-    /// environment variable overrides. An empty value counts as not found.
+    /// environment variable overrides, then among the variables the IDE
+    /// defines itself. With a version set by SetBdsVersion, a variable the
+    /// IDE defines is not read from the environment of another version. An
+    /// empty value counts as not found.
     /// </summary>
     function TryLookupVariable(const AName: string; out AValue: string): Boolean;
     /// <summary>
@@ -371,6 +388,11 @@ type
     /// for tests. Nil restores the registry lookup.
     /// </summary>
     procedure SetIdeOverrideLookup(const ALookup: TEnvironmentLookup);
+    /// <summary>
+    /// Replaces the IDE library path read from the registry, for tests.
+    /// An empty value restores the registry lookup.
+    /// </summary>
+    procedure SetIdeLibrarySearchPath(const ASearchPath: string);
   end;
 
 /// <summary>
@@ -1488,11 +1510,22 @@ begin
   LIdeSearchPath := ReadIdeLibrarySearchPath(AToolchain.Version, PlatformToken);
   if LIdeSearchPath <> '' then
   begin
+    // Expanded before the split, as in AddDelimitedValues: a variable can
+    // hold several paths.
+    // In the IDE $(DELPHI) is the same folder as $(BDS). It is not a general
+    // variable here, because a Delphi 7 project uses it for its own root.
+    LIdeSearchPath := StringReplace(LIdeSearchPath, '$(DELPHI)', '$(BDS)',
+      [rfIgnoreCase, rfReplaceAll]);
+    LIdeSearchPath := ExpandMsBuildVariables(LIdeSearchPath, '', False);
     for LPathEntry in LIdeSearchPath.Split([';']) do
     begin
-      LResolvedPath := Trim(LPathEntry);
-      if (LResolvedPath = '') or LResolvedPath.StartsWith('$') then
+      LResolvedPath := NormalizePathText(Trim(LPathEntry));
+      // An entry that still holds a $(Name) cannot exist on disk.
+      // ExpandVariableTokens has already reported the variable.
+      if (LResolvedPath = '') or (Pos('$(', LResolvedPath) > 0) then
         Continue;
+      if TPath.HasValidPathChars(LResolvedPath, False) then
+        LResolvedPath := TPath.GetFullPath(LResolvedPath);
       AddExistingPath(LResolvedPath, Result);
     end;
   end;
@@ -1519,6 +1552,9 @@ var
     end;
   end;
 begin
+  if FIdeLibrarySearchPath <> '' then
+    Exit(FIdeLibrarySearchPath);
+
   Result := '';
   if (ABdsVersion = '') or (APlatform = '') then
     Exit;
@@ -2509,26 +2545,95 @@ begin
 end;
 
 function TProjectScanner.TryLookupVariable(const AName: string; out AValue: string): Boolean;
+var
+  LIdeValue: string;
+  LIsIdeVariable: Boolean;
 begin
+  LIsIdeVariable := TryGetIdeVariable(AName, LIdeValue);
+
   // Process environment first: inside the IDE and under rsvars it already
-  // holds the overrides, and an explicitly set variable should win.
-  AValue := GetEnvironmentVariable(AName);
-  if AValue <> '' then
+  // holds the overrides, and an explicitly set variable should win. A version
+  // chosen with SetBdsVersion uses its own install, so the folders of the IDE
+  // are then not taken from the environment of another version.
+  if not LIsIdeVariable or not EnvironmentIsOtherBdsVersion then
   begin
-    Exit(True);
+    AValue := GetEnvironmentVariable(AName);
+    if AValue <> '' then
+    begin
+      Exit(True);
+    end;
   end;
 
   if Assigned(FIdeOverrideLookup) then
   begin
     Result := FIdeOverrideLookup(AName, AValue) and (AValue <> '');
-    Exit;
+  end
+  else
+  begin
+    if FIdeOverrides = nil then
+    begin
+      FIdeOverrides := ReadIdeEnvironmentOverrides(FBdsProductVersion);
+    end;
+    Result := FIdeOverrides.TryGetValue(AName, AValue) and (AValue <> '');
   end;
 
-  if FIdeOverrides = nil then
+  if not Result and LIsIdeVariable then
   begin
-    FIdeOverrides := ReadIdeEnvironmentOverrides(FBdsProductVersion);
+    AValue := LIdeValue;
+    Result := True;
   end;
-  Result := FIdeOverrides.TryGetValue(AName, AValue) and (AValue <> '');
+end;
+
+function TProjectScanner.EnvironmentIsOtherBdsVersion: Boolean;
+var
+  LBdsPath: string;
+begin
+  LBdsPath := ExcludeTrailingPathDelimiter(Trim(GetEnvironmentVariable('BDS')));
+  Result := (FBdsVersionOverride <> '') and (LBdsPath <> '') and
+    not SameText(TPath.GetFileName(LBdsPath), FBdsVersionOverride);
+end;
+
+function TProjectScanner.TryGetIdeVariable(const AName: string; out AValue: string): Boolean;
+var
+  LCommonDir: string;
+  LRootDir: string;
+  LUserDir: string;
+begin
+  AValue := '';
+  if not StartsText('BDS', AName) or (FBdsProductVersion = '') then
+    Exit(False);
+
+  LRootDir := DetectToolchainInfo.RootDir;
+  if LRootDir <> '' then
+  begin
+    if SameText(AName, 'BDS') then
+      AValue := LRootDir
+    else if SameText(AName, 'BDSBIN') then
+      AValue := TPath.Combine(LRootDir, 'bin')
+    else if SameText(AName, 'BDSLIB') then
+      AValue := TPath.Combine(LRootDir, 'lib')
+    else if SameText(AName, 'BDSINCLUDE') then
+      AValue := TPath.Combine(LRootDir, 'include');
+  end;
+
+  // A service account can have no documents folder.
+  LCommonDir := TPath.GetSharedDocumentsPath;
+  if LCommonDir <> '' then
+    LCommonDir := TPath.Combine(LCommonDir, 'Embarcadero\Studio\' + FBdsProductVersion);
+  LUserDir := TPath.GetDocumentsPath;
+  if LUserDir <> '' then
+    LUserDir := TPath.Combine(LUserDir, 'Embarcadero\Studio\' + FBdsProductVersion);
+
+  if SameText(AName, 'BDSCOMMONDIR') then
+    AValue := LCommonDir
+  else if SameText(AName, 'BDSUSERDIR') then
+    AValue := LUserDir
+  else if SameText(AName, 'BDSCatalogRepository') and (LUserDir <> '') then
+    AValue := TPath.Combine(LUserDir, 'CatalogRepository')
+  else if SameText(AName, 'BDSCatalogRepositoryAllUsers') and (LCommonDir <> '') then
+    AValue := TPath.Combine(LCommonDir, 'CatalogRepository');
+
+  Result := AValue <> '';
 end;
 
 function TProjectScanner.ExpandVariableTokens(const AInput: string; ADepth: Integer): string;
@@ -2570,7 +2675,7 @@ begin
         FReportedUnresolved.Add(LName, True);
         FWarnings.Add('Variable $(' + LName + ') is not set in the environment or in the IDE ' +
           'environment variable overrides (HKCU\Software\Embarcadero\BDS\' + FBdsProductVersion +
-          '\Environment Variables). Paths that use it cannot be resolved.');
+          '\Environment Variables). Project paths and IDE library path entries that use it cannot be resolved.');
       end;
       LIdx := LEnd + 1;
     end;
@@ -2580,6 +2685,11 @@ end;
 procedure TProjectScanner.SetIdeOverrideLookup(const ALookup: TEnvironmentLookup);
 begin
   FIdeOverrideLookup := ALookup;
+end;
+
+procedure TProjectScanner.SetIdeLibrarySearchPath(const ASearchPath: string);
+begin
+  FIdeLibrarySearchPath := Trim(ASearchPath);
 end;
 
 function TProjectScanner.ResolveBuildPath(const ARawPath, AProjectDir, AProjectName: string): string;
