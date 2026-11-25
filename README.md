@@ -121,7 +121,7 @@ A custom configuration that is based on another one inherits that parent's value
 
 For Android, iOS, Linux, and macOS ARM, the linker writes an LLD map instead. Enable it with Project Options > Linker > Map file ARM > On; these targets have no Detailed setting. Android names the map `lib<Project>.so.map`, next to `lib<Project>.so`.
 
-A 32-bit Android build uses the platform name Android. The binary and the map are in `Android\<Config>`, for example `Android\Release\libMyApp.so` and `Android\Release\libMyApp.so.map`. `--platform=Android32` is accepted and mapped to that folder. Android64 stays `Android64\<Config>`. `$(Platform)` and `$(Config)` in `DCC_ExeOutput`, `DCC_BplOutput`, `DCC_DcpOutput`, and `DCC_DcuOutput` are expanded. When those settings are absent and the Delphi platform folder is already on disk, that folder is the output directory. Otherwise the project directory is used.
+A 32-bit Android build uses the platform name Android. The binary and the map are in `Android\<Config>`, for example `Android\Release\libMyApp.so` and `Android\Release\libMyApp.so.map`. `--platform=Android32` is accepted and mapped to that folder. Android64 stays `Android64\<Config>`. `$(Platform)` and `$(Config)` in `DCC_ExeOutput`, `DCC_BplOutput`, `DCC_DcpOutput`, and `DCC_DcuOutput` are expanded. When the first three are absent and the Delphi platform folder is already on disk, that folder is the output directory. Otherwise the project directory is used. When `DCC_DcuOutput` is set, the platform folder is used only when the built file is in it and not in the project directory.
 
 If the MAP file is in a non-standard directory, use `--map-dir`:
 
@@ -635,7 +635,7 @@ Use `units_folder` for the package directory, or `units_exact` for the unit name
 
 ### The Android map or libMyApp.so is not found
 
-A 32-bit Android project writes `libMyApp.so` and `libMyApp.so.map` under `Android\<Config>`, for example `Android\Release`. The platform name is Android. `--platform=Android32` is accepted and uses that folder. Android64 uses `Android64\<Config>`. `DCC_ExeOutput` and the other output paths in the `.dproj` are used when they are set, including `$(Platform)` and `$(Config)`. When they are not set and that platform folder exists, it is used. Otherwise the project directory is used. If the files are somewhere else, pass `--map-dir`.
+A 32-bit Android project writes `libMyApp.so` and `libMyApp.so.map` under `Android\<Config>`, for example `Android\Release`. The platform name is Android. `--platform=Android32` is accepted and uses that folder. Android64 uses `Android64\<Config>`. `DCC_ExeOutput`, `DCC_BplOutput`, and `DCC_DcpOutput` in the `.dproj` are used when they are set, including `$(Platform)` and `$(Config)`. When they are not set and that platform folder exists, it is used. Otherwise the project directory is used. When `DCC_DcuOutput` is set, the platform folder is used only when the built file is in it and not in the project directory. If the files are somewhere else, pass `--map-dir`.
 
 ### The Android version in the SBOM is 1.0.0.0 or 1.0.0.7
 

@@ -231,6 +231,12 @@ type
     /// </summary>
     function TryResolveDllSuffix(const AProjectName: string; out ASuffix: string): Boolean;
     /// <summary>
+    /// True when the program, library, or package of the project is in
+    /// ADirectory.
+    /// </summary>
+    function BuiltFileExists(const AProjectInfo: TProjectInfo;
+      const ADirectory: string): Boolean;
+    /// <summary>
     /// Fills ArtefactOutputDir and OutputFilePath from the active output
     /// directories, AppType, and DllSuffix.
     /// </summary>
@@ -2438,6 +2444,24 @@ begin
   Result := True;
 end;
 
+function TProjectScanner.BuiltFileExists(const AProjectInfo: TProjectInfo;
+  const ADirectory: string): Boolean;
+begin
+  var LKind := DetectOutputKind(AProjectInfo.MainSourcePath);
+  // ResolveOutputFile reports a DllSuffix that cannot be resolved.
+  var LSuffix := '';
+  if LKind <> pokApplication then
+  begin
+    LSuffix := NormalizePath(Trim(GetPropertyValue('DllSuffix', '')), AProjectInfo.ProjectName);
+    if Pos('$', LSuffix) > 0 then
+      Exit(False);
+  end;
+
+  var LFileName := PrimaryOutputFileName(AProjectInfo.Platform,
+    AProjectInfo.ProjectName, LSuffix, LKind);
+  Result := (LFileName <> '') and TFile.Exists(TPath.Combine(ADirectory, LFileName));
+end;
+
 procedure TProjectScanner.ResolveOutputFile(var AProjectInfo: TProjectInfo);
 begin
   AProjectInfo.OutputFilePath := '';
@@ -3104,27 +3128,38 @@ begin
     Result.DcpOutputDir := LDcpOutputDir;
     Result.DcuOutputDir := LDcuOutputDir;
 
+    // DCC_DcuOutput does not decide where the binary is written.
     Result.OutputDir := LExeOutputDir;
     if Result.OutputDir = '' then
       Result.OutputDir := Result.BplOutputDir;
     if Result.OutputDir = '' then
       Result.OutputDir := Result.DcpOutputDir;
-    if Result.OutputDir = '' then
-      Result.OutputDir := Result.DcuOutputDir;
 
     if Result.OutputDir = '' then
     begin
       // Delphi's own default is .\$(Platform)\$(Config). Use that directory
-      // when it is already on disk. Otherwise an older project writes the
-      // binary in the project directory.
+      // when it is already on disk. With a DCU folder set it can exist only
+      // because of the DCUs. The built file then decides: a binary that an
+      // option set or a build property put there, or next to the DCUs, is
+      // found when it was built before the scan. Otherwise an older project
+      // writes the binary in the project directory.
       LDelphiDefault := ResolveOutputDirectory('.\$(Platform)\$(Config)',
         Result.ProjectDir, Result.ProjectName, 'DCC_ExeOutput', nil);
-      if (LDelphiDefault <> '') and TDirectory.Exists(LDelphiDefault) then
+      if (LDelphiDefault <> '') and TDirectory.Exists(LDelphiDefault) and
+         ((Result.DcuOutputDir = '') or
+          (BuiltFileExists(Result, LDelphiDefault) and
+           not BuiltFileExists(Result, Result.ProjectDir))) then
         Result.OutputDir := LDelphiDefault
+      else if (Result.DcuOutputDir <> '') and not BuiltFileExists(Result, Result.ProjectDir) and
+         BuiltFileExists(Result, Result.DcuOutputDir) then
+        Result.OutputDir := Result.DcuOutputDir
       else
       begin
         Result.OutputDir := Result.ProjectDir;
-        FWarnings.Add('No output directory found in .dproj. Using project directory as default.');
+        // The project directory is where the compiler writes a program or a
+        // library. A package goes to the shared BPL folder of the IDE.
+        if (Result.DcuOutputDir = '') or (DetectOutputKind(Result.MainSourcePath) = pokPackage) then
+          FWarnings.Add('No output directory found in .dproj. Using project directory as default.');
       end;
     end;
 
