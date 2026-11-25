@@ -332,6 +332,62 @@ type
     procedure Scan_NestedIdeOverride_ExpandsBothLevels;
 
     /// <summary>
+    /// An IDE library path entry that starts with $(Name) is expanded with
+    /// the IDE override and searched.
+    /// </summary>
+    [Test]
+    procedure Scan_IdeLibraryPath_EntryWithOverride_IsSearched;
+
+    /// <summary>
+    /// A variable that holds several paths adds one entry for each of them.
+    /// </summary>
+    [Test]
+    procedure Scan_IdeLibraryPath_VariableWithSeveralPaths_AddsEach;
+
+    /// <summary>
+    /// An entry whose variable is not defined is left out and reported once,
+    /// wherever the variable is in the entry.
+    /// </summary>
+    [Test]
+    procedure Scan_IdeLibraryPath_UnknownVariable_IsReportedOnce;
+
+    /// <summary>
+    /// The variables the IDE defines itself, which rsvars.bat does not all
+    /// set, are in the default library path and must not be reported.
+    /// </summary>
+    [Test]
+    procedure Scan_IdeLibraryPath_IdeVariables_AreKnown;
+
+    /// <summary>
+    /// The folders below the documents folders are known as well, also in
+    /// the output paths of the project.
+    /// </summary>
+    [Test]
+    procedure Scan_IdeDocumentFolders_AreKnown;
+
+    /// <summary>
+    /// With a chosen BDS version its library path does not use the folders
+    /// another Delphi version put into the environment.
+    /// </summary>
+    [Test]
+    procedure Scan_IdeLibraryPath_ChosenVersion_IgnoresOtherVersionInEnvironment;
+
+    /// <summary>
+    /// The environment of the chosen version itself is used, and so is a
+    /// variable that is set when BDS is not.
+    /// </summary>
+    [Test]
+    procedure Scan_ChosenVersion_UsesOwnEnvironment;
+
+    /// <summary>An override of the chosen version wins over the known value.</summary>
+    [Test]
+    procedure Scan_IdeLibraryPath_ChosenVersion_OverrideWins;
+
+    /// <summary>A drive root stays a root.</summary>
+    [Test]
+    procedure Scan_IdeLibraryPath_DriveRoot_IsKept;
+
+    /// <summary>
     /// A variable that refers to itself must not loop forever.
     /// </summary>
     [Test]
@@ -2299,10 +2355,12 @@ end;
 
 /// <summary>
 /// Scans a temporary .dproj with ADprojContent for Win32 Release, with
-/// AOverrides (name, value pairs) as the IDE override source. The caller frees the result.
+/// AOverrides (name, value pairs) as the IDE override source and ALibraryPath
+/// as the IDE library path. The caller frees the result.
 /// </summary>
 function ScanDprojWithOverrides(const ADprojContent: string;
-  const AOverrides: array of string; const ABdsVersion: string = ''): TProjectInfo;
+  const AOverrides: array of string; const ABdsVersion: string = '';
+  const ALibraryPath: string = ''): TProjectInfo;
 var
   LOverrides: TDictionary<string, string>;
   LScanner: TProjectScanner;
@@ -2331,6 +2389,7 @@ begin
         begin
           Result := LOverrides.TryGetValue(UpperCase(AName), AValue);
         end);
+      LScanner.SetIdeLibrarySearchPath(ALibraryPath);
       LScannerIntf.SetBdsVersion(ABdsVersion);
       Result := LScannerIntf.Scan(LTempDproj, 'Win32', 'Release');
     finally
@@ -2355,6 +2414,357 @@ end;
 function ScanWithOverrides(const AExeOutput: string; const AOverrides: array of string): TProjectInfo;
 begin
   Result := ScanDprojWithOverrides(OverrideDproj(AExeOutput), AOverrides);
+end;
+
+/// <summary>
+/// Scans a temporary Win32 Release project with ALibraryPath as the IDE
+/// library path and AOverrides (name, value pairs) as the IDE override
+/// source. The caller frees the result.
+/// </summary>
+function ScanWithIdeLibraryPath(const ALibraryPath: string;
+  const AOverrides: array of string; const ABdsVersion: string = ''): TProjectInfo;
+begin
+  Result := ScanDprojWithOverrides(OverrideDproj('.\bin'), AOverrides, ABdsVersion, ALibraryPath);
+end;
+
+function GlobalPathCount(const AInfo: TProjectInfo; const ADir: string): Integer;
+var
+  LPath: string;
+begin
+  Result := 0;
+  for LPath in AInfo.GlobalSearchPaths do
+    if SameText(ExcludeTrailingPathDelimiter(LPath), ExcludeTrailingPathDelimiter(ADir)) then
+      Inc(Result);
+end;
+
+function WarningCount(const AInfo: TProjectInfo; const AText: string): Integer;
+var
+  LWarning: string;
+begin
+  Result := 0;
+  for LWarning in AInfo.Warnings do
+    if Pos(AText, LWarning) > 0 then
+      Inc(Result);
+end;
+
+procedure TProjectScannerTests.Scan_IdeLibraryPath_EntryWithOverride_IsSearched;
+var
+  LInfo: TProjectInfo;
+  LLibDir: string;
+  LPlainDir: string;
+  LRoot: string;
+begin
+  LRoot := MakeTempDir;
+  try
+    LLibDir := TPath.Combine(LRoot, 'Vendor\Library\Win32');
+    LPlainDir := TPath.Combine(LRoot, 'Plain');
+    ForceDirectories(LLibDir);
+    ForceDirectories(LPlainDir);
+    LInfo := ScanWithIdeLibraryPath(
+      '$(DxcVendorRoot)\Library\$(Platform);' + LPlainDir,
+      ['DXCVENDORROOT', TPath.Combine(LRoot, 'Vendor')]);
+    try
+      Assert.AreEqual(1, GlobalPathCount(LInfo, LLibDir),
+        'A library path entry that starts with a variable must be searched');
+      Assert.AreEqual(1, GlobalPathCount(LInfo, LPlainDir),
+        'An entry without a variable is still searched');
+      Assert.AreEqual(0, WarningCount(LInfo, 'DxcVendorRoot'),
+        'A variable that is defined must not be reported');
+    finally
+      LInfo.Free;
+    end;
+  finally
+    TDirectory.Delete(LRoot, True);
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_IdeLibraryPath_VariableWithSeveralPaths_AddsEach;
+var
+  LFirst: string;
+  LInfo: TProjectInfo;
+  LRoot: string;
+  LSecond: string;
+begin
+  LRoot := MakeTempDir;
+  try
+    LFirst := TPath.Combine(LRoot, 'First');
+    LSecond := TPath.Combine(LRoot, 'Second');
+    ForceDirectories(LFirst);
+    ForceDirectories(LSecond);
+    LInfo := ScanWithIdeLibraryPath('$(DxcSeveral)',
+      ['DxcSeveral', LFirst + ';' + LSecond]);
+    try
+      Assert.AreEqual(1, GlobalPathCount(LInfo, LFirst), 'First path of the variable');
+      Assert.AreEqual(1, GlobalPathCount(LInfo, LSecond), 'Second path of the variable');
+    finally
+      LInfo.Free;
+    end;
+  finally
+    TDirectory.Delete(LRoot, True);
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_IdeLibraryPath_UnknownVariable_IsReportedOnce;
+var
+  LInfo: TProjectInfo;
+  LPath: string;
+begin
+  LInfo := ScanWithIdeLibraryPath(
+    '$(DxcNoSuchVendor)\Lib;C:\Libs\$(DxcNoSuchVendor)\Source', []);
+  try
+    for LPath in LInfo.GlobalSearchPaths do
+      Assert.IsFalse(Pos('$(', LPath) > 0, 'An unresolved entry must be left out: ' + LPath);
+    Assert.AreEqual(1, WarningCount(LInfo, '$(DxcNoSuchVendor) is not set'),
+      'A missing variable explains why units are not found, so it is reported once');
+  finally
+    LInfo.Free;
+  end;
+end;
+
+type
+  /// <summary>
+  /// Clears the BDS* variables of the process for one test and restores them
+  /// when the test ends.
+  /// </summary>
+  TBdsEnvironment = class
+  private
+    FSaved: TDictionary<string, string>;
+  public
+    constructor Create;
+    destructor Destroy; override;
+    procedure Define(const AName, AValue: string);
+  end;
+
+const
+  cBdsNames: array[0..7] of string = ('BDS', 'BDSBIN', 'BDSLIB', 'BDSINCLUDE',
+    'BDSCOMMONDIR', 'BDSUSERDIR', 'BDSCatalogRepository',
+    'BDSCatalogRepositoryAllUsers');
+
+constructor TBdsEnvironment.Create;
+var
+  LName: string;
+begin
+  inherited Create;
+  FSaved := TDictionary<string, string>.Create;
+  for LName in cBdsNames do
+  begin
+    FSaved.Add(LName, System.SysUtils.GetEnvironmentVariable(LName));
+    Winapi.Windows.SetEnvironmentVariable(PChar(LName), nil);
+  end;
+end;
+
+destructor TBdsEnvironment.Destroy;
+var
+  LName: string;
+begin
+  for LName in cBdsNames do
+    Define(LName, FSaved[LName]);
+  FSaved.Free;
+  inherited;
+end;
+
+procedure TBdsEnvironment.Define(const AName, AValue: string);
+begin
+  if AValue = '' then
+    Winapi.Windows.SetEnvironmentVariable(PChar(AName), nil)
+  else
+    Winapi.Windows.SetEnvironmentVariable(PChar(AName), PChar(AValue));
+end;
+
+procedure TProjectScannerTests.Scan_IdeLibraryPath_IdeVariables_AreKnown;
+const
+  cNames: array[0..4] of string = ('BDS', 'DELPHI', 'BDSBIN', 'BDSLIB', 'BDSINCLUDE');
+  cFolders: array[0..4] of string = ('vendor', 'other', 'bin', 'lib', 'include');
+var
+  LEnvironment: TBdsEnvironment;
+  LInfo: TProjectInfo;
+  LRoot: string;
+  LTempDir: string;
+begin
+  LTempDir := MakeTempDir;
+  LEnvironment := TBdsEnvironment.Create;
+  try
+    // rsvars.bat sets BDS, but not BDSBIN and BDSLIB.
+    LRoot := TPath.Combine(LTempDir, 'Studio\37.0');
+    LEnvironment.Define('BDS', LRoot);
+    for var i := 0 to High(cFolders) do
+      ForceDirectories(TPath.Combine(LRoot, cFolders[i] + '\dxc'));
+
+    LInfo := ScanWithIdeLibraryPath('$(BDS)\vendor\dxc;$(DELPHI)\other\dxc;' +
+      '$(BDSBIN)\dxc;$(BDSLIB)\dxc;$(BDSINCLUDE)\dxc', []);
+    try
+      for var i := 0 to High(cNames) do
+      begin
+        Assert.AreEqual(1, GlobalPathCount(LInfo, TPath.Combine(LRoot, cFolders[i] + '\dxc')),
+          'An entry that starts with $(' + cNames[i] + ') must be searched');
+        Assert.AreEqual(0, WarningCount(LInfo, 'Variable $(' + cNames[i] + ')'),
+          'The IDE defines $(' + cNames[i] + '), so it must not be reported');
+      end;
+    finally
+      LInfo.Free;
+    end;
+  finally
+    LEnvironment.Free;
+    TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_IdeDocumentFolders_AreKnown;
+var
+  LEnvironment: TBdsEnvironment;
+  LTempDir: string;
+
+  procedure CheckOutput(const AName, AExpected: string);
+  var
+    LInfo: TProjectInfo;
+  begin
+    LInfo := ScanWithOverrides('$(' + AName + ')\DxcNoSuchFolder', []);
+    try
+      Assert.AreEqual(TPath.Combine(AExpected, 'DxcNoSuchFolder'), LInfo.OutputDir, True,
+        'Value of $(' + AName + ')');
+      Assert.AreEqual(0, WarningCount(LInfo, 'Variable $(' + AName + ')'),
+        'The IDE defines $(' + AName + ')');
+    finally
+      LInfo.Free;
+    end;
+  end;
+
+begin
+  LTempDir := MakeTempDir;
+  LEnvironment := TBdsEnvironment.Create;
+  try
+    LEnvironment.Define('BDS', TPath.Combine(LTempDir, 'Studio\37.0'));
+    ForceDirectories(TPath.Combine(LTempDir, 'Studio\37.0'));
+    // A service account can have no documents folder.
+    if TPath.GetDocumentsPath <> '' then
+    begin
+      var LUser := TPath.Combine(TPath.GetDocumentsPath, 'Embarcadero\Studio\37.0');
+      CheckOutput('BDSUSERDIR', LUser);
+      CheckOutput('BDSCatalogRepository', LUser + '\CatalogRepository');
+    end;
+    if TPath.GetSharedDocumentsPath <> '' then
+    begin
+      var LCommon := TPath.Combine(TPath.GetSharedDocumentsPath, 'Embarcadero\Studio\37.0');
+      CheckOutput('BDSCOMMONDIR', LCommon);
+      CheckOutput('BDSCatalogRepositoryAllUsers', LCommon + '\CatalogRepository');
+    end;
+    // A variable that is set still wins.
+    LEnvironment.Define('BDSUSERDIR', LTempDir);
+    CheckOutput('BDSUSERDIR', LTempDir);
+  finally
+    LEnvironment.Free;
+    TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_IdeLibraryPath_ChosenVersion_IgnoresOtherVersionInEnvironment;
+var
+  LEnvironment: TBdsEnvironment;
+  LInfo: TProjectInfo;
+  LOther: string;
+  LPath: string;
+  LTempDir: string;
+  LVersion: string;
+begin
+  LTempDir := MakeTempDir;
+  LEnvironment := TBdsEnvironment.Create;
+  try
+    LVersion := DetectBdsProductVersion;
+    if LVersion = '' then
+      Exit; // No Delphi to choose on this machine.
+    LOther := TPath.Combine(LTempDir, 'Studio\99.0');
+    ForceDirectories(TPath.Combine(LOther, 'lib'));
+    LEnvironment.Define('BDS', LOther);
+    LEnvironment.Define('BDSLIB', TPath.Combine(LOther, 'lib'));
+    LEnvironment.Define('BDSCOMMONDIR', LOther);
+
+    LInfo := ScanWithIdeLibraryPath('$(BDS)\lib;$(BDSLIB);$(BDSCOMMONDIR)\lib', [], LVersion);
+    try
+      Assert.IsTrue(LInfo.GlobalSearchPaths.Count > 0, 'The chosen version is searched');
+      for LPath in LInfo.GlobalSearchPaths do
+        Assert.IsFalse(LPath.StartsWith(LTempDir, True),
+          'A folder of the other version must not be searched: ' + LPath);
+    finally
+      LInfo.Free;
+    end;
+  finally
+    LEnvironment.Free;
+    TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_ChosenVersion_UsesOwnEnvironment;
+var
+  LEnvironment: TBdsEnvironment;
+  LTempDir: string;
+
+  procedure CheckOutput(const ABecause: string);
+  var
+    LInfo: TProjectInfo;
+  begin
+    LInfo := ScanDprojWithOverrides(OverrideDproj('$(BDSCOMMONDIR)\DxcNoSuchFolder'), [], '37.0');
+    try
+      Assert.AreEqual(TPath.Combine(LTempDir, 'DxcNoSuchFolder'), LInfo.OutputDir, True, ABecause);
+    finally
+      LInfo.Free;
+    end;
+  end;
+
+begin
+  LTempDir := MakeTempDir;
+  LEnvironment := TBdsEnvironment.Create;
+  try
+    LEnvironment.Define('BDSCOMMONDIR', LTempDir);
+    CheckOutput('With no BDS the variable is not from another version');
+    ForceDirectories(TPath.Combine(LTempDir, 'Studio\37.0'));
+    LEnvironment.Define('BDS', TPath.Combine(LTempDir, 'Studio\37.0\'));
+    CheckOutput('The environment is the one of the chosen version');
+  finally
+    LEnvironment.Free;
+    TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_IdeLibraryPath_ChosenVersion_OverrideWins;
+var
+  LEnvironment: TBdsEnvironment;
+  LInfo: TProjectInfo;
+  LTempDir: string;
+  LVersion: string;
+begin
+  LTempDir := MakeTempDir;
+  LEnvironment := TBdsEnvironment.Create;
+  try
+    LVersion := DetectBdsProductVersion;
+    if LVersion = '' then
+      Exit; // No Delphi to choose on this machine.
+    LInfo := ScanWithIdeLibraryPath('$(BDSCatalogRepository)',
+      ['BDSCATALOGREPOSITORY', LTempDir], LVersion);
+    try
+      Assert.AreEqual(1, GlobalPathCount(LInfo, LTempDir),
+        'The override of the chosen version is used');
+    finally
+      LInfo.Free;
+    end;
+  finally
+    LEnvironment.Free;
+    TDirectory.Delete(LTempDir, True);
+  end;
+end;
+
+procedure TProjectScannerTests.Scan_IdeLibraryPath_DriveRoot_IsKept;
+var
+  LInfo: TProjectInfo;
+  LRoot: string;
+begin
+  LRoot := TPath.GetPathRoot(TPath.GetFullPath(TPath.GetTempPath));
+  LInfo := ScanWithIdeLibraryPath(LRoot, []);
+  try
+    Assert.IsTrue(LInfo.GlobalSearchPaths.Contains(LRoot),
+      'C:\ must not become C:, which is the current folder of the drive');
+  finally
+    LInfo.Free;
+  end;
 end;
 
 function ProgressText(const AInfo: TProjectInfo): string;
